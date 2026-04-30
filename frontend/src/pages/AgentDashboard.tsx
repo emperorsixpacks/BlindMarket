@@ -48,7 +48,6 @@ export default function AgentDashboard() {
   const [tokenAddress, setTokenAddress] = useState('');
   const [amount, setAmount] = useState('');
   const [duration, setDuration] = useState('86400');
-  const [targetExecutor, setTargetExecutor] = useState('');
 
   const [posting, setPosting] = useState(false);
   const [postError, setPostError] = useState<string | null>(null);
