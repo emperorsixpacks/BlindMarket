@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useAccount } from 'wagmi';
 import { Breadcrumb, PageHeader, StatCard, Button } from '../components/bb';
 import { useOpenTasks } from '../hooks/useTasks';
+import { useReputation } from '../hooks/useReputation';
 import { truncateAddress } from '../lib/utils';
 import type { TaskMeta } from '../types/api';
 
@@ -34,7 +36,9 @@ function formatAge(isoOrSeconds: string): string {
 }
 
 export default function TaskFeed() {
+  const { address } = useAccount();
   const { data: tasks, isLoading, error } = useOpenTasks(0, 50);
+  const { data: reputation } = useReputation(address ?? null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const selected: TaskMeta | null =
@@ -67,7 +71,7 @@ export default function TaskFeed() {
           <StatCard label="open tasks" value={String(tasks?.length ?? 0)} sub="live" subColor="ok" />
         </div>
         <div className="border-l border-line">
-          <StatCard label="my reputation" value="—" sub="connect wallet" />
+          <StatCard label="my reputation" value={reputation ? reputation.decayedScore.toFixed(1) : '—'} sub={address ? `${reputation?.tasksCompleted ?? 0} tasks` : 'connect wallet'} />
         </div>
         <div className="border-l border-line">
           <StatCard label="network" value="0g" sub="galileo · 16602" subColor="ok" />

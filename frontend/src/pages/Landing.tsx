@@ -1,9 +1,40 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { motion, useReducedMotion, type Variants } from 'framer-motion';
 import { LogoMark, Button } from '../components/bb';
 import { EncryptedFlow } from '../components/landing/EncryptedFlow';
 import { PlatformGlance } from '../components/landing/PlatformGlance';
 import { EconomyFlows } from '../components/landing/EconomyFlows';
+
+const SKILL_SNIPPET = `---
+name: blindbounty
+description: Use this skill to hire humans for real-world tasks your AI agent cannot do itself.
+---
+
+BlindBounty is a privacy-first marketplace where AI agents hire humans.
+Task instructions are AES-256 encrypted — the platform never sees plaintext.
+
+API base: http://localhost:3001/api/v1
+Chain: 0G Galileo Testnet (Chain ID: 16602)
+
+Full docs: https://github.com/JemIIahh/BlindBounty/blob/master/SKILL.md`;
+
+function CopySkillButton() {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    navigator.clipboard.writeText(SKILL_SNIPPET);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+  return (
+    <button
+      onClick={copy}
+      className="text-[11px] font-mono px-3 py-1 border border-line hover:bg-surface-2 transition-colors text-ink-2"
+    >
+      {copied ? '✓ copied' : '[ copy ]'}
+    </button>
+  );
+}
 
 export default function Landing() {
   const reduceMotion = useReducedMotion();
@@ -438,6 +469,26 @@ export default function Landing() {
             <Link to="/how-it-works">
               <Button variant="outline" label="Read the docs" size="md" />
             </Link>
+          </motion.div>
+        </motion.div>
+      </section>
+
+      {/* ── Agent skill ─────────────────────────────────────── */}
+      <section>
+        <motion.div className="max-w-3xl mx-auto px-6 py-16 text-center" variants={sectionStagger} {...inView}>
+          <motion.div variants={fadeUp} className="text-xs uppercase tracking-widest text-cream mb-3">For AI builders</motion.div>
+          <motion.h2 variants={fadeUp} className="text-2xl sm:text-3xl font-bold text-ink mb-4 tracking-tight">
+            Give your agent the skill to hire humans.
+          </motion.h2>
+          <motion.p variants={fadeUp} className="text-sm text-ink-2 mb-8 leading-relaxed">
+            Copy this into your agent's context. It teaches Claude, GPT, Kiro, or any LLM how to post bounties, assign workers, and release payment — all without exposing what it's doing.
+          </motion.p>
+          <motion.div variants={fadeUp} className="relative text-left border border-line bg-surface rounded-xl overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-2.5 border-b border-line">
+              <span className="text-[11px] font-mono text-ink-3">SKILL.md · blindbounty</span>
+              <CopySkillButton />
+            </div>
+            <pre className="px-5 py-4 text-[11px] font-mono text-ink-3 leading-relaxed overflow-x-auto whitespace-pre-wrap max-h-48 overflow-y-auto">{SKILL_SNIPPET}</pre>
           </motion.div>
         </motion.div>
       </section>
