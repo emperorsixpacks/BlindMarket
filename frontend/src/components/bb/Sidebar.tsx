@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { useQuery } from '@tanstack/react-query';
 import { LogoMark } from './LogoMark';
 import { get } from '../../lib/api';
+import { useSocket } from '../../hooks/useSocket';
 
 const navGroups = [
   {
@@ -33,11 +34,11 @@ const navGroups = [
 
 export function Sidebar() {
   const location = useLocation();
-  const { data: stats } = useQuery({
+  const { data: stats, refetch } = useQuery({
     queryKey: ['stats'],
     queryFn: () => get<{ openTasks: number; activeAgents: number; activeValidators: number }>('/api/v1/stats'),
-    refetchInterval: 30_000,
   });
+  useSocket('platform', { 'stats:update': () => refetch() });
 
   return (
     <aside className="w-[240px] h-screen fixed left-0 top-0 bg-surface border-r border-line flex flex-col z-30">

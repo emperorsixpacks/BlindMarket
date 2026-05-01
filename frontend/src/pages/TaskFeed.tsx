@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAccount } from 'wagmi';
+import { useQueryClient } from '@tanstack/react-query';
 import { Breadcrumb, PageHeader, StatCard, Button } from '../components/bb';
 import { useOpenTasks } from '../hooks/useTasks';
 import { useReputation } from '../hooks/useReputation';
+import { useSocket } from '../hooks/useSocket';
 import { truncateAddress } from '../lib/utils';
 import type { TaskMeta } from '../types/api';
 
@@ -37,9 +39,16 @@ function formatAge(isoOrSeconds: string): string {
 
 export default function TaskFeed() {
   const { address } = useAccount();
+  const qc = useQueryClient();
   const { data: tasks, isLoading, error } = useOpenTasks(0, 50);
   const { data: reputation } = useReputation(address ?? null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  // Live updates — refetch when new tasks are posted or assigned
+  useSocket('tasks', {
+    'task:created': () => qc.invalidateQueries({ queryKey: ['tasks', 'open'] }),
+    'task:assigned': () => qc.invalidateQueries({ queryKey: ['tasks', 'open'] }),
+  });
 
   const selected: TaskMeta | null =
     (tasks && selectedId && tasks.find((t) => t.taskId === selectedId)) || tasks?.[0] || null;

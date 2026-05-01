@@ -1,13 +1,12 @@
 import { useQuery } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
-import { Breadcrumb, PageHeader, SectionRule, StatCard, Button } from '../components/bb';
+import { Breadcrumb, PageHeader, SectionRule, StatCard } from '../components/bb';
 import { get } from '../lib/api';
+import { useSocket } from '../hooks/useSocket';
 
 function useStats() {
   return useQuery({
     queryKey: ['stats'],
     queryFn: () => get<{ openTasks: number; activeAgents: number; activeValidators: number }>('/api/v1/stats'),
-    refetchInterval: 15_000,
   });
 }
 
@@ -19,7 +18,9 @@ const STEPS = [
 ];
 
 export default function Validators() {
-  const { data: stats } = useStats();
+  const { data: stats, refetch } = useStats();
+  useSocket('platform', { 'stats:update': () => refetch() });
+  useSocket('disputes', { 'dispute:voted': () => refetch(), 'dispute:finalized': () => refetch() });
 
   return (
     <div>

@@ -10,6 +10,7 @@ import * as a2aStore from '../services/a2aStore.js';
 import { randomUUID } from 'crypto';
 import * as accountingService from '../services/accountingService.js';
 import { getDb } from '../services/database.js';
+import { rooms } from '../services/socket.js';
 
 export const tasksRouter = Router();
 
@@ -167,6 +168,8 @@ tasksRouter.post('/', requireAuth, async (req: AuthRequest, res, next) => {
       success: true,
       data: { unsignedTx: tx },
     };
+    rooms.tasks('task:created', { category: data.category, locationZone: data.locationZone, amount: data.amount });
+    rooms.platform('stats:update', {});
     res.json(body);
   } catch (err) {
     next(err);
@@ -237,6 +240,8 @@ tasksRouter.post('/:id/assign', requireAuth, async (req: AuthRequest, res, next)
       success: true,
       data: { unsignedTx: tx },
     };
+    rooms.task(taskId, 'task:assigned', { taskId, worker });
+    rooms.tasks('task:assigned', { taskId, worker });
     res.json(body);
   } catch (err) {
     next(err);

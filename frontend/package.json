@@ -21,6 +21,7 @@
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.28.0",
     "secp256k1": "^5.0.1",
+    "socket.io-client": "^4.8.3",
     "tailwind-merge": "^2.6.0",
     "viem": "^2.47.4",
     "wagmi": "^2.19.5"

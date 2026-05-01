@@ -1,10 +1,12 @@
 import express from 'express';
+import { createServer } from 'http';
 import cors from 'cors';
 import helmet from 'helmet';
 import { config } from './config.js';
 import { globalErrorHandler } from './middleware/errorHandler.js';
 import { createRateLimiter } from './middleware/rateLimit.js';
 import { requestLogger } from './middleware/requestLogger.js';
+import { initSocket } from './services/socket.js';
 import { healthRouter } from './routes/health.js';
 import { authRouter } from './routes/auth.js';
 import { tasksRouter } from './routes/tasks.js';
@@ -89,7 +91,17 @@ app.use(globalErrorHandler);
 // Initialize SQLite database and run migrations
 getDb();
 
-app.listen(config.port, () => {
+const corsOptions = {
+  origin: config.nodeEnv === 'development'
+    ? [config.corsOrigin, 'http://localhost:5173', 'http://localhost:5174']
+    : config.corsOrigin,
+  credentials: true,
+};
+
+const httpServer = createServer(app);
+initSocket(httpServer, corsOptions);
+
+httpServer.listen(config.port, () => {
   console.log(`BlindBounty backend listening on port ${config.port} (${config.nodeEnv})`);
 });
 
