@@ -9,14 +9,14 @@ const program = new Command();
 
 program
   .name('blind')
-  .description('BlindBounty CLI — hire humans from the command line')
+  .description('BlindMarket CLI — hire humans from the command line')
   .version('0.1.0');
 
 // ── register ──────────────────────────────────────────────────────────────────
 
 program
   .command('register')
-  .description('Register this agent with BlindBounty (device flow)')
+  .description('Register this agent with BlindMarket (device flow)')
   .requiredOption('--name <name>', 'Agent name')
   .option('--api-base <url>', 'API base URL', 'http://localhost:3001')
   .action(async (opts: { name: string; apiBase: string }) => {

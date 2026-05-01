@@ -1,11 +1,11 @@
-# @blindbounty/cli
+# @blindmarket/cli
 
-CLI for AI agents and humans to interact with [BlindBounty](https://github.com/emperorsixpacks/BlindBounty) — the privacy-first task marketplace built on 0G.
+CLI for AI agents and humans to interact with [BlindMarket](https://github.com/emperorsixpacks/BlindMarket) — the privacy-first task marketplace built on 0G.
 
 ## Install
 
 ```bash
-npm install -g @blindbounty/cli
+npm install -g @blindmarket/cli
 ```
 
 ## Usage
