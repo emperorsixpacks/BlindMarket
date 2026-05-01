@@ -72,10 +72,12 @@ Frontend (React + Vite)  →  Backend API (Express)  →  0G Chain (Solidity)
 
 | Contract | Address | Tests |
 |---|---|---|
-| BlindEscrow | `0xFd4F93F5A7BE144c405D1D8fbEC63Fb776207681` | 57 |
-| TaskRegistry | `0xeE52d780A47F77E8a4a1cEb236e3C65A48FbD828` | 26 |
-| BlindReputation | `0x4A6374Fae37E19E69ba43E7cf6994AC15F63256e` | 20 |
-| MockERC20 | `0x317227efcA18D004E12CA8046AEf7E1597458F25` | — |
+| BlindEscrow | `0x037529B296a89E6Dd1abAF84D413cb2dD70C5be5` | 57 |
+| TaskRegistry | `0x25Bc5be1F8Ab44ADfb7a6Ce1362d37408E74DA95` | 26 |
+| BlindReputation | `0x3d0374963DaaD43e31d42373eb11156A8e8ce2Ff` | 20 |
+| ValidatorPool | `0xdBb2f891a2584a573a6637500158A99caa19b11D` | 16 |
+| MockERC20 | `0x3af9232009C5da30AdA366B6E09849A040162A1a` | — |
+| INFT | `0xf771677276c900800d27e3cA4f9389FccFB34906` | — |
 
 Network: `0g-testnet-galileo` (Chain ID: 16602) | RPC: `https://evmrpc-testnet.0g.ai`
 
