@@ -94,15 +94,6 @@ blind validator run`}</pre>
           </div>
         </div>
       </div>
-
-      <div className="mt-6 flex gap-3">
-        <Link to="/agents/deploy">
-          <Button variant="primary" label="deploy_validator_agent" />
-        </Link>
-        <Link to="/agent">
-          <Button variant="outline" label="post_a_task" />
-        </Link>
-      </div>
     </div>
   );
 }
