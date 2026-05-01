@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import "@openzeppelin/contracts/utils/Pausable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 
 /**
  * @title TaskRegistry
@@ -16,7 +18,7 @@ import "@openzeppelin/contracts/utils/Pausable.sol";
  *      - 2-step admin transfer
  *      - Pausable for emergency stops
  */
-contract TaskRegistry is Pausable {
+contract TaskRegistry is Initializable, PausableUpgradeable, UUPSUpgradeable {
 
     struct TaskMeta {
         uint256 taskId;
@@ -72,9 +74,17 @@ contract TaskRegistry is Pausable {
 
     // ── Constructor ──
 
+    /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
+        _disableInitializers();
+    }
+
+    function initialize() external initializer {
+        __Pausable_init();
         admin = msg.sender;
     }
+
+    function _authorizeUpgrade(address) internal override onlyAdmin {}
 
     // ── Core Functions ──
 

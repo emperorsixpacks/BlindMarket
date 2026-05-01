@@ -1,5 +1,5 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
+import { ethers, upgrades } from "hardhat";
 import { BlindEscrow, BlindReputation, TaskRegistry } from "../typechain-types";
 import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 import { time } from "@nomicfoundation/hardhat-network-helpers";
@@ -35,15 +35,15 @@ describe("BlindEscrow", function () {
 
     // Deploy reputation
     const Rep = await ethers.getContractFactory("BlindReputation");
-    reputation = await Rep.deploy();
+    reputation = (await upgrades.deployProxy(Rep, [], { kind: "uups" })) as unknown as BlindReputation;
 
     // Deploy registry
     const Reg = await ethers.getContractFactory("TaskRegistry");
-    registry = await Reg.deploy();
+    registry = (await upgrades.deployProxy(Reg, [], { kind: "uups" })) as unknown as TaskRegistry;
 
     // Deploy escrow
     const Escrow = await ethers.getContractFactory("BlindEscrow");
-    escrow = await Escrow.deploy(treasury.address, verifier.address);
+    escrow = (await upgrades.deployProxy(Escrow, [treasury.address, verifier.address], { kind: "uups" })) as unknown as BlindEscrow;
 
     // Whitelist the token
     await escrow.connect(admin).allowToken(await token.getAddress());
@@ -66,14 +66,14 @@ describe("BlindEscrow", function () {
     it("should reject zero treasury address", async function () {
       const Escrow = await ethers.getContractFactory("BlindEscrow");
       await expect(
-        Escrow.deploy(ethers.ZeroAddress, verifier.address)
+        upgrades.deployProxy(Escrow, [ethers.ZeroAddress, verifier.address], { kind: "uups" })
       ).to.be.revertedWithCustomError(escrow, "ZeroAddress");
     });
 
     it("should reject zero verifier address", async function () {
       const Escrow = await ethers.getContractFactory("BlindEscrow");
       await expect(
-        Escrow.deploy(treasury.address, ethers.ZeroAddress)
+        upgrades.deployProxy(Escrow, [treasury.address, ethers.ZeroAddress], { kind: "uups" })
       ).to.be.revertedWithCustomError(escrow, "ZeroAddress");
     });
   });

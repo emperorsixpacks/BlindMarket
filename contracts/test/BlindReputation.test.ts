@@ -1,5 +1,5 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
+import { ethers, upgrades } from "hardhat";
 import { BlindReputation } from "../typechain-types";
 import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 
@@ -14,7 +14,7 @@ describe("BlindReputation", function () {
     [admin, escrow, worker, stranger] = await ethers.getSigners();
 
     const Rep = await ethers.getContractFactory("BlindReputation");
-    reputation = await Rep.deploy();
+    reputation = (await upgrades.deployProxy(Rep, [], { kind: "uups" })) as unknown as BlindReputation;
 
     await reputation.connect(admin).authorizeRater(escrow.address);
   });

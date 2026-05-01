@@ -1,5 +1,5 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
+import { ethers, upgrades } from "hardhat";
 import { TaskRegistry } from "../typechain-types";
 import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 
@@ -13,7 +13,7 @@ describe("TaskRegistry", function () {
     [admin, escrow, stranger] = await ethers.getSigners();
 
     const Registry = await ethers.getContractFactory("TaskRegistry");
-    registry = await Registry.deploy();
+    registry = (await upgrades.deployProxy(Registry, [], { kind: "uups" })) as unknown as TaskRegistry;
 
     await registry.connect(admin).authorizePublisher(escrow.address);
   });

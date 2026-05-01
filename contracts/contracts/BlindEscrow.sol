@@ -3,8 +3,10 @@ pragma solidity ^0.8.24;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/utils/Pausable.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
+import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 
 import "./interfaces/IBlindReputation.sol";
 import "./interfaces/ITaskRegistry.sol";
@@ -25,7 +27,7 @@ import "./interfaces/ITaskRegistry.sol";
  *      - Deadline enforcement to prevent indefinite fund locking
  *      - On-chain integration with TaskRegistry + BlindReputation
  */
-contract BlindEscrow is ReentrancyGuard, Pausable {
+contract BlindEscrow is Initializable, ReentrancyGuardTransient, PausableUpgradeable, UUPSUpgradeable {
     using SafeERC20 for IERC20;
 
     // ── Types ──
@@ -64,14 +66,14 @@ contract BlindEscrow is ReentrancyGuard, Pausable {
 
     // ── State ──
 
-    uint256 public nextTaskId = 1;
+    uint256 public nextTaskId;
     mapping(uint256 => Task) internal _tasks;
 
     address public admin;
     address public pendingAdmin;       // 2-step admin transfer
     address public treasury;
     address public verifier;           // 0G Sealed Inference callback address
-    uint256 public feeBps = 1500;      // 15% = 1500 basis points
+    uint256 public feeBps;             // 15% = 1500 basis points
 
     mapping(address => bool) public allowedTokens;  // token whitelist
 
@@ -144,14 +146,25 @@ contract BlindEscrow is ReentrancyGuard, Pausable {
 
     // ── Constructor ──
 
-    constructor(address _treasury, address _verifier) {
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    function initialize(address _treasury, address _verifier) external initializer {
         if (_treasury == address(0)) revert ZeroAddress();
         if (_verifier == address(0)) revert ZeroAddress();
+
+        __Pausable_init();
 
         admin = msg.sender;
         treasury = _treasury;
         verifier = _verifier;
+        nextTaskId = 1;
+        feeBps = 1500;
     }
+
+    function _authorizeUpgrade(address) internal override onlyAdmin {}
 
     // ── Core Functions ──
 
