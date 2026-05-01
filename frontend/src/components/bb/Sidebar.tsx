@@ -10,6 +10,7 @@ const navGroups = [
     label: 'docs',
     items: [
       { to: '/how-it-works', label: 'how_it_works' },
+      { to: '/agents/deploy', label: 'sdk' },
     ],
   },
   {
@@ -17,7 +18,6 @@ const navGroups = [
     items: [
       { to: '/tasks', label: 'tasks' },
       { to: '/agent', label: 'agent' },
-      { to: '/agents/deploy', label: 'sdk' },
       { to: '/worker', label: 'worker' },
       { to: '/validators', label: 'validators' },
     ],
@@ -26,7 +26,6 @@ const navGroups = [
     label: 'account',
     items: [
       { to: '/earnings', label: 'earnings' },
-      { to: '/verification', label: 'verification' },
       { to: '/settings', label: 'settings' },
     ],
   },
