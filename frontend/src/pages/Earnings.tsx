@@ -1,3 +1,6 @@
+import { useState } from 'react';
+import { useAccount } from 'wagmi';
+import { useQuery } from '@tanstack/react-query';
 import {
   Breadcrumb,
   PageHeader,
@@ -44,9 +47,20 @@ function typeTone(type: string): 'err' | 'warn' | 'neutral' | 'ok' {
 }
 
 export default function Earnings() {
+  const [tab, setTab] = useState<'transactions' | 'my_agents'>('transactions');
   const { isAuthenticated } = useAuth();
+  const { address } = useAccount();
   const { data: summary, isLoading: summaryLoading } = useAccountingSummary();
   const { data: entriesRes, isLoading: entriesLoading, error: entriesError } = useAccountingEntries();
+  const { data: agents } = useQuery({
+    queryKey: ['agents', address],
+    queryFn: async () => {
+      const res = await fetch(`/api/v1/agents?owner=${address}`);
+      const json = await res.json();
+      return json.success ? json.data as Array<{ id: string; name: string; walletAddress: string; status: string; inftTokenId?: number }> : [];
+    },
+    enabled: !!address,
+  });
 
   const entries: Transaction[] = entriesRes?.transactions ?? [];
   const pending = entries.filter((e) => e.status === 'pending');
@@ -98,6 +112,45 @@ export default function Earnings() {
         </div>
       </div>
 
+      {/* Tabs */}
+      <div className="flex gap-6 border-b border-line mb-8">
+        {(['transactions', 'my_agents'] as const).map((t) => (
+          <button key={t} onClick={() => setTab(t)}
+            className={`pb-2.5 text-xs font-mono font-semibold tracking-widest transition-colors border-b -mb-px ${tab === t ? 'text-cream border-cream' : 'text-ink-3 border-transparent hover:text-ink-2'}`}>
+            {tab === t ? '▸ ' : ''}{t}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'my_agents' ? (
+        <Panel>
+          <SectionRule num="01" title="my agents" side={`${agents?.length ?? 0} deployed`} />
+          <div className="mt-4 border border-line">
+            {!address ? (
+              <div className="px-5 py-8 text-center text-xs font-mono text-ink-3">connect wallet to see your agents</div>
+            ) : !agents || agents.length === 0 ? (
+              <div className="px-5 py-8 text-center text-xs font-mono text-ink-3">no agents deployed. run <code className="text-cream">blind register --name my-agent</code></div>
+            ) : (
+              <>
+                <div className="grid grid-cols-[1fr_160px_100px_80px] gap-4 px-5 py-3 border-b border-line text-[11px] font-mono font-semibold uppercase tracking-widest text-ink-3">
+                  <span>agent</span><span>wallet</span><span>inft</span><span>status</span>
+                </div>
+                {agents.map((agent) => (
+                  <div key={agent.id} className="grid grid-cols-[1fr_160px_100px_80px] gap-4 px-5 py-4 border-b border-line last:border-b-0 text-[13px] font-mono items-center">
+                    <span className="text-ink font-semibold">{agent.name}</span>
+                    <span className="text-ink-3 text-xs truncate">{agent.walletAddress.slice(0, 8)}…{agent.walletAddress.slice(-4)}</span>
+                    <span className="text-ink-3 text-xs">{agent.inftTokenId != null ? `#${agent.inftTokenId}` : '—'}</span>
+                    <Tag tone={agent.status === 'running' ? 'ok' : agent.status === 'paused' ? 'warn' : 'neutral'}>
+                      {agent.status}
+                    </Tag>
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+        </Panel>
+      ) : (
+        <>
       {/* Pending payments */}
       <div className="border border-line mb-8">
         <div className="px-5 py-3 border-b border-line flex items-center justify-between">
@@ -183,6 +236,8 @@ export default function Earnings() {
           )}
         </div>
       </Panel>
+        </>
+      )}
     </div>
   );
 }
