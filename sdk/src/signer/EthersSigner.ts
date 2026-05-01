@@ -70,7 +70,7 @@ export class EthersSigner implements Signer {
     }
 
     // Slow path: sign a probe message and recover the public key.
-    const probe = 'BlindBounty-PublicKey-Recovery-v1';
+    const probe = 'BlindMarket-PublicKey-Recovery-v1';
     const sig = await this.inner.signMessage(probe);
     const recovered = ethers.SigningKey.recoverPublicKey(
       ethers.hashMessage(probe),

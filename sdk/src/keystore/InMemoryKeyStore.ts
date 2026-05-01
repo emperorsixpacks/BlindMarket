@@ -3,8 +3,8 @@ import { CryptoError } from '../errors/index.js';
 import type { Address, Hex, TaskId, TaskKey, TaskKeyRef } from '../types.js';
 import type { KeyStore } from './KeyStore.js';
 
-const EXPORT_FORMAT = 'blindbounty.keystore.v1';
-const EXPORT_INFO = new TextEncoder().encode('BlindBounty-Keystore-Export-v1');
+const EXPORT_FORMAT = 'blindmarket.keystore.v1';
+const EXPORT_INFO = new TextEncoder().encode('BlindMarket-Keystore-Export-v1');
 
 interface Entry {
   aesKey: Uint8Array;

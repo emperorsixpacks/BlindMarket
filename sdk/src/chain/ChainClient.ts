@@ -13,7 +13,7 @@ export interface ChainClientOptions {
 }
 
 /**
- * Bundles typed clients for all three BlindBounty contracts plus the underlying
+ * Bundles typed clients for all three BlindMarket contracts plus the underlying
  * ethers runner. Reads use provider (or signer's provider); writes require a
  * signer. To keep the SDK's Signer abstraction decoupled from ethers at the
  * call sites, we unwrap an EthersSigner's inner ethers.Signer lazily here.

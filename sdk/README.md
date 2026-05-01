@@ -1,17 +1,17 @@
-# @blindbounty/sdk
+# @blindmarket/sdk
 
-TypeScript SDK for [BlindBounty](https://github.com/emperorsixpacks/BlindBounty) — the privacy-first task marketplace where AI agents delegate real-world tasks to humans, powered by 0G.
+TypeScript SDK for [BlindMarket](https://github.com/emperorsixpacks/BlindMarket) — the privacy-first task marketplace where AI agents delegate real-world tasks to humans, powered by 0G.
 
 ## Install
 
 ```bash
-npm install @blindbounty/sdk
+npm install @blindmarket/sdk
 ```
 
 ## Quick Start
 
 ```ts
-import { Agent, PrivateKeySigner, ogTestnet } from '@blindbounty/sdk';
+import { Agent, PrivateKeySigner, ogTestnet } from '@blindmarket/sdk';
 
 const signer = new PrivateKeySigner(process.env.PRIVATE_KEY!);
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  BlindBountyError,
+  BlindMarketError,
   ConfigError,
   CryptoError,
   StorageError,
@@ -11,7 +11,7 @@ import {
   TimeoutError,
 } from '../src/errors/index.js';
 
-describe('BlindBountyError', () => {
+describe('BlindMarketError', () => {
   it('preserves code, message, retriable, context, cause', () => {
     const cause = new Error('root');
     const err = new StorageError('STORAGE/UPLOAD_FAILED', 'upload blew up', {
@@ -19,7 +19,7 @@ describe('BlindBountyError', () => {
       context: { attempt: 1 },
       cause,
     });
-    expect(err).toBeInstanceOf(BlindBountyError);
+    expect(err).toBeInstanceOf(BlindMarketError);
     expect(err.name).toBe('StorageError');
     expect(err.code).toBe('STORAGE/UPLOAD_FAILED');
     expect(err.message).toBe('upload blew up');
@@ -59,6 +59,6 @@ describe('BlindBountyError', () => {
     // biome-ignore lint/suspicious/noExplicitAny: dynamic ctor call for table test
     const err = new (Ctor as any)(code, 'msg');
     expect(err.code).toBe(code);
-    expect(err).toBeInstanceOf(BlindBountyError);
+    expect(err).toBeInstanceOf(BlindMarketError);
   });
 });

@@ -1,7 +1,7 @@
 import { Wallet, ethers } from 'ethers';
 import { createCipheriv, randomBytes, createHash } from 'crypto';
 
-export interface BlindBountyConfig {
+export interface BlindMarketConfig {
   apiBase?: string;
   apiKey: string;
   rpcUrl?: string;
@@ -43,11 +43,11 @@ export interface PostedTask {
   storageRoot: string;
 }
 
-export class BlindBounty {
+export class BlindMarket {
   private apiBase: string;
   private apiKey: string;
 
-  constructor(config: BlindBountyConfig) {
+  constructor(config: BlindMarketConfig) {
     this.apiBase = config.apiBase ?? 'http://localhost:3001';
     this.apiKey = config.apiKey;
   }
@@ -197,8 +197,8 @@ export class BlindBounty {
    *
    * @example
    * const wallet = new ethers.Wallet(privateKey);
-   * const apiKey = await BlindBounty.authenticate(wallet, 'http://localhost:3001');
-   * const bb = new BlindBounty({ apiKey });
+   * const apiKey = await BlindMarket.authenticate(wallet, 'http://localhost:3001');
+   * const bb = new BlindMarket({ apiKey });
    */
   static async authenticate(wallet: Wallet, apiBase = 'http://localhost:3001'): Promise<string> {
     const nonceRes = await fetch(`${apiBase}/api/v1/auth/nonce`, {
@@ -207,7 +207,7 @@ export class BlindBounty {
       body: JSON.stringify({ address: wallet.address }),
     });
     const { data: { nonce } } = await nonceRes.json() as { data: { nonce: string } };
-    const message = `Sign this message to authenticate with BlindBounty.\n\nNonce: ${nonce}`;
+    const message = `Sign this message to authenticate with BlindMarket.\n\nNonce: ${nonce}`;
     const signature = await wallet.signMessage(message);
     const verifyRes = await fetch(`${apiBase}/api/v1/auth/verify`, {
       method: 'POST',

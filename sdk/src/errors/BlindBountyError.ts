@@ -6,7 +6,7 @@ export interface ErrorOptions {
   cause?: unknown;
 }
 
-export abstract class BlindBountyError extends Error {
+export abstract class BlindMarketError extends Error {
   readonly code: ErrorCode;
   readonly retriable: boolean;
   readonly context?: Record<string, unknown>;

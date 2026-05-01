@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 const IV_LENGTH = 12;
 const TAG_LENGTH = 16;
 const KEY_LENGTH = 32;
-const ECIES_HKDF_INFO = 'BlindBounty-ECIES-v1';
+const ECIES_HKDF_INFO = 'BlindMarket-ECIES-v1';
 
 function aesEncrypt(plaintext, key) {
   const iv = randomBytes(IV_LENGTH);
