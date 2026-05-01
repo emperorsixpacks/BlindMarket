@@ -1,6 +1,8 @@
 import { Link, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
+import { useQuery } from '@tanstack/react-query';
 import { LogoMark } from './LogoMark';
+import { get } from '../../lib/api';
 
 const navGroups = [
   {
@@ -16,6 +18,7 @@ const navGroups = [
       { to: '/agent', label: 'agent' },
       { to: '/agents/deploy', label: 'deploy_agent' },
       { to: '/worker', label: 'worker' },
+      { to: '/validators', label: 'validators' },
     ],
   },
   {
@@ -30,6 +33,11 @@ const navGroups = [
 
 export function Sidebar() {
   const location = useLocation();
+  const { data: stats } = useQuery({
+    queryKey: ['stats'],
+    queryFn: () => get<{ openTasks: number; activeAgents: number; activeValidators: number }>('/api/v1/stats'),
+    refetchInterval: 30_000,
+  });
 
   return (
     <aside className="w-[240px] h-screen fixed left-0 top-0 bg-surface border-r border-line flex flex-col z-30">
@@ -75,12 +83,18 @@ export function Sidebar() {
       </nav>
 
       {/* Footer status */}
-      <div className="px-6 py-4 border-t border-line">
+      <div className="px-6 py-4 border-t border-line space-y-1">
         <div className="text-[10px] font-mono text-ink-3">v0.4.2 · testnet</div>
-        <div className="flex items-center gap-1.5 mt-1">
+        <div className="flex items-center gap-1.5">
           <span className="w-1.5 h-1.5 bg-ok inline-block" />
           <span className="text-[10px] font-mono text-ok">tee online</span>
         </div>
+        {stats && (
+          <div className="text-[10px] font-mono text-ink-3 space-y-0.5 pt-1">
+            <div>{stats.activeValidators} validators · {stats.activeAgents} agents</div>
+            <div>{stats.openTasks} open tasks</div>
+          </div>
+        )}
       </div>
     </aside>
   );

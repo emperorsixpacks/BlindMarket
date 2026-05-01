@@ -20,6 +20,8 @@ import { stakingRouter } from './routes/staking.js';
 import { accountingRouter } from './routes/accounting.js';
 import { agentsRouter } from './routes/agents.js';
 import { registrationRouter } from './routes/registration.js';
+import { validatorsRouter } from './routes/validators.js';
+import { statsRouter } from './routes/stats.js';
 import { getDb } from './services/database.js';
 
 const app = express();
@@ -55,6 +57,8 @@ app.use('/api/v1/staking', stakingRouter);
 app.use('/api/v1/accounting', accountingRouter);
 app.use('/api/v1/agents', agentsRouter);
 app.use('/api/v1/registration', registrationRouter);
+app.use('/api/v1/validators', validatorsRouter);
+app.use('/api/v1/stats', statsRouter);
 app.use('/a2a/v1', a2aProtocolRouter);
 
 // Agent card (A2A discovery)

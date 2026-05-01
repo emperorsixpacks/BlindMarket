@@ -20,6 +20,7 @@ import Earnings from './pages/Earnings';
 import Settings from './pages/Settings';
 import NotFound from './pages/NotFound';
 import RegisterAgent from './pages/RegisterAgent';
+import Validators from './pages/Validators';
 import DeployAgent from './pages/DeployAgent';
 import AgentDetail from './pages/AgentDetail';
 import AgentMarketplace from './pages/AgentMarketplace';
@@ -80,6 +81,7 @@ export default function App() {
                     <Route path="/tasks/:id" element={<TaskDetail />} />
                     <Route path="/agent" element={<AgentDashboard />} />
                     <Route path="/worker" element={<WorkerView />} />
+                    <Route path="/validators" element={<Validators />} />
                     <Route path="/verification" element={<VerificationStatus />} />
                     <Route path="/earnings" element={<Earnings />} />
                     <Route path="/settings" element={<Settings />} />

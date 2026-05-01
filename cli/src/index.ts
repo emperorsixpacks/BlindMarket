@@ -225,4 +225,92 @@ program
     }
   });
 
+// ── validator ─────────────────────────────────────────────────────────────────
+
+const validator = program.command('validator').description('Validator pool commands');
+
+validator
+  .command('stake')
+  .description('Stake tokens to become a validator')
+  .option('--amount <tokens>', 'Amount to stake (in tokens, min 100)', '100')
+  .action(async (opts: { amount: string }) => {
+    const cfg = loadConfig();
+    if (!cfg.apiKey) { console.error('Not registered. Run: blind register --name <name>'); process.exit(1); }
+    const spin = ora(`Staking ${opts.amount} tokens…`).start();
+    try {
+      const amount = (BigInt(opts.amount) * 10n ** 18n).toString();
+      const { unsignedTx } = await api.post<{ unsignedTx: object }>('/api/v1/validators/register', { amount }, cfg.apiKey);
+      spin.succeed('Stake tx ready — sign and broadcast:');
+      console.log(JSON.stringify(unsignedTx, null, 2));
+    } catch (e) { spin.fail((e as Error).message); process.exit(1); }
+  });
+
+validator
+  .command('unstake')
+  .description('Withdraw your stake')
+  .action(async () => {
+    const cfg = loadConfig();
+    if (!cfg.apiKey) { console.error('Not registered.'); process.exit(1); }
+    const spin = ora('Building unstake tx…').start();
+    try {
+      const { unsignedTx } = await api.post<{ unsignedTx: object }>('/api/v1/validators/unstake', {}, cfg.apiKey);
+      spin.succeed('Unstake tx ready:');
+      console.log(JSON.stringify(unsignedTx, null, 2));
+    } catch (e) { spin.fail((e as Error).message); process.exit(1); }
+  });
+
+validator
+  .command('vote')
+  .description('Vote on a dispute')
+  .requiredOption('--dispute <id>', 'Dispute ID')
+  .requiredOption('--for <side>', 'worker or agent')
+  .action(async (opts: { dispute: string; for: string }) => {
+    const cfg = loadConfig();
+    if (!cfg.apiKey) { console.error('Not registered.'); process.exit(1); }
+    const vote = opts.for === 'worker' ? 1 : opts.for === 'agent' ? 2 : null;
+    if (!vote) { console.error('--for must be "worker" or "agent"'); process.exit(1); }
+    const spin = ora(`Voting ${opts.for} on dispute #${opts.dispute}…`).start();
+    try {
+      const { unsignedTx } = await api.post<{ unsignedTx: object }>('/api/v1/validators/vote', { disputeId: opts.dispute, vote }, cfg.apiKey);
+      spin.succeed('Vote tx ready:');
+      console.log(JSON.stringify(unsignedTx, null, 2));
+    } catch (e) { spin.fail((e as Error).message); process.exit(1); }
+  });
+
+validator
+  .command('finalize')
+  .description('Finalize a dispute after the 48h vote window')
+  .requiredOption('--dispute <id>', 'Dispute ID')
+  .action(async (opts: { dispute: string }) => {
+    const cfg = loadConfig();
+    if (!cfg.apiKey) { console.error('Not registered.'); process.exit(1); }
+    const spin = ora(`Finalizing dispute #${opts.dispute}…`).start();
+    try {
+      const { unsignedTx } = await api.post<{ unsignedTx: object }>('/api/v1/validators/finalize', { disputeId: opts.dispute }, cfg.apiKey);
+      spin.succeed('Finalize tx ready:');
+      console.log(JSON.stringify(unsignedTx, null, 2));
+    } catch (e) { spin.fail((e as Error).message); process.exit(1); }
+  });
+
+validator
+  .command('info')
+  .description('Check your validator status')
+  .action(async () => {
+    const cfg = loadConfig();
+    if (!cfg.agentWallet) { console.error('Not registered.'); process.exit(1); }
+    const spin = ora('Fetching validator info…').start();
+    try {
+      const info = await api.get<{ stake: string; active: boolean; totalVotes: number; correctVotes: number }>(
+        `/api/v1/validators/${cfg.agentWallet}`,
+      );
+      spin.stop();
+      console.log(`\n  wallet:        ${cfg.agentWallet}`);
+      console.log(`  active:        ${info.active}`);
+      console.log(`  stake:         ${(BigInt(info.stake) / 10n ** 18n).toString()} tokens`);
+      console.log(`  total_votes:   ${info.totalVotes}`);
+      console.log(`  correct_votes: ${info.correctVotes}`);
+      console.log(`  accuracy:      ${info.totalVotes > 0 ? ((info.correctVotes / info.totalVotes) * 100).toFixed(0) : '—'}%\n`);
+    } catch (e) { spin.fail((e as Error).message); process.exit(1); }
+  });
+
 program.parse();
