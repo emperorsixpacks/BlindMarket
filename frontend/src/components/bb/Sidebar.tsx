@@ -17,7 +17,7 @@ const navGroups = [
     items: [
       { to: '/tasks', label: 'tasks' },
       { to: '/agent', label: 'agent' },
-      { to: '/agents/deploy', label: 'deploy_agent' },
+      { to: '/agents/deploy', label: 'sdk' },
       { to: '/worker', label: 'worker' },
       { to: '/validators', label: 'validators' },
     ],

@@ -1,249 +1,111 @@
-import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useAccount, useWalletClient } from 'wagmi';
-import { ConnectButton } from '@rainbow-me/rainbowkit';
-import { SigningKey, hashMessage } from 'ethers';
+import { Breadcrumb, PageHeader, SectionRule } from '../components/bb';
 
-const PROVIDERS = {
-  openai:    { label: 'OpenAI',    models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo'] },
-  anthropic: { label: 'Anthropic', models: ['claude-opus-4-5', 'claude-sonnet-4-5', 'claude-3-haiku-20240307'] },
-  groq:      { label: 'Groq',      models: ['llama-3.3-70b-versatile', 'llama3-8b-8192', 'mixtral-8x7b-32768'] },
-  gemini:    { label: 'Gemini',    models: ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'] },
-} as const;
+const SNIPPETS = [
+  {
+    title: '01 · install',
+    code: `npm install @blindbounty/sdk`,
+  },
+  {
+    title: '02 · authenticate',
+    code: `import { BlindBounty } from '@blindbounty/sdk';
+import { ethers } from 'ethers';
 
-type Provider = keyof typeof PROVIDERS;
-type ToolType = 'http' | 'mcp' | 'js';
+const wallet = new ethers.Wallet(process.env.PRIVATE_KEY);
+const apiKey = await BlindBounty.authenticate(wallet);
+const bb = new BlindBounty({ apiKey });`,
+  },
+  {
+    title: '03 · deploy an agent',
+    code: `const agent = await bb.deployAgent({
+  name: 'research-agent',
+  instructions: 'You research topics and post tasks for humans to verify.',
+  provider: 'anthropic',
+  model: 'claude-sonnet-4-5',
+  apiKey: process.env.ANTHROPIC_API_KEY,
+  ownerAddress: wallet.address,
+  ownerPublicKey: wallet.publicKey,
+});
 
-interface ToolDraft {
-  id: string;
-  type: ToolType;
-  name: string;
-  description: string;
-  // http
-  url: string;
-  method: 'GET' | 'POST' | 'PUT' | 'DELETE';
-  headers: string; // JSON string
-  bodyTemplate: string;
-  // mcp
-  endpointUrl: string;
-  toolName: string;
-  // js
-  code: string;
-}
+console.log(agent.walletAddress); // agent's own wallet
+console.log(agent.inftTokenId);   // on-chain identity`,
+  },
+  {
+    title: '04 · post a task',
+    code: `const { unsignedTx, taskHash } = await bb.postTask({
+  instructions: 'Photograph the exterior of 42 Oak Street, NYC.',
+  category: 'photography',
+  amount: ethers.parseEther('30').toString(),
+  token: '0x317227efcA18D004E12CA8046AEf7E1597458F25',
+  locationZone: 'US-NY',
+});
 
-function emptyTool(type: ToolType): ToolDraft {
-  return {
-    id: crypto.randomUUID(),
-    type,
-    name: '',
-    description: '',
-    url: '',
-    method: 'GET',
-    headers: '',
-    bodyTemplate: '',
-    endpointUrl: '',
-    toolName: '',
-    code: 'return input.toUpperCase();',
-  };
-}
+// Sign and broadcast with agent wallet
+const receipt = await wallet.sendTransaction(unsignedTx);`,
+  },
+  {
+    title: '05 · assign + verify',
+    code: `// Assign a worker
+const { unsignedTx } = await bb.assignWorker(taskId, workerAddress);
+await wallet.sendTransaction(unsignedTx);
 
-function toolDraftToPayload(t: ToolDraft) {
-  const base = { type: t.type, name: t.name, description: t.description };
-  if (t.type === 'http') return { ...base, url: t.url, method: t.method, headers: t.headers ? JSON.parse(t.headers) : undefined, bodyTemplate: t.bodyTemplate || undefined };
-  if (t.type === 'mcp') return { ...base, endpointUrl: t.endpointUrl, toolName: t.toolName };
-  return { ...base, code: t.code };
-}
+// Trigger TEE verification
+const result = await bb.verify({
+  taskId: 1,
+  requirements: '3 exterior photos with street number visible',
+  evidenceSummary: 'Worker submitted 3 photos showing 42 Oak St sign',
+});
 
-const INPUT_CLS = 'w-full bg-surface-2 border border-line px-3 py-2 text-sm text-ink focus:outline-none focus:border-[var(--bb-cream)]';
-const LABEL_CLS = 'block text-xs font-mono text-ink-3 mb-1 uppercase tracking-wider';
+console.log(result.passed);     // true
+console.log(result.confidence); // 0.94`,
+  },
+];
 
 export default function DeployAgent() {
-  const { address, isConnected } = useAccount();
-  const { data: walletClient } = useWalletClient();
-  const navigate = useNavigate();
-
-  const [form, setForm] = useState({ name: '', instructions: '', provider: 'openai' as Provider, model: 'gpt-4o-mini', apiKey: '' });
-  const [tools, setTools] = useState<ToolDraft[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    setForm(f => ({ ...f, model: PROVIDERS[f.provider].models[0] }));
-  }, [form.provider]);
-
-  function addTool(type: ToolType) { setTools(t => [...t, emptyTool(type)]); }
-  function removeTool(id: string) { setTools(t => t.filter(x => x.id !== id)); }
-  function updateTool(id: string, patch: Partial<ToolDraft>) {
-    setTools(t => t.map(x => x.id === id ? { ...x, ...patch } : x));
-  }
-
-  async function handleDeploy(e: React.FormEvent) {
-    e.preventDefault();
-    if (!isConnected || !address || !walletClient) { setError('Connect wallet first'); return; }
-    setLoading(true); setError('');
-    try {
-      const msg = 'BlindBounty: authorize agent deployment';
-      const sig = await walletClient.signMessage({ message: msg });
-      const publicKeyHex = SigningKey.recoverPublicKey(hashMessage(msg), sig);
-      const ownerPublicKey = publicKeyHex.startsWith('04') ? publicKeyHex : `04${publicKeyHex}`;
-
-      const res = await fetch('/api/v1/agents/deploy', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...form, ownerAddress: address, ownerPublicKey, tools: tools.map(toolDraftToPayload) }),
-      });
-      const json = await res.json();
-      if (!json.success) throw new Error(json.error?.message ?? 'Deploy failed');
-      navigate('/agents');
-    } catch (err: unknown) {
-      setError((err as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }
-
   return (
-    <div className="max-w-2xl mx-auto px-4 py-10">
-      <h1 className="heading-display text-2xl mb-1">Deploy an Agent</h1>
-      <p className="text-ink-3 mb-8 text-sm font-mono">
-        Your agent picks up open tasks, calls your LLM with tools, and submits results automatically.
-      </p>
+    <div>
+      <Breadcrumb items={['marketplace', 'agents', 'sdk']} />
+      <PageHeader
+        title="BlindBounty SDK"
+        description="Compose and deploy agents programmatically."
+      />
 
-      {!isConnected && <div className="mb-6"><ConnectButton /></div>}
+      <div className="border border-line mb-8 p-6 space-y-2">
+        <SectionRule num="I" title="why SDK not UI" />
+        <p className="text-xs font-mono text-ink-3 leading-relaxed mt-3">
+          Agents are code. They should be composed in code — with your own logic, tools, and deployment pipeline.
+          The SDK gives you full control. The UI shows you what's running.
+        </p>
+      </div>
 
-      <form onSubmit={handleDeploy} className="space-y-6">
-        {/* Basic config */}
-        <div>
-          <label className={LABEL_CLS}>Agent name</label>
-          <input required value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="My Research Agent" className={INPUT_CLS} />
-        </div>
-
-        <div>
-          <label className={LABEL_CLS}>System instructions</label>
-          <textarea required rows={4} value={form.instructions} onChange={e => setForm(f => ({ ...f, instructions: e.target.value }))} placeholder="You are a research agent..." className={`${INPUT_CLS} resize-none`} />
-        </div>
-
-        <div>
-          <label className={LABEL_CLS}>LLM provider</label>
-          <div className="grid grid-cols-4 gap-2">
-            {(Object.keys(PROVIDERS) as Provider[]).map(p => (
-              <button key={p} type="button" onClick={() => setForm(f => ({ ...f, provider: p }))}
-                className={`py-2 border text-xs font-mono font-semibold uppercase tracking-wider transition-colors ${form.provider === p ? 'border-[var(--bb-cream)] text-[var(--bb-cream)] bg-surface-2' : 'border-line text-ink-3 hover:border-line-2'}`}>
-                {PROVIDERS[p].label}
-              </button>
-            ))}
+      <div className="space-y-0 border border-line">
+        {SNIPPETS.map((s, i) => (
+          <div key={s.title} className={`p-6 ${i < SNIPPETS.length - 1 ? 'border-b border-line' : ''}`}>
+            <div className="text-[11px] font-mono font-semibold uppercase tracking-widest text-cream mb-3">{s.title}</div>
+            <pre className="bg-surface-2 border border-line p-4 text-xs font-mono text-ink-3 leading-relaxed overflow-x-auto">{s.code}</pre>
           </div>
+        ))}
+      </div>
+
+      <div className="mt-6 border border-line p-6">
+        <SectionRule num="II" title="full reference" />
+        <div className="mt-4 grid grid-cols-2 gap-4 text-xs font-mono">
+          {[
+            ['BlindBounty.authenticate(wallet)', 'Get JWT from wallet signature'],
+            ['bb.deployAgent(params)', 'Deploy agent, mint INFT, return wallet'],
+            ['bb.listAgents(ownerAddress)', 'List all agents for a wallet'],
+            ['bb.postTask(params)', 'Encrypt + upload + build createTask tx'],
+            ['bb.assignWorker(taskId, worker)', 'Build assignWorker tx'],
+            ['bb.verify(params)', 'Trigger TEE verification'],
+            ['bb.getTask(taskId)', 'Get task status from chain'],
+            ['bb.listTasks(limit)', 'List open tasks'],
+          ].map(([method, desc]) => (
+            <div key={method} className="flex gap-3">
+              <span className="text-cream shrink-0">{method}</span>
+              <span className="text-ink-3">{desc}</span>
+            </div>
+          ))}
         </div>
-
-        <div>
-          <label className={LABEL_CLS}>Model</label>
-          <select value={form.model} onChange={e => setForm(f => ({ ...f, model: e.target.value }))} className={INPUT_CLS}>
-            {PROVIDERS[form.provider].models.map(m => <option key={m} value={m}>{m}</option>)}
-          </select>
-        </div>
-
-        <div>
-          <label className={LABEL_CLS}>{PROVIDERS[form.provider].label} API key</label>
-          <input required type="password" value={form.apiKey} onChange={e => setForm(f => ({ ...f, apiKey: e.target.value }))} placeholder="sk-..." className={`${INPUT_CLS} font-mono`} />
-          <p className="text-xs text-ink-3 mt-1 font-mono">Encrypted with your wallet key before storage.</p>
-        </div>
-
-        {/* Tools builder */}
-        <div>
-          <div className="section-rule mb-4">
-            <span className="section-num">§</span> Tools
-          </div>
-
-          {tools.length === 0 && (
-            <p className="text-xs text-ink-3 font-mono mb-3">No tools added. Agents can call HTTP endpoints, MCP servers, or run JS snippets.</p>
-          )}
-
-          <div className="space-y-4">
-            {tools.map(t => (
-              <div key={t.id} className="card-dark p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="chip chip-neutral">{t.type}</span>
-                  <button type="button" onClick={() => removeTool(t.id)} className="text-xs text-err font-mono hover:underline">remove</button>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3 mb-3">
-                  <div>
-                    <label className={LABEL_CLS}>Tool name</label>
-                    <input value={t.name} onChange={e => updateTool(t.id, { name: e.target.value })} placeholder="search_web" className={INPUT_CLS} />
-                  </div>
-                  <div>
-                    <label className={LABEL_CLS}>Description</label>
-                    <input value={t.description} onChange={e => updateTool(t.id, { description: e.target.value })} placeholder="Search the web for information" className={INPUT_CLS} />
-                  </div>
-                </div>
-
-                {t.type === 'http' && (
-                  <div className="space-y-3">
-                    <div className="grid grid-cols-3 gap-3">
-                      <div className="col-span-2">
-                        <label className={LABEL_CLS}>URL</label>
-                        <input value={t.url} onChange={e => updateTool(t.id, { url: e.target.value })} placeholder="https://api.example.com/search?q={input}" className={INPUT_CLS} />
-                      </div>
-                      <div>
-                        <label className={LABEL_CLS}>Method</label>
-                        <select value={t.method} onChange={e => updateTool(t.id, { method: e.target.value as any })} className={INPUT_CLS}>
-                          {['GET','POST','PUT','DELETE'].map(m => <option key={m}>{m}</option>)}
-                        </select>
-                      </div>
-                    </div>
-                    <div>
-                      <label className={LABEL_CLS}>Headers (JSON, optional)</label>
-                      <input value={t.headers} onChange={e => updateTool(t.id, { headers: e.target.value })} placeholder='{"Authorization": "Bearer token"}' className={`${INPUT_CLS} font-mono text-xs`} />
-                    </div>
-                    {t.method !== 'GET' && (
-                      <div>
-                        <label className={LABEL_CLS}>Body template (optional, use {'{{input}}'})</label>
-                        <input value={t.bodyTemplate} onChange={e => updateTool(t.id, { bodyTemplate: e.target.value })} placeholder='{"query": "{{input}}"}' className={`${INPUT_CLS} font-mono text-xs`} />
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {t.type === 'mcp' && (
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className={LABEL_CLS}>MCP endpoint URL</label>
-                      <input value={t.endpointUrl} onChange={e => updateTool(t.id, { endpointUrl: e.target.value })} placeholder="https://mcp.example.com" className={INPUT_CLS} />
-                    </div>
-                    <div>
-                      <label className={LABEL_CLS}>Tool name on server</label>
-                      <input value={t.toolName} onChange={e => updateTool(t.id, { toolName: e.target.value })} placeholder="search" className={INPUT_CLS} />
-                    </div>
-                  </div>
-                )}
-
-                {t.type === 'js' && (
-                  <div>
-                    <label className={LABEL_CLS}>JS function body — receives <code className="text-[var(--bb-cream)]">input: string</code>, must return a value</label>
-                    <textarea rows={4} value={t.code} onChange={e => updateTool(t.id, { code: e.target.value })} className={`${INPUT_CLS} font-mono text-xs resize-none`} />
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-
-          <div className="flex gap-2 mt-3">
-            {(['http', 'mcp', 'js'] as ToolType[]).map(type => (
-              <button key={type} type="button" onClick={() => addTool(type)}
-                className="btn-ghost text-xs">
-                + {type.toUpperCase()} tool
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {error && <p className="text-sm text-err font-mono">{error}</p>}
-
-        <button type="submit" disabled={loading || !isConnected}
-          className="btn-bracket-primary w-full justify-center disabled:opacity-50">
-          {loading ? 'Deploying…' : isConnected ? 'Deploy agent' : 'Connect wallet to deploy'}
-        </button>
-      </form>
+      </div>
     </div>
   );
 }

@@ -1,58 +1,25 @@
 {
   "name": "@blindbounty/sdk",
   "version": "0.1.0",
-  "description": "TypeScript SDK for BlindBounty — privacy-first task marketplace on 0G.",
+  "description": "BlindBounty SDK — deploy agents, post tasks, assign workers, verify evidence",
   "type": "module",
-  "license": "MIT",
-  "sideEffects": false,
-  "files": ["dist", "README.md", "LICENSE"],
-  "main": "./dist/index.cjs",
-  "module": "./dist/index.js",
+  "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
-    ".":          { "types": "./dist/index.d.ts",          "import": "./dist/index.js",          "require": "./dist/index.cjs" },
-    "./agent":    { "types": "./dist/agent/index.d.ts",    "import": "./dist/agent/index.js",    "require": "./dist/agent/index.cjs" },
-    "./worker":   { "types": "./dist/worker/index.d.ts",   "import": "./dist/worker/index.js",   "require": "./dist/worker/index.cjs" },
-    "./verifier": { "types": "./dist/verifier/index.d.ts", "import": "./dist/verifier/index.js", "require": "./dist/verifier/index.cjs" },
-    "./chain":    { "types": "./dist/chain/index.d.ts",    "import": "./dist/chain/index.js",    "require": "./dist/chain/index.cjs" },
-    "./storage":  { "types": "./dist/storage/index.d.ts",  "import": "./dist/storage/index.js",  "require": "./dist/storage/index.cjs" },
-    "./compute":  { "types": "./dist/compute/index.d.ts",  "import": "./dist/compute/index.js",  "require": "./dist/compute/index.cjs" },
-    "./crypto":   { "types": "./dist/crypto/index.d.ts",   "import": "./dist/crypto/index.js",   "require": "./dist/crypto/index.cjs" },
-    "./api":      { "types": "./dist/api/index.d.ts",      "import": "./dist/api/index.js",      "require": "./dist/api/index.cjs" },
-    "./signer":   { "types": "./dist/signer/index.d.ts",   "import": "./dist/signer/index.js",   "require": "./dist/signer/index.cjs" },
-    "./keystore": { "types": "./dist/keystore/index.d.ts", "import": "./dist/keystore/index.js", "require": "./dist/keystore/index.cjs" },
-    "./events":   { "types": "./dist/events/index.d.ts",   "import": "./dist/events/index.js",   "require": "./dist/events/index.cjs" },
-    "./errors":   { "types": "./dist/errors/index.d.ts",   "import": "./dist/errors/index.js",   "require": "./dist/errors/index.cjs" },
-    "./network":  { "types": "./dist/network/index.d.ts",  "import": "./dist/network/index.js",  "require": "./dist/network/index.cjs" },
-    "./testing":  { "types": "./dist/testing/index.d.ts",  "import": "./dist/testing/index.js",  "require": "./dist/testing/index.cjs" }
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
   },
   "scripts": {
-    "build": "tsup",
-    "dev": "tsup --watch",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage",
-    "typecheck": "tsc --noEmit",
-    "lint": "biome check src test",
-    "format": "biome format --write src test",
-    "docs": "typedoc"
+    "build": "tsc",
+    "dev": "tsc --watch"
   },
   "dependencies": {
-    "@0gfoundation/0g-ts-sdk": "^1.2.1",
-    "@0glabs/0g-serving-broker": "^0.7.5",
-    "ethers": "^6.13.5"
+    "ethers": "6.13.1"
   },
   "devDependencies": {
-    "@biomejs/biome": "^1.9.4",
     "@types/node": "^22.15.3",
-    "@vitest/coverage-v8": "^2.1.9",
-    "fast-check": "^3.23.2",
-    "tsup": "^8.3.5",
-    "typedoc": "^0.27.6",
-    "typescript": "^5.7.3",
-    "vitest": "^2.1.9"
-  },
-  "engines": { "node": ">=18.0.0" },
-  "keywords": ["blindbounty", "0g", "sdk", "privacy", "ecies", "tee", "sealed-inference", "task-marketplace"],
-  "repository": { "type": "git", "url": "https://github.com/JemIIahh/BlindBounty", "directory": "sdk" }
+    "typescript": "^5.7.3"
+  }
 }
