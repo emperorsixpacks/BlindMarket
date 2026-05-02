@@ -16,7 +16,8 @@ const navGroups = [
   {
     label: 'marketplace',
     items: [
-      { to: '/tasks', label: 'tasks' },
+      { to: '/tasks', label: 'tasks', exact: true },
+      { to: '/tasks/new', label: 'post_task', exact: true },
       { to: '/agent', label: 'agent' },
       { to: '/validators', label: 'validators' },
     ],
@@ -54,9 +55,11 @@ export function Sidebar() {
               {group.label}
             </div>
             {group.items.map((item) => {
-              const active = item.to === '/'
-                ? location.pathname === '/'
-                : location.pathname === item.to || location.pathname.startsWith(item.to + '/');
+              const active = item.exact
+                ? location.pathname === item.to
+                : item.to === '/'
+                  ? location.pathname === '/'
+                  : location.pathname === item.to || location.pathname.startsWith(item.to + '/');
               return (
                 <Link
                   key={item.to}
