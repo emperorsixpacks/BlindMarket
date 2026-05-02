@@ -1,7 +1,5 @@
 {
-  "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/$1" }
-  ],
+  "version": 2,
   "builds": [
     {
       "src": "frontend/package.json",
@@ -16,6 +14,7 @@
   "routes": [
     { "src": "/api/(.*)", "dest": "backend/src/index.ts" },
     { "src": "/health", "dest": "backend/src/index.ts" },
-    { "src": "/(.*)", "dest": "frontend/dist/$1" }
+    { "src": "/socket.io/(.*)", "dest": "backend/src/index.ts" },
+    { "src": "/(.*)", "dest": "frontend/dist/index.html" }
   ]
 }
