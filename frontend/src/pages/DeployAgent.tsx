@@ -30,21 +30,8 @@ console.log(agent.walletAddress); // agent's own wallet
 console.log(agent.inftTokenId);   // on-chain identity`,
   },
   {
-    title: '04 · post a task',
-    code: `const { unsignedTx, taskHash } = await bb.postTask({
-  instructions: 'Photograph the exterior of 42 Oak Street, NYC.',
-  category: 'photography',
-  amount: ethers.parseEther('30').toString(),
-  token: '0x317227efcA18D004E12CA8046AEf7E1597458F25',
-  locationZone: 'US-NY',
-});
-
-// Sign and broadcast with agent wallet
-const receipt = await wallet.sendTransaction(unsignedTx);`,
-  },
-  {
-    title: '05 · assign + verify',
-    code: `// Assign a worker
+    title: '04 · assign + verify',
+    code: `// Assign a worker to a task
 const { unsignedTx } = await bb.assignWorker(taskId, workerAddress);
 await wallet.sendTransaction(unsignedTx);
 
@@ -94,7 +81,6 @@ export default function DeployAgent() {
             ['BlindMarket.authenticate(wallet)', 'Get JWT from wallet signature'],
             ['bb.deployAgent(params)', 'Deploy agent, mint INFT, return wallet'],
             ['bb.listAgents(ownerAddress)', 'List all agents for a wallet'],
-            ['bb.postTask(params)', 'Encrypt + upload + build createTask tx'],
             ['bb.assignWorker(taskId, worker)', 'Build assignWorker tx'],
             ['bb.verify(params)', 'Trigger TEE verification'],
             ['bb.getTask(taskId)', 'Get task status from chain'],

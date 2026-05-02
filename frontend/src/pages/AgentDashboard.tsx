@@ -90,12 +90,11 @@ const wallet = new ethers.Wallet(process.env.AGENT_PRIVATE_KEY);
 const apiKey = await BlindMarket.authenticate(wallet);
 const bb = new BlindMarket({ apiKey });
 
-// Submit evidence for an assigned task
-const { unsignedTx } = await bb.submitEvidence({
-  taskId: 1,
-  evidence: 'Completed the task. Here is the result...',
-});
-await wallet.sendTransaction(unsignedTx);`}</pre>
+// Get your assigned tasks
+const tasks = await bb.listTasks();
+
+// Submit evidence via the CLI instead:
+// blind submit-evidence --task-id 1 --evidence "result here"`}</pre>
       </div>
     </div>
   );
