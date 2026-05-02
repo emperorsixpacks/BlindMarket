@@ -1,5 +1,4 @@
 import { Wallet, ethers } from 'ethers';
-import { createCipheriv, randomBytes, createHash } from 'crypto';
 
 export interface BlindMarketConfig {
   apiBase?: string;
@@ -19,15 +18,6 @@ export interface DeployAgentParams {
   tools?: object[];
 }
 
-export interface PostTaskParams {
-  instructions: string;
-  category: string;
-  amount: string;       // wei as string
-  token: string;        // ERC-20 address
-  locationZone?: string;
-  duration?: string;    // seconds
-}
-
 export interface DeployedAgent {
   id: string;
   name: string;
@@ -35,12 +25,6 @@ export interface DeployedAgent {
   publicKey: string;
   inftTokenId?: number;
   status: string;
-}
-
-export interface PostedTask {
-  unsignedTx: object;
-  taskHash: string;
-  storageRoot: string;
 }
 
 export class BlindMarket {
@@ -93,47 +77,6 @@ export class BlindMarket {
   // ── Task lifecycle ────────────────────────────────────────────────────────
 
   /**
-   * Encrypt instructions and post a task. Returns an unsigned tx to sign + broadcast.
-   *
-   * @example
-   * const { unsignedTx, taskHash } = await bb.postTask({
-   *   instructions: 'Photograph the exterior of 42 Oak Street, NYC.',
-   *   category: 'photography',
-   *   amount: ethers.parseEther('30').toString(),
-   *   token: '0x317227efcA18D004E12CA8046AEf7E1597458F25',
-   *   locationZone: 'US-NY',
-   * });
-   * const receipt = await wallet.sendTransaction(unsignedTx);
-   */
-  async postTask(params: PostTaskParams): Promise<PostedTask> {
-    // Encrypt instructions
-    const key = randomBytes(32);
-    const iv = randomBytes(12);
-    const cipher = createCipheriv('aes-256-gcm', key, iv);
-    const encrypted = Buffer.concat([cipher.update(params.instructions, 'utf8'), cipher.final()]);
-    const tag = (cipher as any).getAuthTag() as Buffer;
-    const blob = Buffer.concat([iv, tag, encrypted]).toString('base64');
-
-    // Upload to storage
-    const { rootHash } = await this.req<{ rootHash: string }>('POST', '/api/v1/storage/upload', { data: blob });
-
-    // taskHash = SHA-256 of ciphertext
-    const taskHash = '0x' + createHash('sha256').update(Buffer.concat([iv, tag, encrypted])).digest('hex');
-
-    // Build unsigned tx
-    const { unsignedTx } = await this.req<{ unsignedTx: object }>('POST', '/api/v1/tasks', {
-      taskHash,
-      token: params.token,
-      amount: params.amount,
-      category: params.category,
-      locationZone: params.locationZone ?? 'global',
-      duration: params.duration ?? '86400',
-    });
-
-    return { unsignedTx, taskHash, storageRoot: rootHash };
-  }
-
-  /**
    * Assign a worker to a task. Returns an unsigned tx.
    */
   async assignWorker(taskId: string, worker: string): Promise<{ unsignedTx: object }> {
@@ -155,23 +98,6 @@ export class BlindMarket {
       taskRequirements: params.requirements,
       evidenceSummary: params.evidenceSummary,
     });
-  }
-
-  /**
-   * Submit evidence for an assigned task.
-   */
-  async submitEvidence(params: { taskId: number; evidence: string }): Promise<{ unsignedTx: object }> {
-    const key = randomBytes(32);
-    const iv = randomBytes(12);
-    const cipher = createCipheriv('aes-256-gcm', key, iv);
-    const encrypted = Buffer.concat([cipher.update(params.evidence, 'utf8'), cipher.final()]);
-    const tag = (cipher as any).getAuthTag() as Buffer;
-    const blob = Buffer.concat([iv, tag, encrypted]).toString('base64');
-
-    await this.req('POST', '/api/v1/storage/upload', { data: blob });
-    const evidenceHash = '0x' + createHash('sha256').update(Buffer.concat([iv, tag, encrypted])).digest('hex');
-
-    return this.req('POST', '/api/v1/submissions/submit', { taskId: params.taskId, evidenceHash });
   }
 
   /**

@@ -24,6 +24,7 @@ import Validators from './pages/Validators';
 import DeployAgent from './pages/DeployAgent';
 import AgentDetail from './pages/AgentDetail';
 import AgentMarketplace from './pages/AgentMarketplace';
+import PostTask from './pages/PostTask';
 
 const privyAppId = import.meta.env.VITE_PRIVY_APP_ID;
 const isValidPrivyId = privyAppId && privyAppId.startsWith('c') && privyAppId.length > 10;
@@ -78,6 +79,7 @@ export default function App() {
                   <Route element={<DashboardLayout />}>
                     <Route path="/how-it-works" element={<HowItWorks />} />
                     <Route path="/tasks" element={<TaskFeed />} />
+                    <Route path="/tasks/new" element={<PostTask />} />
                     <Route path="/tasks/:id" element={<TaskDetail />} />
                     <Route path="/agent" element={<AgentDashboard />} />
                     <Route path="/worker" element={<WorkerView />} />
