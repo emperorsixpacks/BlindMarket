@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "start": "node dist/index.js",
-    "build": "tsc && cp -r src/abi dist/abi",
+    "start": "tsx src/index.ts",
+    "build": "echo 'No build step needed — using tsx'",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -38,7 +38,7 @@
     "@types/express": "^4.17.21",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^20.17.57",
-    "tsx": "^4.19.4",
+    "tsx": "^4.21.0",
     "typescript": "^5.7.3"
   }
 }
