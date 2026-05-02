@@ -32,8 +32,8 @@ const app = express();
 app.use(helmet());
 app.use(cors({
   origin: config.nodeEnv === 'development'
-    ? [config.corsOrigin, 'http://localhost:5173', 'http://localhost:5174']
-    : config.corsOrigin,
+    ? [...new Set([...config.corsOrigin, 'http://localhost:5173', 'http://localhost:5174'])] as string[]
+    : [...config.corsOrigin] as string[],
   credentials: true,
 }));
 app.use(createRateLimiter());
@@ -93,8 +93,8 @@ getDb();
 
 const corsOptions = {
   origin: config.nodeEnv === 'development'
-    ? [config.corsOrigin, 'http://localhost:5173', 'http://localhost:5174']
-    : config.corsOrigin,
+    ? [...new Set([...config.corsOrigin, 'http://localhost:5173', 'http://localhost:5174'])] as string[]
+    : [...config.corsOrigin] as string[],
   credentials: true,
 };
 

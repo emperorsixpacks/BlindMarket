@@ -39,7 +39,7 @@ export const config = {
   privyAppId: process.env.PRIVY_APP_ID || '',
 
   // CORS
-  corsOrigin: optional('CORS_ORIGIN', 'http://localhost:5173'),
+  corsOrigin: optional('CORS_ORIGIN', 'http://localhost:5173').split(',').map(s => s.trim()),
 
   // 0G Storage (Phase 3)
   ogStorageIndexerRpc: process.env.OG_STORAGE_INDEXER_RPC || '',
