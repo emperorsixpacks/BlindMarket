@@ -27,7 +27,7 @@ export function TopBar() {
   return (
     <header className="h-16 border-b border-line bg-surface flex items-center justify-end px-6 gap-3">
       {/* Post task */}
-      <Link to="/agent">
+      <Link to="/tasks/new">
         <Button variant="outline" label="post_task" size="sm" />
       </Link>
 

@@ -17,7 +17,6 @@ const navGroups = [
     label: 'marketplace',
     items: [
       { to: '/tasks', label: 'tasks', exact: true },
-      { to: '/tasks/new', label: 'post_task', exact: true },
       { to: '/agent', label: 'agent' },
       { to: '/validators', label: 'validators' },
     ],
@@ -64,9 +63,8 @@ export function Sidebar() {
                 <Link
                   key={item.to}
                   to={item.to}
-                  className={`relative block px-6 py-2 text-[13px] font-mono transition-colors duration-150 ${
-                    active ? 'text-ink' : 'text-ink-2 hover:text-ink hover:bg-surface-2'
-                  }`}
+                  className={`relative block px-6 py-2 text-[13px] font-mono transition-colors duration-150 ${active ? 'text-ink' : 'text-ink-2 hover:text-ink hover:bg-surface-2'
+                    }`}
                 >
                   {active && (
                     <motion.span
