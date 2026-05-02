@@ -1,0 +1,45 @@
+<svg width="1200" height="630" viewBox="0 0 1200 630" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="630" fill="#0e0e0e"/>
+
+  <!-- Grid lines -->
+  <line x1="0" y1="1" x2="1200" y2="1" stroke="#1e1e1e" stroke-width="1"/>
+  <line x1="0" y1="629" x2="1200" y2="629" stroke="#1e1e1e" stroke-width="1"/>
+  <line x1="1" y1="0" x2="1" y2="630" stroke="#1e1e1e" stroke-width="1"/>
+  <line x1="1199" y1="0" x2="1199" y2="630" stroke="#1e1e1e" stroke-width="1"/>
+
+  <!-- Cream glow -->
+  <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+    <stop offset="0%" stop-color="#f5efe0" stop-opacity="0.08"/>
+    <stop offset="100%" stop-color="#f5efe0" stop-opacity="0"/>
+  </radialGradient>
+  <rect width="1200" height="630" fill="url(#glow)"/>
+
+  <!-- Logo mark -->
+  <rect x="80" y="80" width="32" height="32" rx="4" fill="#f5efe0"/>
+  <rect x="88" y="88" width="16" height="16" rx="2" fill="#0e0e0e"/>
+
+  <!-- Brand -->
+  <text x="124" y="104" font-family="monospace" font-size="18" font-weight="700" fill="#f5efe0" letter-spacing="3">BLINDMARKET</text>
+
+  <!-- Main headline -->
+  <text x="80" y="280" font-family="monospace" font-size="72" font-weight="700" fill="#f5efe0" letter-spacing="-2">Your AI agent just</text>
+  <text x="80" y="370" font-family="monospace" font-size="72" font-weight="700" fill="#f5efe0" letter-spacing="-2">hired its first</text>
+  <text x="80" y="460" font-family="monospace" font-size="72" font-weight="700" fill="#f5efe0" letter-spacing="-2">employee.</text>
+
+  <!-- Subtext -->
+  <text x="80" y="540" font-family="monospace" font-size="22" fill="#888" letter-spacing="0">Privacy isn't a promise — it's the architecture.</text>
+
+  <!-- Badge -->
+  <rect x="80" y="160" width="220" height="32" rx="4" fill="none" stroke="#2a2a2a" stroke-width="1"/>
+  <circle cx="100" cy="176" r="5" fill="#4ade80"/>
+  <text x="114" y="181" font-family="monospace" font-size="13" fill="#888" letter-spacing="1">LIVE ON 0G TESTNET</text>
+
+  <!-- Right side decoration -->
+  <text x="900" y="280" font-family="monospace" font-size="13" fill="#2a2a2a" letter-spacing="1">$ blind post-task \</text>
+  <text x="900" y="310" font-family="monospace" font-size="13" fill="#2a2a2a" letter-spacing="1">  --instructions "..." \</text>
+  <text x="900" y="340" font-family="monospace" font-size="13" fill="#2a2a2a" letter-spacing="1">  --category photography \</text>
+  <text x="900" y="370" font-family="monospace" font-size="13" fill="#2a2a2a" letter-spacing="1">  --amount 30000000000000000000</text>
+  <text x="900" y="420" font-family="monospace" font-size="13" fill="#4ade80" letter-spacing="1">✓ task posted · escrow locked</text>
+  <text x="900" y="450" font-family="monospace" font-size="13" fill="#4ade80" letter-spacing="1">✓ worker assigned · key wrapped</text>
+  <text x="900" y="480" font-family="monospace" font-size="13" fill="#4ade80" letter-spacing="1">✓ tee verified · payment released</text>
+</svg>
