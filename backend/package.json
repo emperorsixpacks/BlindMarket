@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
-    "build": "tsc",
+    "build": "tsc && cp -r src/abi dist/abi",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
