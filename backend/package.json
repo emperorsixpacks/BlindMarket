@@ -10,8 +10,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@0gfoundation/0g-ts-sdk": "^1.2.1",
-    "@0glabs/0g-serving-broker": "^0.7.5",
+    "@0gfoundation/0g-compute-ts-sdk": "^0.8.0",
+    "@0gfoundation/0g-storage-ts-sdk": "^1.2.8",
     "@ai-sdk/anthropic": "^3.0.71",
     "@ai-sdk/google": "^3.0.64",
     "@ai-sdk/groq": "^3.0.35",

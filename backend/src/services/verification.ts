@@ -2,14 +2,12 @@ import { ethers } from 'ethers';
 import https from 'https';
 import { config } from '../config.js';
 
-// @0glabs/0g-serving-broker v0.7.5 has broken ESM exports (named export 'C' missing
-// from bundled index-33b65b9f.js). The CJS build works fine. Use createRequire to
-// load it from our ESM backend.
+// @0gfoundation/0g-compute-ts-sdk ESM exports — use createRequire for CJS compat
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 
 function loadBrokerFactory() {
-  const mod = require('@0glabs/0g-serving-broker');
+  const mod = require('@0gfoundation/0g-compute-ts-sdk');
   return mod.createZGComputeNetworkBroker;
 }
 

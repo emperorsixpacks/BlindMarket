@@ -1,4 +1,4 @@
-import { Indexer, MemData } from '@0gfoundation/0g-ts-sdk';
+import { Indexer, MemData } from '@0gfoundation/0g-storage-ts-sdk';
 import { ethers } from 'ethers';
 import { createHash, randomBytes } from 'crypto';
 import { writeFileSync, readFileSync, mkdirSync, existsSync, unlinkSync } from 'fs';
