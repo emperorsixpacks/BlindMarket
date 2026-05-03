@@ -14,7 +14,7 @@ const ToolSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('http'),
     name: z.string().min(1),
-    description: z.string().min(1),
+    description: z.string().default(''),
     url: z.string().url(),
     method: z.enum(['GET', 'POST', 'PUT', 'DELETE']),
     headers: z.record(z.string()).optional(),
@@ -23,14 +23,14 @@ const ToolSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('mcp'),
     name: z.string().min(1),
-    description: z.string().min(1),
+    description: z.string().default(''),
     endpointUrl: z.string().url(),
     toolName: z.string().min(1),
   }),
   z.object({
     type: z.literal('js'),
     name: z.string().min(1),
-    description: z.string().min(1),
+    description: z.string().default(''),
     code: z.string().min(1),
   }),
 ]);
