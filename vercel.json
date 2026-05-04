@@ -9,5 +9,8 @@
             "entrypoint": "backend",
             "routePrefix": "/_/backend"
         }
-    }
+    },
+    "rewrites": [
+        { "source": "/((?!_/|api/|health|assets/|.*\\.).*)", "destination": "/index.html" }
+    ]
 }
