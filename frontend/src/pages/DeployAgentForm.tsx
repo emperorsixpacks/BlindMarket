@@ -141,16 +141,16 @@ export default function DeployAgentForm() {
         {/* Identity */}
         <div className="p-6 border-b border-line">
           <SectionRule num="01" title="identity" />
-          <div className="mt-4 grid grid-cols-2 gap-4">
-            <div>
+          <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="min-w-0">
               <label className="block text-[11px] font-mono uppercase tracking-widest text-ink-3 mb-2">agent name <span className="text-cream">*</span></label>
               <input required value={form.name} onChange={e => set('name', e.target.value)}
                 placeholder="research-agent"
                 className="w-full bg-surface-2 border border-line px-4 py-3 text-xs font-mono text-ink placeholder-ink-3 focus:outline-none focus:border-cream" />
             </div>
-            <div>
+            <div className="min-w-0">
               <label className="block text-[11px] font-mono uppercase tracking-widest text-ink-3 mb-2">owner wallet</label>
-              <div className="bg-surface-2 border border-line px-4 py-3 text-xs font-mono text-ink-3">{address ?? 'connect wallet'}</div>
+              <div className="bg-surface-2 border border-line px-4 py-3 text-xs font-mono text-ink-3 truncate">{address ?? 'connect wallet'}</div>
             </div>
           </div>
           <div className="mt-4">
@@ -164,7 +164,7 @@ export default function DeployAgentForm() {
         {/* Model */}
         <div className="p-6 border-b border-line">
           <SectionRule num="02" title="model" />
-          <div className="mt-4 grid grid-cols-3 gap-4">
+          <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
               <label className="block text-[11px] font-mono uppercase tracking-widest text-ink-3 mb-2">provider</label>
               <select value={form.provider} onChange={e => set('provider', e.target.value)}
@@ -202,7 +202,7 @@ export default function DeployAgentForm() {
 
             {showToolForm ? (
               <div className="border border-line p-4 space-y-3">
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-[11px] font-mono uppercase tracking-widest text-ink-3 mb-1">type</label>
                     <select value={newTool.type} onChange={e => setNewTool(t => ({ ...t, type: e.target.value as 'http' | 'mcp' }))}
@@ -217,7 +217,7 @@ export default function DeployAgentForm() {
                       placeholder="web-search" className="w-full bg-surface-2 border border-line px-3 py-2 text-xs font-mono text-ink placeholder-ink-3 focus:outline-none focus:border-cream" />
                   </div>
                 </div>
-                <div className="grid grid-cols-[1fr_120px] gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-[1fr_120px] gap-3">
                   <div>
                     <label className="block text-[11px] font-mono uppercase tracking-widest text-ink-3 mb-1">url / endpoint</label>
                     <input value={newTool.url} onChange={e => setNewTool(t => ({ ...t, url: e.target.value }))}
@@ -241,7 +241,7 @@ export default function DeployAgentForm() {
                 {newTool.type === 'http' && (
                   <div className="space-y-2">
                     <label className="block text-[11px] font-mono uppercase tracking-widest text-ink-3">auth</label>
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <select value={newTool.authType ?? 'none'} onChange={e => setNewTool(t => ({ ...t, authType: e.target.value as Tool['authType'] }))}
                         className="w-full bg-surface-2 border border-line px-3 py-2 text-xs font-mono text-ink focus:outline-none focus:border-cream">
                         <option value="none">none</option>
