@@ -24,9 +24,9 @@ let remoteJWKSet: ReturnType<typeof createRemoteJWKSet> | null = null;
 function getJWKS() {
   if (!config.privyAppId) return null;
   if (!remoteJWKSet) {
-    remoteJWKSet = createRemoteJWKSet(
-      new URL(`https://auth.privy.io/api/v1/apps/${config.privyAppId}/jwks`)
-    );
+    const jwksUrl = `https://auth.privy.io/api/v1/apps/${config.privyAppId}/jwks`;
+    console.log(`[Auth] Initializing JWKS for App ID: ${config.privyAppId.slice(0, 5)}...`);
+    remoteJWKSet = createRemoteJWKSet(new URL(jwksUrl));
   }
   return remoteJWKSet;
 }
