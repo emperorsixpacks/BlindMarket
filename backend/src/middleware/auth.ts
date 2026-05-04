@@ -21,19 +21,39 @@ function isAgentApiKey(candidate: string): boolean {
 // Jose-based JWKS set
 let remoteJWKSet: ReturnType<typeof createRemoteJWKSet> | null = null;
 
-function getJWKS() {
+async function getJWKS() {
   if (!config.privyAppId) return null;
-  if (!remoteJWKSet) {
-    const jwksUrl = `https://auth.privy.io/api/v1/apps/${config.privyAppId}/.well-known/jwks.json`;
-    console.log(`[Auth] Initializing JWKS. URL: ${jwksUrl}`);
-    remoteJWKSet = createRemoteJWKSet(new URL(jwksUrl));
+  if (remoteJWKSet) return remoteJWKSet;
+
+  const app_id = config.privyAppId;
+  const urls = [
+    `https://auth.privy.io/api/v1/apps/${app_id}/jwks`,
+    `https://auth.privy.io/api/v1/apps/${app_id}/.well-known/jwks.json`,
+    `https://auth.privy.io/apps/${app_id}/jwks`,
+  ];
+
+  for (const url of urls) {
+    try {
+      const res = await fetch(url);
+      if (res.ok) {
+        console.log(`[Auth] JWKS found at: ${url}`);
+        remoteJWKSet = createRemoteJWKSet(new URL(url));
+        return remoteJWKSet;
+      }
+      console.warn(`[Auth] JWKS not found at ${url} (Status: ${res.status})`);
+    } catch (err: any) {
+      console.warn(`[Auth] Failed to reach ${url}: ${err.message}`);
+    }
   }
+
+  // Fallback to the first one even if it failed, so jose can try its own internal fetch/retry
+  remoteJWKSet = createRemoteJWKSet(new URL(urls[0]));
   return remoteJWKSet;
 }
 
 /** Verify a Privy JWT using jose */
 async function verifyPrivyToken(token: string): Promise<{ address: string }> {
-  const JWKS = getJWKS();
+  const JWKS = await getJWKS();
   if (!JWKS) throw new Error('Privy not configured (missing PRIVY_APP_ID)');
 
   try {
@@ -50,19 +70,6 @@ async function verifyPrivyToken(token: string): Promise<{ address: string }> {
 
     return { address: walletAddress };
   } catch (err: any) {
-    if (err.message?.includes('JSON Web Key Set HTTP response')) {
-      try {
-        const jwksUrl = `https://auth.privy.io/api/v1/apps/${config.privyAppId}/.well-known/jwks.json`;
-        const res = await fetch(jwksUrl);
-        console.error(`[Auth] Debug manual JWKS fetch: ${res.status} ${res.statusText}`);
-        if (res.status !== 200) {
-          const body = await res.text();
-          console.error(`[Auth] Debug manual JWKS fetch body: ${body}`);
-        }
-      } catch (fetchErr: any) {
-        console.error(`[Auth] Debug manual JWKS fetch failed completely: ${fetchErr.message}`);
-      }
-    }
     throw err;
   }
 }
