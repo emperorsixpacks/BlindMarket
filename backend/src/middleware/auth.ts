@@ -65,7 +65,6 @@ async function verifyPrivyToken(token: string): Promise<{ address: string }> {
 
   try {
     const { payload } = await jwtVerify(token, JWKS, {
-      issuer: 'privy.io',
       audience: config.privyAppId,
     });
 
