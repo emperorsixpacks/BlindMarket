@@ -53,20 +53,37 @@ export default function PostTask() {
       if (!token) throw new Error('No authentication token available. Please try logging out and back in.');
 
       // 0. Handle Token Approval if needed
+      console.log('[PostTask] Initializing provider for approval check...');
       const provider = new BrowserProvider(walletClient.transport);
       const signer = await provider.getSigner();
       const tokenContract = new Contract(TOKEN, ERC20_ABI, signer);
       const amountWei = parseUnits(form.amount, 18);
 
-      const allowance = await tokenContract.allowance(address, BLIND_ESCROW_ADDRESS);
-      if (allowance < amountWei) {
-        setStatus('approving');
-        const tx = await tokenContract.approve(BLIND_ESCROW_ADDRESS, amountWei);
-        await tx.wait();
+      try {
+        console.log(`[PostTask] Checking allowance for ${address} on token ${TOKEN}...`);
+        const allowance = await tokenContract.allowance(address, BLIND_ESCROW_ADDRESS);
+        console.log(`[PostTask] Current allowance: ${allowance.toString()}`);
+        
+        if (allowance < amountWei) {
+          setStatus('approving');
+          console.log(`[PostTask] Requesting approval for ${amountWei.toString()}...`);
+          const tx = await tokenContract.approve(BLIND_ESCROW_ADDRESS, amountWei);
+          const explorerLink = `https://chainscan-galileo.0g.ai/tx/${tx.hash}`;
+          console.log(`[PostTask] Approval TX sent: ${tx.hash}`);
+          console.log(`[PostTask] Track it here: ${explorerLink}`);
+          await tx.wait();
+          console.log('[PostTask] Approval confirmed.');
+        } else {
+          console.log('[PostTask] Sufficient allowance already exists.');
+        }
+      } catch (err: any) {
+        console.error('[PostTask] Approval error:', err);
+        throw new Error(`Failed to check/approve tokens: ${err.message || 'Unknown error'}. Is the token address ${TOKEN} correct for this network?`);
       }
 
       // 1. Encrypt instructions browser-side
       setStatus('encrypting');
+      console.log('[PostTask] Encrypting instructions...');
       const key = generateAesKey();
       const plaintext = toBytes(form.instructions);
       const ciphertext = await aesEncrypt(plaintext, key);
@@ -88,7 +105,13 @@ export default function PostTask() {
 
       // 4. Sign and send via MetaMask
       setStatus('signing');
-      await signAndSendTx(signer, taskJson.unsignedTx);
+      console.log(`[PostTask] Signing registration TX...`);
+      const tx = await signAndSendTx(signer, taskJson.unsignedTx);
+      const taskExplorerLink = `https://chainscan-galileo.0g.ai/tx/${tx.hash}`;
+      console.log(`[PostTask] Task TX sent: ${tx.hash}`);
+      console.log(`[PostTask] Track it here: ${taskExplorerLink}`);
+      await tx.wait();
+      console.log('[PostTask] Task creation confirmed.');
 
       setTaskId(taskJson.taskId ?? null);
       setStatus('done');
