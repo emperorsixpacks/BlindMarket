@@ -18,7 +18,7 @@ export const config = {
 
   // 0G Chain
   ogRpcUrl: optional('OG_RPC_URL', 'https://evmrpc-testnet.0g.ai'),
-  ogChainId: parseInt(optional('OG_CHAIN_ID', '16601'), 10),
+  ogChainId: parseInt(optional('OG_CHAIN_ID', '16602'), 10),
 
   // Contracts
   blindEscrowAddress: required('BLIND_ESCROW_ADDRESS'),

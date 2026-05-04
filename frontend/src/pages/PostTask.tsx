@@ -5,6 +5,7 @@ import { BrowserProvider } from 'ethers';
 import { Breadcrumb, PageHeader, SectionRule } from '../components/bb';
 import { aesEncrypt, generateAesKey, sha256, toBase64, toBytes } from '../lib/crypto';
 import { signAndSendTx } from '../lib/txSigner';
+import { authedPost } from '../lib/api';
 import { trackEvent } from '../hooks/useAnalytics';
 
 const CATEGORIES = ['photography', 'research', 'verification', 'data-collection', 'transcription', 'other'];
@@ -46,30 +47,18 @@ export default function PostTask() {
       const taskHash = '0x' + await sha256(ciphertext);
 
       // 2. Upload encrypted blob to storage
-      const uploadRes = await fetch('/api/v1/storage/upload', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data: blob }),
-      });
-      const uploadJson = await uploadRes.json();
-      if (!uploadJson.success) throw new Error(uploadJson.error?.message ?? 'Upload failed');
+      const uploadJson = await authedPost<any>('/api/v1/storage/upload', { data: blob });
 
       // 3. Get unsigned tx from backend
       const amountWei = (BigInt(Math.round(parseFloat(form.amount) * 1e18))).toString();
-      const taskRes = await fetch('/api/v1/tasks', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          taskHash,
-          token: TOKEN,
-          amount: amountWei,
-          category: form.category,
-          locationZone: form.locationZone,
-          duration: form.duration,
-        }),
+      const taskJson = await authedPost<any>('/api/v1/tasks', {
+        taskHash,
+        token: TOKEN,
+        amount: amountWei,
+        category: form.category,
+        locationZone: form.locationZone,
+        duration: form.duration,
       });
-      const taskJson = await taskRes.json();
-      if (!taskJson.success) throw new Error(taskJson.error?.message ?? 'Task creation failed');
 
       // 4. Sign and send via MetaMask
       setStatus('signing');
