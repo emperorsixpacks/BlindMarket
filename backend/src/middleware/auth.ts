@@ -147,6 +147,8 @@ export function requireAuth(req: AuthRequest, _res: Response, next: NextFunction
 
   // 2. Check Authorization: Bearer <token>
   const authHeader = req.headers.authorization;
+  console.log(`[Auth] Incoming Header: ${authHeader ? 'present' : 'MISSING'}`);
+  
   if (!authHeader?.startsWith('Bearer ')) {
     throw new AppError(401, 'UNAUTHORIZED', 'Authentication required');
   }
