@@ -73,7 +73,7 @@ async function verifyPrivyToken(token: string): Promise<{ address: string }> {
     const walletAddress = extractWalletAddress(payload as any);
     if (!walletAddress || !walletAddress.startsWith('0x')) {
       // Debug log the claims if we can't find a wallet
-      console.warn(`[Auth] No wallet found in token. Claims:`, JSON.stringify(payload));
+      console.warn(`[Auth] No wallet found in token. Available keys: ${Object.keys(payload).join(', ')}`);
       throw new Error(`No wallet address in Privy token (found: ${walletAddress})`);
     }
 
@@ -85,18 +85,28 @@ async function verifyPrivyToken(token: string): Promise<{ address: string }> {
 
 /** Extract wallet address from Privy JWT claims */
 function extractWalletAddress(payload: any): string | null {
-  // 1. Check for the preferred 'wallet_address' claim (often present in v2 or specific configs)
+  // 1. Check for the preferred 'wallet_address' claim
   if (typeof payload.wallet_address === 'string') return payload.wallet_address;
 
   // 2. Check linked_accounts array
-  const accounts = payload.linked_accounts;
+  let accounts = payload.linked_accounts;
+  
+  // Handle stringified JSON if necessary
+  if (typeof accounts === 'string') {
+    try {
+      accounts = JSON.parse(accounts);
+    } catch (e) {
+      console.warn('[Auth] Failed to parse stringified linked_accounts');
+    }
+  }
+
   if (Array.isArray(accounts)) {
     // Prioritize embedded wallets or external wallets
     const wallet = accounts.find((a: any) => a.type === 'wallet' && a.address?.startsWith('0x'));
     if (wallet) return wallet.address;
   }
 
-  // 3. Last resort: check sub if it's an address (unlikely but possible)
+  // 3. Last resort: check sub if it's an address
   if (typeof payload.sub === 'string' && payload.sub.startsWith('0x')) return payload.sub;
 
   return null;
