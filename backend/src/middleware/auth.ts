@@ -29,6 +29,7 @@ async function getJWKS() {
   const urls = [
     `https://auth.privy.io/api/v1/apps/${app_id}/jwks`,
     `https://auth.privy.io/api/v1/apps/${app_id}/.well-known/jwks.json`,
+    `https://auth.privy.io/api/v1/apps/${app_id}/keys`,
     `https://auth.privy.io/apps/${app_id}/jwks`,
   ];
 
