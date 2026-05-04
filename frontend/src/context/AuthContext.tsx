@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useRef, type ReactNode } from 'react';
-import { usePrivy } from '@privy-io/react-auth';
+import { usePrivy, getIdentityToken, getAccessToken } from '@privy-io/react-auth';
 import { useAccount } from 'wagmi';
 import { setAccessTokenGetter } from '../lib/api';
 import { trackEvent } from '../hooks/useAnalytics';
@@ -14,7 +14,7 @@ interface AuthState {
 const AuthContext = createContext<AuthState | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const { ready, authenticated, login, logout, getAccessToken, getIdentityToken } = usePrivy();
+  const { ready, authenticated, login, logout } = usePrivy();
   const { address } = useAccount();
   const trackedRef = useRef(false);
 

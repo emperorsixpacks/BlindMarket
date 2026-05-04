@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAccount, useWalletClient } from 'wagmi';
-import { usePrivy } from '@privy-io/react-auth';
+import { usePrivy, getIdentityToken, getAccessToken } from '@privy-io/react-auth';
 import { BrowserProvider } from 'ethers';
 import { Breadcrumb, PageHeader, SectionRule } from '../components/bb';
 import { aesEncrypt, generateAesKey, sha256, toBase64, toBytes } from '../lib/crypto';
@@ -15,7 +15,7 @@ const TOKEN = import.meta.env.VITE_MOCK_ERC20_ADDRESS ?? '0x3af9232009C5da30AdA3
 export default function PostTask() {
   const { address } = useAccount();
   const { data: walletClient } = useWalletClient();
-  const { getIdentityToken, getAccessToken } = usePrivy();
+  const { login } = usePrivy();
   const navigate = useNavigate();
 
   const [form, setForm] = useState({
