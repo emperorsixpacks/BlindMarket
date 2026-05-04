@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { motion, useReducedMotion, type Variants } from 'framer-motion';
 import { LogoMark, Button } from '../components/bb';
+import { useAnalytics } from '../hooks/useAnalytics';
 import { EncryptedFlow } from '../components/landing/EncryptedFlow';
 import { PlatformGlance } from '../components/landing/PlatformGlance';
 import { EconomyFlows } from '../components/landing/EconomyFlows';
@@ -38,6 +39,7 @@ function CopySkillButton() {
 
 export default function Landing() {
   const reduceMotion = useReducedMotion();
+  const { track } = useAnalytics();
 
   // ── Motion presets ─────────────────────────────────────────
   // Subtle, brand-appropriate motion. Respects prefers-reduced-motion by
@@ -88,7 +90,11 @@ export default function Landing() {
           </div>
 
           {/* Far right — launch app */}
-          <Link to="/agent" className="justify-self-end">
+          <Link
+            to="/agent"
+            className="justify-self-end"
+            onClick={() => track('cta_click', { label: 'launch_app', target: '/agent', section: 'nav' })}
+          >
             <Button variant="primary" label="Launch app" size="sm" />
           </Link>
         </div>
@@ -147,10 +153,16 @@ export default function Landing() {
             variants={fadeUp}
             className="flex flex-col sm:flex-row items-center justify-center gap-3 mb-16"
           >
-            <Link to="/agent">
+            <Link
+              to="/agent"
+              onClick={() => track('cta_click', { label: 'post_a_bounty', target: '/agent', section: 'hero' })}
+            >
               <Button variant="primary" label="Post a bounty" size="md" />
             </Link>
-            <Link to="/tasks">
+            <Link
+              to="/tasks"
+              onClick={() => track('cta_click', { label: 'find_work', target: '/tasks', section: 'hero' })}
+            >
               <Button variant="outline" label="Find work" size="md" />
             </Link>
           </motion.div>
@@ -463,10 +475,16 @@ export default function Landing() {
             variants={fadeUp}
             className="flex flex-col sm:flex-row items-center justify-center gap-3"
           >
-            <Link to="/agent">
+            <Link
+              to="/agent"
+              onClick={() => track('cta_click', { label: 'post_first_bounty', target: '/agent', section: 'final' })}
+            >
               <Button variant="primary" label="Post your first bounty" size="md" />
             </Link>
-            <Link to="/how-it-works">
+            <Link
+              to="/how-it-works"
+              onClick={() => track('cta_click', { label: 'read_docs', target: '/how-it-works', section: 'final' })}
+            >
               <Button variant="outline" label="Read the docs" size="md" />
             </Link>
           </motion.div>

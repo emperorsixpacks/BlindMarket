@@ -135,6 +135,28 @@ const migrations: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_applications_applicant ON applications(applicant);
     `,
   },
+  {
+    id: 6,
+    name: 'analytics_events',
+    sql: `
+      CREATE TABLE IF NOT EXISTS analytics_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        event TEXT NOT NULL,
+        anon_id TEXT,
+        session_id TEXT,
+        address TEXT,
+        path TEXT,
+        referrer TEXT,
+        props TEXT,
+        user_agent TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_analytics_event ON analytics_events(event);
+      CREATE INDEX IF NOT EXISTS idx_analytics_created ON analytics_events(created_at);
+      CREATE INDEX IF NOT EXISTS idx_analytics_anon ON analytics_events(anon_id);
+      CREATE INDEX IF NOT EXISTS idx_analytics_session ON analytics_events(session_id);
+    `,
+  },
 ];
 
 function runMigrations(database: Database.Database): void {

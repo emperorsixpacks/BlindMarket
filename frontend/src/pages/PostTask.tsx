@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAccount, useWalletClient } from 'wagmi';
 import { BrowserProvider } from 'ethers';
 import { Breadcrumb, PageHeader, SectionRule } from '../components/bb';
 import { aesEncrypt, generateAesKey, sha256, toBase64, toBytes } from '../lib/crypto';
 import { signAndSendTx } from '../lib/txSigner';
+import { trackEvent } from '../hooks/useAnalytics';
 
 const CATEGORIES = ['photography', 'research', 'verification', 'data-collection', 'transcription', 'other'];
 const TOKEN = import.meta.env.VITE_MOCK_ERC20_ADDRESS ?? '0x3af9232009C5da30AdA366B6E09849A040162A1a';
@@ -24,6 +25,10 @@ export default function PostTask() {
   const [status, setStatus] = useState<'idle' | 'encrypting' | 'signing' | 'done' | 'error'>('idle');
   const [error, setError] = useState('');
   const [taskId, setTaskId] = useState<string | null>(null);
+
+  useEffect(() => {
+    trackEvent('post_task_view');
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -74,9 +79,15 @@ export default function PostTask() {
 
       setTaskId(taskJson.data.taskId ?? null);
       setStatus('done');
+      trackEvent('task_posted', {
+        taskId: taskJson.data.taskId ?? null,
+        category: form.category,
+        amount: Number(form.amount),
+      });
     } catch (err) {
       setError((err as Error).message);
       setStatus('error');
+      trackEvent('task_post_error', { message: (err as Error).message });
     }
   }
 

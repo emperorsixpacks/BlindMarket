@@ -7,6 +7,14 @@ export const BLIND_ESCROW_ADDRESS = import.meta.env.VITE_BLIND_ESCROW_ADDRESS ||
 export const TASK_REGISTRY_ADDRESS = import.meta.env.VITE_TASK_REGISTRY_ADDRESS || '';
 export const BLIND_REPUTATION_ADDRESS = import.meta.env.VITE_BLIND_REPUTATION_ADDRESS || '';
 
+// Founder addresses (comma-separated, lowercase). Used to gate the /metrics page.
+// The backend enforces the same allowlist via FOUNDER_ADDRESSES — the env var
+// here is purely for UX ("Not authorized" vs. wallet-not-connected).
+export const FOUNDER_ADDRESSES: string[] = (import.meta.env.VITE_FOUNDER_ADDRESSES || '')
+  .split(',')
+  .map((s: string) => s.trim().toLowerCase())
+  .filter(Boolean);
+
 export const OG_CHAIN_CONFIG = {
   chainId: `0x${OG_CHAIN_ID.toString(16)}`,
   chainName: '0G Testnet',

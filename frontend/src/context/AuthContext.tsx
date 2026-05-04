@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useAccount, useSignMessage } from 'wagmi';
 import { post, setAccessTokenGetter } from '../lib/api';
+import { trackEvent } from '../hooks/useAnalytics';
 
 interface AuthState {
   jwt: string | null;
@@ -46,6 +47,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const { token } = await post<{ token: string }>('/api/v1/auth/verify', { address, signature });
         localStorage.setItem(JWT_KEY, token);
         setJwt(token);
+        trackEvent('connect_wallet', { address: address.toLowerCase() });
       } catch (err) {
         console.warn('[auth] SIWE sign failed:', err);
       } finally {

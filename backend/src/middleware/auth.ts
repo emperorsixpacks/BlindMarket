@@ -147,6 +147,26 @@ export function requireAuth(req: AuthRequest, _res: Response, next: NextFunction
 }
 
 /**
+ * Founder gate. Run AFTER requireAuth — checks req.user.address against
+ * the FOUNDER_ADDRESSES env var (comma-separated, case-insensitive).
+ * Treats absence of FOUNDER_ADDRESSES as "no one is a founder" so production
+ * deploys never accidentally expose admin views.
+ */
+export function requireFounder(req: AuthRequest, _res: Response, next: NextFunction): void {
+  const raw = process.env.FOUNDER_ADDRESSES || '';
+  const founders = new Set(
+    raw.split(',').map(s => s.trim().toLowerCase()).filter(Boolean),
+  );
+
+  const address = req.user?.address?.toLowerCase();
+  if (!address || !founders.has(address)) {
+    next(new AppError(403, 'FORBIDDEN', 'Founder access required'));
+    return;
+  }
+  next();
+}
+
+/**
  * Optional auth — attaches user if token present, continues regardless.
  */
 export function optionalAuth(req: AuthRequest, _res: Response, next: NextFunction): void {
