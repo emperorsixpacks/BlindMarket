@@ -64,12 +64,12 @@ export default function PostTask() {
       setStatus('signing');
       const provider = new BrowserProvider(walletClient.transport);
       const signer = await provider.getSigner();
-      await signAndSendTx(signer, taskJson.data.unsignedTx);
+      await signAndSendTx(signer, taskJson.unsignedTx);
 
-      setTaskId(taskJson.data.taskId ?? null);
+      setTaskId(taskJson.taskId ?? null);
       setStatus('done');
       trackEvent('task_posted', {
-        taskId: taskJson.data.taskId ?? null,
+        taskId: taskJson.taskId ?? null,
         category: form.category,
         amount: Number(form.amount),
       });
