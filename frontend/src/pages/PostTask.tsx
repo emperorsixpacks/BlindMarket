@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAccount, useWalletClient } from 'wagmi';
 import { getIdentityToken, getAccessToken } from '@privy-io/react-auth';
-import { BrowserProvider, Contract, parseUnits } from 'ethers';
+import { BrowserProvider, Contract, parseUnits, formatUnits } from 'ethers';
 import { Breadcrumb, PageHeader, SectionRule } from '../components/bb';
 import { aesEncrypt, generateAesKey, sha256, toBase64, toBytes } from '../lib/crypto';
 import { signAndSendTx } from '../lib/txSigner';
@@ -58,7 +58,8 @@ export default function PostTask() {
       const signer = await provider.getSigner();
       const tokenContract = new Contract(TOKEN, ERC20_ABI, signer);
       
-      const decimals = await tokenContract.decimals().catch(() => 18);
+      const decimalsRaw = await tokenContract.decimals().catch(() => 18);
+      const decimals = Number(decimalsRaw);
       const amountWei = parseUnits(form.amount, decimals);
 
       try {
@@ -71,7 +72,7 @@ export default function PostTask() {
         console.log(`[PostTask] Balance: ${balance.toString()}, Allowance: ${allowance.toString()}, Required: ${amountWei.toString()}`);
         
         if (balance < amountWei) {
-          throw new Error(`Insufficient balance. You need ${form.amount} tokens, but only have ${Number(balance) / (10 ** decimals)}.`);
+          throw new Error(`Insufficient balance. You need ${form.amount} tokens, but only have ${formatUnits(balance, decimals)}.`);
         }
         
         if (allowance < amountWei) {
