@@ -25,8 +25,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (authenticated) {
       setAccessTokenGetter(async () => {
         try {
-          return await getIdentityToken();
-        } catch {
+          const idToken = await getIdentityToken();
+          if (idToken) {
+            console.log('[Auth] Using Identity Token');
+            return idToken;
+          }
+          
+          console.warn('[Auth] Identity Token null, falling back to Access Token');
+          const accToken = await getAccessToken();
+          return accToken;
+        } catch (err) {
+          console.error('[Auth] Failed to get tokens:', err);
           return null;
         }
       });
