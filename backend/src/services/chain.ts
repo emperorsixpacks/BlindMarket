@@ -38,5 +38,5 @@ export async function buildUnsignedTx(
 ): Promise<ethers.TransactionRequest> {
   const data = contract.interface.encodeFunctionData(method, args);
   const to = await contract.getAddress();
-  return { to, data, from };
+  return { to, data, from: ethers.getAddress(from) };
 }
