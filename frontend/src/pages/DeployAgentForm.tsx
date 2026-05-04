@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAccount, useWalletClient } from 'wagmi';
 import { recoverPublicKey, hashMessage } from 'viem';
 import { Breadcrumb, PageHeader, SectionRule } from '../components/bb';
+import { get, post } from '../lib/api';
 
 type Provider = 'openai' | 'anthropic' | 'groq' | 'gemini';
 type ProviderModels = Record<Provider, string[]>;
@@ -48,9 +49,8 @@ export default function DeployAgentForm() {
   const [agentId, setAgentId] = useState('');
 
   useEffect(() => {
-    fetch('/api/v1/agents/providers')
-      .then(r => r.json())
-      .then(j => j.success && setProviders(j.data))
+    get<ProviderModels>('/api/v1/agents/providers')
+      .then(setProviders)
       .catch(() => {});
   }, []);
 
@@ -82,28 +82,22 @@ export default function DeployAgentForm() {
       // viem returns 0x04... — strip 0x for backend
       const ownerPublicKey = recovered.replace(/^0x/, '');
 
-      const res = await fetch('/api/v1/agents/deploy', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...form,
-          ownerAddress: address,
-          ownerPublicKey,
-          capabilities: [],
-          tools: tools.map(t => {
-            const headers: Record<string, string> = {};
-            if (t.authType === 'bearer') headers['Authorization'] = `Bearer ${t.authValue}`;
-            else if (t.authType === 'api-key') headers[t.authHeader ?? 'X-API-Key'] = t.authValue ?? '';
-            else if (t.authType === 'basic') headers['Authorization'] = `Basic ${btoa(t.authValue ?? '')}`;
-            return t.type === 'mcp'
-              ? { type: 'mcp', name: t.name, description: t.description, endpointUrl: t.url, toolName: t.toolName ?? t.name }
-              : { type: 'http', name: t.name, description: t.description, url: t.url, method: t.method ?? 'POST', headers };
-          }),
+      const data = await post<{ id: string }>('/api/v1/agents/deploy', {
+        ...form,
+        ownerAddress: address,
+        ownerPublicKey,
+        capabilities: [],
+        tools: tools.map(t => {
+          const headers: Record<string, string> = {};
+          if (t.authType === 'bearer') headers['Authorization'] = `Bearer ${t.authValue}`;
+          else if (t.authType === 'api-key') headers[t.authHeader ?? 'X-API-Key'] = t.authValue ?? '';
+          else if (t.authType === 'basic') headers['Authorization'] = `Basic ${btoa(t.authValue ?? '')}`;
+          return t.type === 'mcp'
+            ? { type: 'mcp', name: t.name, description: t.description, endpointUrl: t.url, toolName: t.toolName ?? t.name }
+            : { type: 'http', name: t.name, description: t.description, url: t.url, method: t.method ?? 'POST', headers };
         }),
       });
-      const json = await res.json();
-      if (!json.success) throw new Error(json.error?.message ?? JSON.stringify(json.error));
-      setAgentId(json.data.id);
+      setAgentId(data.id);
       setStatus('done');
     } catch (err) {
       setError((err as Error).message);
