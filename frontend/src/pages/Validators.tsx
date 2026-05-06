@@ -147,7 +147,7 @@ export default function Validators() {
           <div className="p-8 text-center text-xs font-mono text-ink-3">connect wallet to continue</div>
         ) : isValidator ? (
           <div className="p-6 grid grid-cols-4 gap-6 text-xs font-mono">
-            <div><div className="text-ink-3 mb-1">staked</div><div className="text-cream">{(BigInt(validatorInfo!.stake) / 10n ** 6n).toString()} USDC</div></div>
+            <div><div className="text-ink-3 mb-1">staked</div><div className="text-cream">{(BigInt(validatorInfo!.stake) / 10n ** 18n).toString()} USDC</div></div>
             <div><div className="text-ink-3 mb-1">total votes</div><div className="text-ink">{validatorInfo!.totalVotes}</div></div>
             <div><div className="text-ink-3 mb-1">correct votes</div><div className="text-ink">{validatorInfo!.correctVotes}</div></div>
             <div>
