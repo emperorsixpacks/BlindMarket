@@ -7,6 +7,7 @@ import { useSocket } from '../hooks/useSocket';
 import { signAndSendTx } from '../lib/txSigner';
 import { authedPost } from '../lib/api';
 import { API_BASE_URL } from '../config/constants';
+import { MintTestTokensCard } from '../components/MintTestTokensCard';
 
 interface ValidatorInfo {
   stake: string;
@@ -163,6 +164,7 @@ export default function Validators() {
           </div>
         ) : (
           <div className="p-6 space-y-4">
+            <MintTestTokensCard />
             <div className="text-xs font-mono text-ink-3 leading-relaxed max-w-lg">
               Stake USDC to join the validator pool. You'll vote on disputed tasks and earn a share of slashed stakes from wrong voters. Minimum stake: 100 USDC.
             </div>
