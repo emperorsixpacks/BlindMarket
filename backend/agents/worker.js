@@ -26,6 +26,7 @@ import { createGroq } from '@ai-sdk/groq';
 import { z } from 'zod';
 import { createHash, randomBytes } from 'crypto';
 import { runInNewContext } from 'vm';
+import { ethers } from 'ethers';
 
 const AGENT_ID = process.env.AGENT_ID ?? 'unknown';
 const AGENT_NAME = process.env.AGENT_NAME ?? 'Agent';
@@ -34,6 +35,9 @@ const AGENT_PROVIDER = (process.env.AGENT_PROVIDER ?? 'openai').toLowerCase();
 const AGENT_MODEL = process.env.AGENT_MODEL ?? 'gpt-4o-mini';
 const AGENT_API_KEY = process.env.AGENT_API_KEY ?? '';
 const AGENT_PLATFORM_TOKEN = process.env.AGENT_PLATFORM_TOKEN ?? '';
+const AGENT_PRIVATE_KEY = process.env.AGENT_PRIVATE_KEY ?? '';
+const OG_RPC_URL = process.env.OG_RPC_URL ?? 'https://evmrpc-testnet.0g.ai';
+const OG_CHAIN_ID = Number(process.env.OG_CHAIN_ID ?? 16602);
 const AGENT_TOOLS_RAW = process.env.AGENT_TOOLS ?? '[]';
 const AGENT_CAPABILITIES_RAW = process.env.AGENT_CAPABILITIES ?? '[]';
 const BACKEND_URL = process.env.BACKEND_URL ?? 'http://localhost:3001';
@@ -42,6 +46,19 @@ const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS ?? 30_000);
 let agentCapabilities = [];
 try { agentCapabilities = JSON.parse(AGENT_CAPABILITIES_RAW); } catch {}
 
+// Ethers wallet — used to sign + broadcast the unsigned txs the backend builds
+let signerWallet = null;
+if (AGENT_PRIVATE_KEY) {
+  try {
+    const provider = new ethers.JsonRpcProvider(OG_RPC_URL, OG_CHAIN_ID);
+    signerWallet = new ethers.Wallet(
+      AGENT_PRIVATE_KEY.startsWith('0x') ? AGENT_PRIVATE_KEY : `0x${AGENT_PRIVATE_KEY}`,
+      provider,
+    );
+  } catch (e) {
+    console.error(`[agent:${(process.env.AGENT_ID ?? '').slice(0, 8)}] failed to init signer: ${e.message}`);
+  }
+}
 
 // Track tasks we've already applied to or are currently working on
 const appliedTasks = new Set();
@@ -304,11 +321,13 @@ async function pollAndWork() {
     // For now, just hash the result
     const evidenceHash = createHash('sha256').update(text).digest('hex');
 
-    // 7. Submit evidence
+    // 7. Submit evidence — backend builds the unsigned submitEvidence tx, the
+    // agent signs with its own wallet and broadcasts to 0G. Without this step
+    // the on-chain task stays in Assigned forever and escrow never releases.
     log(`submitting task ${taskId}`);
     const submitRes = await fetch(`${BACKEND_URL}/api/v1/submissions/submit`, {
       method: 'POST',
-      headers: { 
+      headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${AGENT_PLATFORM_TOKEN}`
       },
@@ -317,7 +336,33 @@ async function pollAndWork() {
         evidenceHash: `0x${evidenceHash}`,
       }),
     });
-    log(`submitted task ${taskId}: ${submitRes.status}`);
+
+    if (!submitRes.ok) {
+      const errText = await submitRes.text();
+      log(`submit endpoint failed for task ${taskId}: ${submitRes.status} ${errText.slice(0, 120)}`);
+      return;
+    }
+
+    const submitJson = await submitRes.json();
+    const unsignedTx = submitJson.data?.unsignedTx;
+    if (!unsignedTx) {
+      log(`submit endpoint returned no unsignedTx for task ${taskId}`);
+      return;
+    }
+
+    if (!signerWallet) {
+      log(`cannot broadcast task ${taskId}: signer not initialised (missing AGENT_PRIVATE_KEY)`);
+      return;
+    }
+
+    try {
+      const sent = await signerWallet.sendTransaction(unsignedTx);
+      log(`submitEvidence broadcast for task ${taskId}: ${sent.hash}`);
+      const receipt = await sent.wait();
+      log(`submitEvidence confirmed for task ${taskId}: block=${receipt?.blockNumber} status=${receipt?.status}`);
+    } catch (e) {
+      log(`submitEvidence broadcast failed for task ${taskId}: ${e.shortMessage ?? e.message}`);
+    }
   } catch (err) {
     log(`error: ${err.message}`);
   }

@@ -268,6 +268,11 @@ export interface DeployedAgent {
   walletAddress: string;
   publicKey: string;
   encryptedPrivateKey: string;
+  // Server-custodial copy of the raw signing key. Lets the worker autonomously
+  // sign on-chain calls (e.g. submitEvidence) without owner involvement. Demo-
+  // grade custody — production would replace this with an EIP-712 owner-signed
+  // delegation that the contract verifies, so the backend never holds the key.
+  rawPrivateKey?: string;
   inftTokenId?: number;
 }
 

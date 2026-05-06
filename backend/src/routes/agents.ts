@@ -51,7 +51,7 @@ const DeploySchema = z.object({
 
 function strip(agent: Awaited<ReturnType<typeof getAgent>>) {
   if (!agent) return null;
-  const { encryptedPrivateKey: _a, encryptedApiKey: _b, apiKey: _c, ...safe } = agent;
+  const { encryptedPrivateKey: _a, encryptedApiKey: _b, apiKey: _c, rawPrivateKey: _d, ...safe } = agent;
   return safe;
 }
 
