@@ -79,11 +79,32 @@ export default function Validators() {
       const provider = new BrowserProvider(walletClient.transport);
       const signer = await provider.getSigner();
       await signAndSendTx(signer, txJson.unsignedTx as any);
-
       setTxStatus('✓ done');
       refetchValidator();
       refetchDisputes();
       refetchStats();
+    } catch (e) {
+      setTxStatus(`error: ${(e as Error).message}`);
+    }
+  }
+
+  async function stakeWithApproval() {
+    if (!address || !walletClient) return;
+    const amountWei = BigInt(Math.round(parseFloat(stakeAmount) * 1e6));
+    const USDC = import.meta.env.VITE_MOCK_ERC20_ADDRESS ?? '0x3af9232009C5da30AdA366B6E09849A040162A1a';
+    const POOL = '0xdBb2f891a2584a573a6637500158A99caa19b11D';
+    // ERC20 approve selector: approve(address,uint256)
+    const approveData = '0x095ea7b3' +
+      POOL.slice(2).toLowerCase().padStart(64, '0') +
+      amountWei.toString(16).padStart(64, '0');
+    setTxStatus('step 1/2: approve USDC…');
+    try {
+      const provider = new BrowserProvider(walletClient.transport);
+      const signer = await provider.getSigner();
+      const approveTx = await signer.sendTransaction({ to: USDC, data: approveData });
+      await approveTx.wait();
+      setTxStatus('step 2/2: staking…');
+      await sendTx('/api/v1/validators/register', { amount: String(amountWei) }, 'staking');
     } catch (e) {
       setTxStatus(`error: ${(e as Error).message}`);
     }
@@ -148,7 +169,7 @@ export default function Validators() {
                 <input type="number" min="100" value={stakeAmount} onChange={e => setStakeAmount(e.target.value)}
                   className="w-40 bg-surface-2 border border-line px-4 py-3 text-xs font-mono text-ink focus:outline-none focus:border-cream" />
               </div>
-              <button onClick={() => sendTx('/api/v1/validators/register', { amount: String(BigInt(Math.round(parseFloat(stakeAmount) * 1e6))) }, 'staking')}
+              <button onClick={() => stakeWithApproval()}
                 className="px-6 py-3 border border-cream text-xs font-mono text-cream hover:bg-cream hover:text-bg transition-colors">
                 stake + become validator →
               </button>
