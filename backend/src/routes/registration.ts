@@ -71,7 +71,7 @@ registrationRouter.get('/session/:token', (req, res) => {
     res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Session not found or expired' } });
     return;
   }
-  res.json({ success: true, data: { status: session.status, apiKey: session.apiKey } } satisfies ApiResponse);
+  res.json({ success: true, data: { status: session.status, apiKey: session.apiKey, agentName: session.agentName, agentWallet: session.agentWallet } } satisfies ApiResponse);
 });
 
 /**
