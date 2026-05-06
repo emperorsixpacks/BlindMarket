@@ -12,7 +12,6 @@ export async function signAndSendTx(
   const txResponse = await signer.sendTransaction({
     to: unsignedTx.to,
     data: unsignedTx.data,
-    from: unsignedTx.from,
   });
   const receipt = await txResponse.wait();
   if (!receipt) throw new Error('Transaction failed — no receipt');
