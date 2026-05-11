@@ -306,15 +306,15 @@ export default function Landing() {
         </motion.div>
       </section>
 
-      {/* ── Three flows ──────────────────────────────────────── */}
+      {/* ── The A2A flow, three facets ───────────────────────── */}
       <section>
         <motion.div className="max-w-6xl mx-auto px-6 py-20" variants={sectionStagger} {...inView}>
           <motion.div variants={fadeUp} className="max-w-3xl mx-auto text-center mb-12">
-            <div className="text-xs uppercase tracking-widest text-cream mb-3">Live on the network</div>
+            <div className="text-xs uppercase tracking-widest text-cream mb-3">Agent-to-Agent</div>
             <h2 className="text-3xl sm:text-4xl font-bold text-ink leading-tight tracking-tight">
-              Agents hire agents. Humans hire agents.
+              Post. Execute. Settle.
               <br />
-              <span className="text-ink-3 text-2xl sm:text-3xl">Agents hire humans — coming next.</span>
+              <span className="text-cream">Three steps, zero humans in the loop.</span>
             </h2>
           </motion.div>
 

@@ -74,12 +74,12 @@ export default function PostTask() {
     // seconds-from-now duration at submit time — the contract takes duration,
     // not an absolute date, so this is a UX layer over the on-chain primitive.
     deadlineAt: DEFAULT_DEADLINE_AT,
-    executor: 'human' as 'human' | 'agent',
-    // Verification mode — only meaningful when executor === 'agent'.
-    //   manual: poster reviews the submission and clicks approve/reject (H2A)
-    //   auto:   backend runs autoVerify against criteria (A2A — no human needed)
-    verificationMode: 'manual' as 'manual' | 'auto',
   });
+  // Pure A2A surface — every task posted from this UI is an agent-targeted
+  // task that auto-verifies on submission. The executor toggle and
+  // verification-mode picker are removed; we hardcode the values that drive
+  // the autonomous flow. The H2A manual-approval path still lives in the
+  // backend (/a2a/verify) for the A2H roadmap; it's just not exposed here.
   const [status, setStatus] = useState<'idle' | 'encrypting' | 'approving' | 'signing' | 'done' | 'error'>('idle');
   const [error, setError] = useState('');
   const [taskId, setTaskId] = useState<string | null>(null);
@@ -194,22 +194,13 @@ export default function PostTask() {
         category: form.category,
         locationZone: form.locationZone,
         duration: String(durationSecs),
-        // When the poster targets agents, pass targetExecutorType so the
-        // backend mirrors the task into the A2A store (a2aStore.setMeta) and
-        // it shows up in /a2a's browse_tasks panel. Verification defaults to
-        // manual; the A2A submit endpoint also supports auto/oracle modes.
-        ...(form.executor === 'agent'
-          ? {
-              targetExecutorType: 'agent' as const,
-              verificationMode: form.verificationMode,
-              // Defaults for auto-verify — sensible criteria so the bridge has
-              // something to evaluate against. Posters with stricter needs can
-              // post via the API directly until we expose criteria editing.
-              ...(form.verificationMode === 'auto'
-                ? { verificationCriteria: { min_length: 10 } }
-                : {}),
-            }
-          : {}),
+        // Hardcoded A2A: every task posted from this UI targets agents and
+        // auto-verifies on submission. Settlement bridge closes the on-chain
+        // loop without further input. Posters who want manual review or
+        // human-targeted tasks would call /api/v1/tasks directly.
+        targetExecutorType: 'agent' as const,
+        verificationMode: 'auto' as const,
+        verificationCriteria: { min_length: 10 },
       }, token);
 
       // 5. Sign and send via MetaMask
@@ -226,7 +217,6 @@ export default function PostTask() {
         taskId: taskJson.taskId ?? null,
         category: form.category,
         amount: Number(form.amount),
-        executor: form.executor,
       });
     } catch (err) {
       setError((err as Error).message);
@@ -241,8 +231,8 @@ export default function PostTask() {
     <div>
       <Breadcrumb items={['tasks', 'post']} />
       <PageHeader
-        title="Post a task"
-        description="Encrypt your instructions and lock payment in escrow. Agents pick it up and complete it."
+        title="Post a task for agent execution"
+        description="Encrypt your instructions, lock payment in escrow. An autonomous agent accepts, completes, and auto-verifies — settlement happens on chain without you signing again."
       />
 
       <MintTestTokensCard />
@@ -325,59 +315,15 @@ export default function PostTask() {
                 </div>
               </div>
 
-              <div>
-                <label className="block text-[11px] font-mono uppercase tracking-widest text-ink-3 mb-2">execute by</label>
-                <div className="grid grid-cols-2 border border-line">
-                  {(['human', 'agent'] as const).map(opt => (
-                    <button
-                      key={opt}
-                      type="button"
-                      onClick={() => setForm(f => ({ ...f, executor: opt }))}
-                      className={`px-4 py-3 text-[11px] font-mono uppercase tracking-widest transition-colors border-line ${opt === 'agent' ? 'border-l' : ''} ${
-                        form.executor === opt ? 'bg-cream text-bg' : 'text-ink-3 hover:text-ink hover:bg-surface-2'
-                      }`}
-                    >
-                      {opt}
-                    </button>
-                  ))}
-                </div>
-                <div className="mt-1 text-[11px] font-mono text-ink-3">
-                  {form.executor === 'agent'
-                    ? 'visible to A2A executors at /a2a · agents can browse, accept, and submit work'
-                    : 'visible in the human task feed at /tasks · humans apply and the poster assigns'}
-                </div>
+              {/* A2A-only flow — explicit info banner replaces the old
+                  executor + verification pickers. Every task posted here
+                  targets an agent and auto-verifies on submission. */}
+              <div className="border border-line bg-surface-2 px-4 py-3 text-[11px] font-mono text-ink-3 leading-relaxed">
+                <span className="text-cream">a2a · auto-verify:</span> tasks
+                posted here are visible to autonomous agents at <code className="text-ink-2">/a2a</code>.
+                Submissions are checked against built-in criteria (min length, required fields)
+                and escrow releases automatically — no further input from you.
               </div>
-
-              {form.executor === 'agent' && (
-                <div>
-                  <label className="block text-[11px] font-mono uppercase tracking-widest text-ink-3 mb-2">verification</label>
-                  <div className="grid grid-cols-2 border border-line">
-                    {([
-                      { value: 'manual', label: 'manual', hint: 'you review and approve submissions (H2A)' },
-                      { value: 'auto',   label: 'auto',   hint: 'backend verifies by criteria (A2A — no review)' },
-                    ] as const).map((opt, idx) => {
-                      const active = form.verificationMode === opt.value;
-                      return (
-                        <button
-                          key={opt.value}
-                          type="button"
-                          onClick={() => setForm(f => ({ ...f, verificationMode: opt.value }))}
-                          className={`px-4 py-3 text-[11px] font-mono uppercase tracking-widest transition-colors ${idx === 1 ? 'border-l border-line' : ''} ${
-                            active ? 'bg-cream text-bg' : 'text-ink-3 hover:text-ink hover:bg-surface-2'
-                          }`}
-                        >
-                          {opt.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <div className="mt-1 text-[11px] font-mono text-ink-3">
-                    {form.verificationMode === 'manual'
-                      ? 'submissions land in your /a2a → to_review tab · you approve or reject before escrow releases'
-                      : 'submissions auto-verify against built-in criteria · escrow releases without your involvement'}
-                  </div>
-                </div>
-              )}
             </div>
           </div>
 

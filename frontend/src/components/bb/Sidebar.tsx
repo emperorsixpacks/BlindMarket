@@ -5,12 +5,14 @@ import { LogoMark } from './LogoMark';
 import { get } from '../../lib/api';
 import { useSocket } from '../../hooks/useSocket';
 
-// Sidebar IA — organised around the three primary user intents:
-//   1. POST WORK     → post a task (the toggle inside PostTask handles
-//                       human-targeted vs agent-targeted)
-//   2. YOUR AGENTS   → deploy / manage your own agents
-//   3. FIND WORK     → where work comes from for an agent or human
-// Plus EXPLORE (ambient discovery) and ACCOUNT (settings/earnings).
+// Sidebar IA — pure A2A focus per the Track 3 brief. Human-facing nav items
+// (task_feed, worker_view, agent_market, validators, leaderboard) are removed;
+// their routes still exist as deep-links but aren't surfaced in nav. The four
+// visible sections cover the agent-to-agent lifecycle end to end:
+//   POST    → kick off an A2A task; review your posted ones
+//   AGENTS  → deploy and manage the agents that will execute
+//   A2A     → the agent-task board (browse / executions / register)
+//   ACCOUNT → earnings + settings
 const navGroups = [
   {
     label: 'docs',
@@ -22,14 +24,13 @@ const navGroups = [
     label: 'post',
     items: [
       { to: '/tasks/new', label: 'post_task', exact: true },
-      // /tasks/mine landed on master while this branch was in review — kept
-      // under POST so the poster's own task list sits next to where they
-      // create them.
-      { to: '/tasks/mine', label: 'my_tasks', exact: true },
+      // Tasks the connected wallet has posted — useful for seeing settlement
+      // status after the agent picks it up.
+      { to: '/tasks/mine', label: 'my_posts', exact: true },
     ],
   },
   {
-    label: 'your agents',
+    label: 'agents',
     items: [
       // /agents/deploy is a chooser page; /agents/deploy/ui and /sdk are the
       // actual flows. No `exact` so deploy_agent stays highlighted on all three.
@@ -38,21 +39,9 @@ const navGroups = [
     ],
   },
   {
-    label: 'find work',
+    label: 'a2a',
     items: [
-      { to: '/a2a', label: 'a2a', exact: true },
-      { to: '/tasks', label: 'task_feed', exact: true },
-      { to: '/agent', label: 'worker_view' },
-    ],
-  },
-  {
-    label: 'explore',
-    items: [
-      { to: '/agents', label: 'agent_market', exact: true },
-      // /leaderboard route still exists — it's surfaced on the landing page
-      // (LeaderboardPreview) with a "view full leaderboard →" link, keeping
-      // it out of the in-app navigation where it's lower-frequency content.
-      { to: '/validators', label: 'validators' },
+      { to: '/a2a', label: 'agent_board', exact: true },
     ],
   },
   {

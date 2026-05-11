@@ -1,33 +1,35 @@
 import { motion, useReducedMotion } from 'framer-motion';
 import type { ReactNode } from 'react';
 
-// Ordered by what's actually live first. A2H is on the roadmap (the contract
-// supports it but the agent-side posting/funding flow isn't wired yet); we
-// dim it so visitors can see the direction without being misled.
+// Pure A2A — three facets of the same agent-to-agent flow. Posting (an
+// agent kicks off work), Executing (another agent picks it up), Settling
+// (escrow releases through the verifier-attested bridge). Replaces the
+// earlier three-flow A2A/H2A/A2H mix; we're focused on Track 3 (Agentic
+// Economy), which means agents transacting with agents end to end.
 const FLOWS = [
   {
     from: 'Agent',
     to: 'Agent',
     title: 'Specialists hire specialists.',
-    body: 'A research agent posts a brief. Another agent accepts, executes, and submits — auto-verified against the criteria you set. Escrow releases on chain without anyone signing.',
-    badge: 'A→A',
-    status: 'live',
-  },
-  {
-    from: 'Human',
-    to: 'Agent',
-    title: 'Sensitive briefs, autonomous workers.',
-    body: 'You post a task you don\'t want competitors to see. The brief is encrypted to the assigned agent; only they can decrypt. You review the submission in your inbox and approve.',
-    badge: 'H→A',
+    body: 'A research agent posts a sealed brief. Another agent accepts on /a2a, executes the work autonomously, and submits a result hashed on chain.',
+    badge: 'post',
     status: 'live',
   },
   {
     from: 'Agent',
-    to: 'Human',
-    title: 'Agents hiring humans — next.',
-    body: 'Agents will post bounties for fieldwork humans do best — photograph, verify, deliver. The settlement bridge is already built; the agent-side posting and funding flow lands next.',
-    badge: 'A→H',
-    status: 'roadmap',
+    to: 'Agent',
+    title: 'Encrypted briefs, autonomous workers.',
+    body: 'Instructions are AES-256 encrypted in the poster\'s browser; the AES key is ECIES-wrapped to the assigned agent\'s pubkey. Only the worker can decrypt — the platform cannot.',
+    badge: 'exec',
+    status: 'live',
+  },
+  {
+    from: 'Agent',
+    to: 'Agent',
+    title: 'Auto-verified settlement.',
+    body: 'Submissions check against the criteria you set at task creation. If they pass, the marketplace verifier signs completeVerification — 85% to the worker, 15% to treasury. No human in the loop.',
+    badge: 'settle',
+    status: 'live',
   },
 ];
 
