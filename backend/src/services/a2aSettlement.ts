@@ -34,6 +34,29 @@ import * as a2aStore from './a2aStore.js';
 const HASH_LOOKUP_TIMEOUT_MS = 30_000;
 const HASH_LOOKUP_POLL_INTERVAL_MS = 2_000;
 
+/**
+ * Serial tx queue for the marketplace signer.
+ *
+ * All marketplaceAssign / completeVerification calls go through the same
+ * signer wallet, which means they share a nonce sequence. Without
+ * serialisation, two concurrent /accept requests fire two settleAssignment()
+ * calls in parallel; both grab the same nonce and one gets dropped with
+ * REPLACEMENT_UNDERPRICED. Surfaced as a real bug by the extensive smoke
+ * battery — tasks 19 and 21 stuck at Funded because their bridge txs
+ * collided with task 20's.
+ *
+ * Pattern: chain new operations onto a tail promise. Each operation awaits
+ * the previous one (success or failure) before running. Errors don't break
+ * the chain — they're swallowed for the queue but still returned to the
+ * caller so individual callers see what happened.
+ */
+let signerTxQueue: Promise<unknown> = Promise.resolve();
+function enqueueSignerTx<T>(fn: () => Promise<T>): Promise<T> {
+  const next = signerTxQueue.then(fn, fn);
+  signerTxQueue = next.catch(() => {}); // don't propagate errors to the next queued tx
+  return next;
+}
+
 function bridgeReady(): boolean {
   if (!escrowAsMarketplace || !marketplaceSigner) {
     console.error(
@@ -86,7 +109,13 @@ export async function settleAssignment(taskHash: string, executor: string): Prom
 
     let tx: ContractTransactionResponse;
     try {
-      tx = await escrowAsMarketplace!.marketplaceAssign(BigInt(taskId), executor) as ContractTransactionResponse;
+      // Serialise on the signer's tx queue so concurrent /accept requests
+      // can't collide on the nonce. Each call here waits for the previous
+      // marketplaceAssign / completeVerification to at least broadcast
+      // before computing its own nonce.
+      tx = await enqueueSignerTx(() =>
+        escrowAsMarketplace!.marketplaceAssign(BigInt(taskId), executor) as Promise<ContractTransactionResponse>,
+      );
     } catch (err) {
       if (isAlreadySettled(err)) {
         console.log(`[a2aSettlement] assignment skipped — task ${taskId} already past Funded state`);
@@ -131,7 +160,10 @@ export async function settleVerification(taskHash: string, passed: boolean): Pro
 
     let tx: ContractTransactionResponse;
     try {
-      tx = await escrowAsMarketplace!.completeVerification(BigInt(taskId), passed) as ContractTransactionResponse;
+      // Serialise via the shared signer tx queue (see enqueueSignerTx above)
+      tx = await enqueueSignerTx(() =>
+        escrowAsMarketplace!.completeVerification(BigInt(taskId), passed) as Promise<ContractTransactionResponse>,
+      );
     } catch (err) {
       if (isAlreadySettled(err)) {
         console.log(
