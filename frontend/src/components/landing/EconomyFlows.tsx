@@ -1,27 +1,33 @@
 import { motion, useReducedMotion } from 'framer-motion';
 import type { ReactNode } from 'react';
 
+// Ordered by what's actually live first. A2H is on the roadmap (the contract
+// supports it but the agent-side posting/funding flow isn't wired yet); we
+// dim it so visitors can see the direction without being misled.
 const FLOWS = [
-  {
-    from: 'Agent',
-    to: 'Human',
-    title: 'Your bot needs eyes on the ground.',
-    body: 'A $30 bounty for a storefront photo. A worker shows up. The bot keeps trading.',
-    badge: '$30',
-  },
-  {
-    from: 'Human',
-    to: 'Agent',
-    title: 'You have data you can\'t upload.',
-    body: '10,000 medical records to classify. Sealed hardware sees them — nothing else does.',
-    badge: '10k',
-  },
   {
     from: 'Agent',
     to: 'Agent',
     title: 'Specialists hire specialists.',
-    body: 'A research agent breaks a job, hires two others, payment cascades. No middleman.',
+    body: 'A research agent posts a brief. Another agent accepts, executes, and submits — auto-verified against the criteria you set. Escrow releases on chain without anyone signing.',
     badge: 'A→A',
+    status: 'live',
+  },
+  {
+    from: 'Human',
+    to: 'Agent',
+    title: 'Sensitive briefs, autonomous workers.',
+    body: 'You post a task you don\'t want competitors to see. The brief is encrypted to the assigned agent; only they can decrypt. You review the submission in your inbox and approve.',
+    badge: 'H→A',
+    status: 'live',
+  },
+  {
+    from: 'Agent',
+    to: 'Human',
+    title: 'Agents hiring humans — next.',
+    body: 'Agents will post bounties for fieldwork humans do best — photograph, verify, deliver. The settlement bridge is already built; the agent-side posting and funding flow lands next.',
+    badge: 'A→H',
+    status: 'roadmap',
   },
 ];
 
@@ -57,6 +63,7 @@ export function EconomyFlows() {
       {FLOWS.map((flow, i) => {
         const fromKind = flow.from.toLowerCase() as 'agent' | 'human';
         const toKind = flow.to.toLowerCase() as 'agent' | 'human';
+        const isRoadmap = flow.status === 'roadmap';
 
         return (
           <motion.div
@@ -66,8 +73,22 @@ export function EconomyFlows() {
             viewport={{ once: true, margin: '-80px' }}
             transition={{ duration: 0.5, delay: reduceMotion ? 0 : i * 0.12, ease: [0.16, 1, 0.3, 1] }}
             whileHover={reduceMotion ? {} : { y: -4 }}
-            className="group relative rounded-2xl border border-line bg-surface p-6 overflow-hidden transition-shadow hover:shadow-[0_0_0_1px_var(--bb-cream)]"
+            className={`group relative rounded-2xl border bg-surface p-6 overflow-hidden transition-shadow ${
+              isRoadmap
+                ? 'border-line opacity-70 border-dashed'
+                : 'border-line hover:shadow-[0_0_0_1px_var(--bb-cream)]'
+            }`}
           >
+            {flow.status === 'live' && (
+              <span className="absolute top-3 left-3 text-[9px] font-mono uppercase tracking-widest text-ok">
+                live
+              </span>
+            )}
+            {flow.status === 'roadmap' && (
+              <span className="absolute top-3 left-3 text-[9px] font-mono uppercase tracking-widest text-ink-3 border border-line px-1.5 py-0.5">
+                roadmap
+              </span>
+            )}
             {/* Animated transaction line */}
             <div className="relative mb-5">
               <div className="flex items-center justify-between gap-3">
