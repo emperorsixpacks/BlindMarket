@@ -51,6 +51,17 @@ const CATEGORY_SUGGESTIONS = [
   'code-review',
   'analysis',
 ];
+
+// Mirrors the backend AGENT_CAPABILITIES enum (backend/src/types.ts:86) and
+// the register-tab list in A2ADashboard.tsx. Tasks need at least one match
+// for an executor to surface them in the agent_board capability filter.
+const AGENT_CAPABILITIES = [
+  'data_processing', 'web_research', 'code_execution', 'content_generation',
+  'api_integration', 'text_analysis', 'translation', 'summarization',
+  'image_analysis', 'document_processing', 'math_computation', 'data_extraction',
+  'report_generation', 'code_review', 'testing', 'scheduling',
+  'email_drafting', 'social_media', 'market_research', 'competitive_analysis',
+] as const;
 const TOKEN = import.meta.env.VITE_MOCK_ERC20_ADDRESS ?? '0x3af9232009C5da30AdA366B6E09849A040162A1a';
 
 const ERC20_ABI = [
@@ -83,6 +94,10 @@ export default function PostTask() {
   const [status, setStatus] = useState<'idle' | 'encrypting' | 'approving' | 'signing' | 'done' | 'error'>('idle');
   const [error, setError] = useState('');
   const [taskId, setTaskId] = useState<string | null>(null);
+  const [requiredCaps, setRequiredCaps] = useState<string[]>([]);
+
+  const toggleCap = (cap: string) =>
+    setRequiredCaps(prev => (prev.includes(cap) ? prev.filter(c => c !== cap) : [...prev, cap]));
 
   useEffect(() => {
     trackEvent('post_task_view');
@@ -95,6 +110,10 @@ export default function PostTask() {
     try {
       setStatus('encrypting');
       setError('');
+
+      if (requiredCaps.length === 0) {
+        throw new Error('Pick at least one required capability so executor agents can match your task.');
+      }
 
       // Prefer the identity token (has linked_accounts → backend can derive
       // the wallet address from did:privy claims); fall back to the access
@@ -185,6 +204,7 @@ export default function PostTask() {
         targetExecutorType: 'agent' as const,
         verificationMode: 'auto' as const,
         verificationCriteria: { min_length: 10 },
+        requiredCapabilities: requiredCaps,
       }, token);
 
       // 5. Sign and send via MetaMask
@@ -299,6 +319,37 @@ export default function PostTask() {
                 </div>
               </div>
 
+              <div>
+                <label className="block text-[11px] font-mono uppercase tracking-widest text-ink-3 mb-2">
+                  required capabilities <span className="text-cream">*</span>
+                  <span className="ml-2 normal-case tracking-normal text-ink-3/70">
+                    ({requiredCaps.length} selected — at least one required)
+                  </span>
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {AGENT_CAPABILITIES.map((cap) => {
+                    const active = requiredCaps.includes(cap);
+                    return (
+                      <button
+                        key={cap}
+                        type="button"
+                        onClick={() => toggleCap(cap)}
+                        className={`px-2.5 py-1 text-[11px] font-mono border transition-colors ${
+                          active
+                            ? 'bg-cream/10 border-cream/40 text-cream'
+                            : 'bg-surface-2 border-line text-ink-3 hover:text-ink-2'
+                        }`}
+                      >
+                        {cap}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="mt-1 text-[11px] font-mono text-ink-3">
+                  pick every skill your task needs. an executor agent matches if it has any one.
+                </div>
+              </div>
+
               {/* A2A-only flow — explicit info banner replaces the old
                   executor + verification pickers. Every task posted here
                   targets an agent and auto-verifies on submission. */}
@@ -360,7 +411,8 @@ export default function PostTask() {
             ) : (
               <button
                 type="submit"
-                disabled={busy}
+                disabled={busy || requiredCaps.length === 0}
+                title={requiredCaps.length === 0 ? 'select at least one required capability above' : undefined}
                 className="px-6 py-3 border border-cream text-xs font-mono text-cream hover:bg-cream hover:text-bg disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
                 {status === 'encrypting' ? 'encrypting…' : status === 'approving' ? 'approving…' : status === 'signing' ? 'sign in wallet…' : 'encrypt + post task →'}

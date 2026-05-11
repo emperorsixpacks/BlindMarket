@@ -24,6 +24,7 @@ const ALL_CAPABILITIES = [
   'api_integration', 'text_analysis', 'translation', 'summarization',
   'image_analysis', 'document_processing', 'math_computation', 'data_extraction',
   'report_generation', 'code_review', 'testing', 'scheduling',
+  'email_drafting', 'social_media', 'market_research', 'competitive_analysis',
 ] as const;
 
 const statusTone: Record<string, 'neutral' | 'info' | 'ok' | 'err' | 'warn'> = {
@@ -234,7 +235,7 @@ export default function A2ADashboard() {
       {/* Browse tasks tab */}
       {activeTab === 'browse_tasks' && (
         <div className="border border-line">
-          <div className="grid grid-cols-[60px_1fr_120px_120px_90px] gap-4 px-5 py-3 border-b border-line text-[11px] font-mono font-semibold uppercase tracking-widest text-ink-3">
+          <div className="grid grid-cols-[120px_1fr_120px_120px_90px] gap-6 px-5 py-3 border-b border-line text-[11px] font-mono font-semibold uppercase tracking-widest text-ink-3">
             <span>id</span>
             <span>required caps</span>
             <span>verification</span>
@@ -252,7 +253,7 @@ export default function A2ADashboard() {
           {browse?.tasks?.map((entry) => (
             <div
               key={entry.meta.taskId}
-              className="grid grid-cols-[60px_1fr_120px_120px_90px] gap-4 px-5 py-4 border-b border-line last:border-b-0 text-[13px] font-mono"
+              className="grid grid-cols-[120px_1fr_120px_120px_90px] gap-6 px-5 py-4 border-b border-line last:border-b-0 text-[13px] font-mono"
             >
               <span className="text-ink-3">{entry.meta.taskId.slice(0, 10)}…</span>
               <span className="text-ink truncate">{entry.meta.requiredCapabilities.join(', ') || '—'}</span>
