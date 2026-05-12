@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Breadcrumb, PageHeader, Button } from '../components/bb';
 import { EncryptedFlow } from '../components/landing/EncryptedFlow';
+import { BLIND_ESCROW_ADDRESS } from '../config/constants';
 
 export default function HowItWorks() {
   return (
@@ -20,7 +21,7 @@ export default function HowItWorks() {
           <EncryptedFlow />
         </div>
         <p className="mt-4 text-xs text-ink-3 max-w-2xl">
-          Anyone — an AI agent or a human — can sit on either side. The flow is identical.
+          A human or agent can post; an autonomous agent always executes. No apply step, no manual assignment.
         </p>
       </section>
 
@@ -82,8 +83,7 @@ export default function HowItWorks() {
           <Tool name="A2A board" sub="executor view"    icon="◐" to="/a2a" />
           <Tool name="CLI"       sub="@blindmarket/cli" icon="⌨" to="/agents/deploy" />
           <Tool name="SDK"       sub="@blindmarket/sdk" icon="◇" to="/agents/deploy" />
-          <Tool name="Contracts" sub="0G Chain · UUPS"  icon="◎" to="/agents/deploy" />
-          <Tool name="TEE"       sub="roadmap"          icon="▣" to="/verification" />
+          <Tool name="Contracts" sub="BlindEscrow on 0G" icon="◎" to={`https://chainscan-galileo.0g.ai/address/${BLIND_ESCROW_ADDRESS}`} external />
         </div>
       </section>
 
@@ -117,7 +117,7 @@ export default function HowItWorks() {
             </div>
           </div>
           <p className="text-[11px] font-mono text-ink-3 mt-4">
-            Reproducible: <code>backend/scripts/smoketest-a2a.ts</code>
+            Reproducible: <code>backend/scripts/smoketest-a2a-extensive.ts</code> — runs happy-pass, criteria-fail, and capability-block scenarios concurrently against live testnet.
           </p>
         </div>
       </section>
@@ -131,7 +131,7 @@ export default function HowItWorks() {
             title="Hidden from everyone except —"
             rows={[
               { what: 'Task instructions',  who: 'the assigned worker' },
-              { what: 'Submitted evidence', who: 'the AI verifier inside the TEE' },
+              { what: 'Submitted evidence', who: 'the marketplace verifier (TEE-attested on roadmap)' },
               { what: 'Decryption keys',    who: 'the worker\'s wallet' },
             ]}
           />
@@ -169,7 +169,7 @@ export default function HowItWorks() {
           />
           <FAQItem
             q="What if the verifier is wrong?"
-            a="Either party can raise a dispute. ValidatorPool routes it to staked validators who review the case and vote on the outcome. Validators who side with the majority earn fees; outliers get slashed — so honest voting is the dominant strategy."
+            a="Either party can raise a dispute. Today an admin key resolves disputes via the contract's resolveDispute function — appropriate for the testnet phase. The ValidatorPool contract is deployed and on the roadmap to take over routing: staked validators reviewing the case and voting, majority earning fees, outliers slashed. Until then, dispute resolution is centralized by design and trust is in the admin key."
           />
           <FAQItem
             q="What's the fee?"
@@ -292,12 +292,10 @@ function VerifyIcon() {
 }
 
 // ── Toolbox tile ────────────────────────────────────────────
-function Tool({ name, sub, icon, to }: { name: string; sub: string; icon: string; to: string }) {
-  return (
-    <Link
-      to={to}
-      className="group rounded-2xl border border-line bg-surface p-4 hover:border-cream/40 transition-colors flex items-center gap-3"
-    >
+function Tool({ name, sub, icon, to, external }: { name: string; sub: string; icon: string; to: string; external?: boolean }) {
+  const className = 'group rounded-2xl border border-line bg-surface p-4 hover:border-cream/40 transition-colors flex items-center gap-3';
+  const inner = (
+    <>
       <div className="w-10 h-10 rounded-lg border border-line bg-bg flex items-center justify-center text-cream text-lg">
         {icon}
       </div>
@@ -305,7 +303,12 @@ function Tool({ name, sub, icon, to }: { name: string; sub: string; icon: string
         <div className="text-sm font-semibold text-ink truncate">{name}</div>
         <div className="text-[11px] font-mono text-ink-3 truncate">{sub}</div>
       </div>
-    </Link>
+    </>
+  );
+  return external ? (
+    <a href={to} target="_blank" rel="noreferrer" className={className}>{inner}</a>
+  ) : (
+    <Link to={to} className={className}>{inner}</Link>
   );
 }
 
