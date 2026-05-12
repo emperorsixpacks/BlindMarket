@@ -26,7 +26,7 @@ const navGroups = [
       { to: '/tasks/new', label: 'post_task', exact: true },
       // Tasks the connected wallet has posted — useful for seeing settlement
       // status after the agent picks it up.
-      { to: '/tasks/mine', label: 'my_posts', exact: true },
+      { to: '/tasks/mine', label: 'my_tasks', exact: true },
     ],
   },
   {

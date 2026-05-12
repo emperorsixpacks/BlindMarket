@@ -68,9 +68,19 @@ export default function TaskDetail() {
     <motion.div initial="hidden" animate="visible" variants={fadeUp} className="max-w-3xl mx-auto">
       <TxPendingModal open={txSend.isPending} />
 
-      {/* Breadcrumb */}
+      {/* Breadcrumb — context-aware:
+          • posters land back on their my_tasks list
+          • everyone else lands on the agent_board (where they'd browse tasks)
+          This matches the post-pivot IA: '/tasks' as a single bucket no longer
+          exists, so the breadcrumb routes to whichever section the viewer
+          actually belongs in. */}
       <div className="flex items-center gap-2 text-sm text-neutral-600 mb-8">
-        <Link to="/tasks" className="hover:text-amber-400 transition-colors">Tasks</Link>
+        <Link
+          to={isPoster ? '/tasks/mine' : '/a2a'}
+          className="hover:text-amber-400 transition-colors"
+        >
+          {isPoster ? 'my_tasks' : 'agent_board'}
+        </Link>
         <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
         </svg>
