@@ -6,8 +6,39 @@ import {
   getAgent, listAgents, getAgentLogs, subscribeAgentLogs, updateAgent,
 } from '../services/agentRunner.js';
 import { getDecayedReputation } from '../services/reputationDecay.js';
+import * as agentStore from '../services/agentStore.js';
 
 export const agentsRouter = Router();
+
+/**
+ * USDC raw micro-units → decimal string. Six decimals because USDC. Kept tight
+ * because the frontend reads this as `parseFloat(totalEarned).toFixed(2)` and
+ * passing raw micro-units (e.g. "8500000") would render as "$8500000.00".
+ */
+function formatUsdcDecimal(raw: string): string {
+  const n = BigInt(raw);
+  const whole = (n / 1_000_000n).toString();
+  const frac = (n % 1_000_000n).toString().padStart(6, '0');
+  return `${whole}.${frac}`;
+}
+
+/**
+ * Merge the on-chain-executor stats (kept in agentStore keyed by walletAddress)
+ * onto a stripped DeployedAgent record. tasksCompleted + totalEarned only live
+ * in the executor record — without this enrichment the dashboard UI reads
+ * `undefined` for both and shows 0 / $0.00 even after the agent has been paid
+ * (the on-chain payout is real but the off-chain index is in a sibling Redis
+ * key the /agents route never touched until now).
+ */
+async function withExecutorStats<T extends { walletAddress?: string }>(stripped: T) {
+  if (!stripped.walletAddress) return { ...stripped, tasksCompleted: 0, totalEarned: '0' };
+  const exec = await agentStore.getAgent(stripped.walletAddress);
+  return {
+    ...stripped,
+    tasksCompleted: exec?.tasksCompleted ?? 0,
+    totalEarned: formatUsdcDecimal(exec?.totalEarnedRaw ?? '0'),
+  };
+}
 
 const PROVIDERS = Object.keys(LLM_PROVIDER_MODELS) as [string, ...string[]];
 
@@ -76,15 +107,15 @@ agentsRouter.post('/deploy', async (req, res) => {
 agentsRouter.get('/', async (req, res) => {
   const owner = req.query.owner as string | undefined;
   const rawAgents = await listAgents(owner);
-  const enriched = rawAgents.map(a => {
+  const enriched = await Promise.all(rawAgents.map(async a => {
     const s = strip(a);
     if (!s) return null;
     return {
-      ...s,
+      ...(await withExecutorStats(s)),
       reputation: getDecayedReputation(a.walletAddress),
     };
-  }).filter(Boolean);
-  res.json({ success: true, data: enriched });
+  }));
+  res.json({ success: true, data: enriched.filter(Boolean) });
 });
 
 // GET /api/v1/agents/:id/logs — SSE stream
@@ -140,10 +171,11 @@ agentsRouter.patch('/:id', async (req, res) => {
 agentsRouter.get('/:id', async (req, res) => {
   const agent = await getAgent(req.params.id);
   if (!agent) { res.status(404).json({ success: false, error: 'Not found' }); return; }
+  const stripped = strip(agent)!;
   res.json({
     success: true,
     data: {
-      ...strip(agent),
+      ...(await withExecutorStats(stripped)),
       reputation: getDecayedReputation(agent.walletAddress),
     }
   });

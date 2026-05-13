@@ -106,6 +106,11 @@ export interface AgentExecutor {
   mcpEndpointUrl?: string;
   reputation: number; // 0-100
   tasksCompleted: number;
+  // Sum of worker payouts in smallest token unit (e.g. USDC micro-units; 6
+  // decimals). Stored as a decimal string because BigInt doesn't survive
+  // JSON.stringify. Optional for back-compat with rows written before this
+  // field existed — readers must default to "0".
+  totalEarnedRaw?: string;
   registeredAt: string;
 }
 

@@ -195,33 +195,41 @@ export default function AgentDetail() {
 }
 
 function AgentTasks({ agentWallet }: { agentWallet?: string }) {
-  const [tasks, setTasks] = useState<Array<{ taskId: string; category: string; status: number; reward: string }>>([]);
+  type Execution = {
+    meta: { taskId: string; requiredCapabilities?: string[] };
+    state: { status: string; acceptedAt?: string; verificationResult?: { passed: boolean } };
+  };
+  const [executions, setExecutions] = useState<Execution[]>([]);
 
   useEffect(() => {
     if (!agentWallet) return;
-    get<{ tasks?: Array<{ taskId: string; category: string; status: number; reward: string; worker?: string; agent?: string }> }>(
-      `/api/v1/tasks?limit=50`,
-    )
-      .then(data => {
-        setTasks((data.tasks ?? []).filter(t =>
-          t.worker?.toLowerCase() === agentWallet.toLowerCase() || t.agent?.toLowerCase() === agentWallet.toLowerCase()
-        ));
-      })
+    // Hits /a2a/executions filtered by agent wallet (not the owner EOA). The
+    // old code queried /api/v1/tasks which only returns currently-open tasks,
+    // so completed runs by this agent never appeared.
+    get<{ executions?: Execution[] }>(`/api/v1/a2a/executions?address=${agentWallet}`)
+      .then(data => setExecutions(data.executions ?? []))
       .catch(() => { /* leave empty */ });
   }, [agentWallet]);
 
-  const STATUS: Record<number, string> = { 0: 'funded', 1: 'assigned', 2: 'submitted', 3: 'verified', 4: 'completed', 5: 'cancelled', 6: 'disputed' };
+  if (executions.length === 0) return <div className="text-xs font-mono text-ink-3 py-8 text-center">no tasks yet</div>;
 
-  if (tasks.length === 0) return <div className="text-xs font-mono text-ink-3 py-8 text-center">no tasks yet</div>;
+  // Most-recent first by acceptedAt; falls back to insertion order when
+  // timestamps are missing (older state rows pre-acceptedAt field).
+  const sorted = [...executions].sort((a, b) => {
+    const ta = a.state.acceptedAt ? Date.parse(a.state.acceptedAt) : 0;
+    const tb = b.state.acceptedAt ? Date.parse(b.state.acceptedAt) : 0;
+    return tb - ta;
+  });
 
   return (
     <div className="space-y-2">
-      {tasks.map(t => (
-        <div key={t.taskId} className="flex items-center justify-between border border-line px-4 py-3 text-xs font-mono">
-          <span className="text-ink-3">#{t.taskId}</span>
-          <span className="text-ink">{t.category}</span>
-          <span className="text-ink-3">{STATUS[t.status] ?? t.status}</span>
-          <span className="text-cream">${(BigInt(t.reward ?? '0') / 10n ** 18n).toString()} USDC</span>
+      {sorted.map(e => (
+        <div key={e.meta.taskId} className="flex items-center justify-between border border-line px-4 py-3 text-xs font-mono">
+          <span className="text-ink-3">{e.meta.taskId.slice(0, 10)}…</span>
+          <span className="text-ink">{(e.meta.requiredCapabilities ?? []).join(', ') || '—'}</span>
+          <span className={e.state.status === 'verified' ? 'text-ok' : e.state.status === 'failed' ? 'text-red-400' : 'text-ink-3'}>
+            {e.state.status}
+          </span>
         </div>
       ))}
     </div>

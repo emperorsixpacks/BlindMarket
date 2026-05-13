@@ -9,6 +9,7 @@ import { autoVerify } from '../services/autoVerify.js';
 import { settleAssignment, settleVerification } from '../services/a2aSettlement.js';
 import { getTaskIdByHash } from '../services/escrowEvents.js';
 import * as escrowService from '../services/escrow.js';
+import * as accountingService from '../services/accountingService.js';
 import { provider } from '../services/chain.js';
 import { ethers } from 'ethers';
 import type { AuthRequest, ApiResponse, AgentCapability } from '../types.js';
@@ -41,6 +42,76 @@ const verifySchema = z.object({
   passed: z.boolean(),
   reasons: z.array(z.string()).max(20).optional(),
 });
+
+// Cache the on-chain feeBps for the duration of the process. Fee changes are
+// admin-gated and rare; one stale read per restart is fine. Falls back to 1500
+// (15%) — the documented default in CLAUDE.md — if the RPC is unreachable.
+let cachedFeeBps: number | null = null;
+async function getFeeBps(): Promise<number> {
+  if (cachedFeeBps !== null) return cachedFeeBps;
+  try {
+    cachedFeeBps = await escrowService.feeBps();
+  } catch (err) {
+    console.warn('[a2a] feeBps RPC read failed, falling back to 1500:', (err as Error).message);
+    cachedFeeBps = 1500;
+  }
+  return cachedFeeBps;
+}
+
+/**
+ * Record a successful task completion on the executor's record: bump
+ * tasksCompleted, reputation, and totalEarnedRaw by the worker's share of the
+ * escrow (amount minus platform fee). Idempotent at the route level — only
+ * called from auto-/verify success branches, each of which checks state isn't
+ * already 'verified' before transitioning.
+ *
+ * Persists to Redis (agentStore) so the /agents endpoint can surface these
+ * stats to the UI without re-deriving from on-chain history. If anything in
+ * here fails we log + continue: settleVerification still fires and the worker
+ * still gets paid on chain — only the UI counter is at risk.
+ */
+async function recordWorkerPayout(taskHash: string, executorAddr: string): Promise<void> {
+  try {
+    const agent = await agentStore.getAgent(executorAddr);
+    if (!agent) return;
+    agent.tasksCompleted += 1;
+    agent.reputation = Math.min(100, agent.reputation + 1);
+
+    const onChainId = await getTaskIdByHash(taskHash);
+    if (onChainId) {
+      const task = await escrowService.getTask(Number(onChainId));
+      const feeBps = await getFeeBps();
+      const workerShare = (task.amount * (10_000n - BigInt(feeBps))) / 10_000n;
+      const platformFee = task.amount - workerShare;
+      const prev = BigInt(agent.totalEarnedRaw ?? '0');
+      agent.totalEarnedRaw = (prev + workerShare).toString();
+
+      // Mirror the payout into the accounting ledger so the Earnings page can
+      // surface it. USDC has 6 decimals, so micro-units → float USD = /1e6.
+      // Safe up to ~9e15 micro-units (Number.MAX_SAFE_INTEGER), i.e. ~$9B —
+      // more than fine for testnet payouts.
+      try {
+        accountingService.recordTransaction({
+          address: executorAddr.toLowerCase(),
+          role: 'worker',
+          taskId: onChainId,
+          type: 'payment',
+          amount: Number(workerShare) / 1_000_000,
+          fee: Number(platformFee) / 1_000_000,
+          net: Number(workerShare) / 1_000_000,
+          status: 'confirmed',
+        });
+      } catch (acctErr) {
+        console.warn(`[a2a] accounting recordTransaction failed for ${taskHash.slice(0, 10)}…:`, (acctErr as Error).message);
+      }
+    } else {
+      console.warn(`[a2a] recordWorkerPayout: hash ${taskHash.slice(0, 10)}… not indexed yet; tasksCompleted bumped but totalEarnedRaw untouched`);
+    }
+    await agentStore.registerAgent(agent);
+  } catch (err) {
+    console.error(`[a2a] recordWorkerPayout failed for ${taskHash.slice(0, 10)}… executor=${executorAddr}:`, (err as Error).message);
+  }
+}
 
 // POST /tasks/:id/wrap-to — poster pushes ECIES-wrapped AES slices to new
 // bidders that registered after the task was posted. Address keys are EOA
@@ -527,12 +598,7 @@ a2aRouter.post('/tasks/:id/finalize', requireAuth, async (req: AuthRequest, res,
     });
 
     if (verificationResult.passed) {
-      const agent = await agentStore.getAgent(address);
-      if (agent) {
-        agent.tasksCompleted += 1;
-        agent.reputation = Math.min(100, agent.reputation + 1);
-        await agentStore.registerAgent(agent);
-      }
+      await recordWorkerPayout(taskHash, address);
     }
 
     // Fire-and-forget bridge call: marketplace signer calls completeVerification
@@ -594,12 +660,7 @@ a2aRouter.post('/tasks/:id/verify', requireAuth, async (req: AuthRequest, res, n
     });
 
     if (passed && state.executorAddress) {
-      const agent = await agentStore.getAgent(state.executorAddress);
-      if (agent) {
-        agent.tasksCompleted += 1;
-        agent.reputation = Math.min(100, agent.reputation + 1);
-        await agentStore.registerAgent(agent);
-      }
+      await recordWorkerPayout(taskHash, state.executorAddress);
     }
 
     // Bridge: marketplace signer calls completeVerification on chain. Assumes
@@ -642,11 +703,20 @@ a2aRouter.get('/tasks/posted', requireAuth, async (req: AuthRequest, res, next) 
 
 /**
  * GET /api/v1/a2a/executions
- * List my accepted/completed tasks.
+ *
+ * Default: list the authed caller's accepted/completed tasks (executor view).
+ * Pass `?address=0x…` to list a specific executor's history — used by the
+ * agent-detail dashboard, where the viewer is the owner EOA but the executor
+ * record lives on the agent's separate wallet address. The list is essentially
+ * public (all task state is on chain anyway), so we don't gate by ownership.
  */
 a2aRouter.get('/executions', requireAuth, async (req: AuthRequest, res, next) => {
   try {
-    const address = req.user!.address;
+    const queryAddr = (req.query.address as string | undefined)?.trim();
+    if (queryAddr && !/^0x[0-9a-fA-F]{40}$/.test(queryAddr)) {
+      throw new AppError(400, 'BAD_ADDRESS', 'address must be a 0x-prefixed 40-char hex string');
+    }
+    const address = queryAddr ?? req.user!.address;
     const tasks = await a2aStore.getExecutorTasks(address);
 
     const body: ApiResponse = {

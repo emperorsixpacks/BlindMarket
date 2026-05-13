@@ -99,10 +99,17 @@ export function getSummary(address: string, from?: string, to?: string): Transac
   let netRevenue = 0;
   let taskCount = 0;
 
+  // Only payment-shaped rows ('payment' = worker payout, 'stake_return' =
+  // refund of an earlier stake) count toward earnings/revenue/task count.
+  // escrow_lock + refund + stake are CASH MOVEMENTS the user originated, not
+  // INCOME — including them previously made escrow locks display as
+  // "+$1,009.98 NET REVENUE" on the earnings page, which is the opposite of
+  // what the user wants to see (they actually spent that, not earned it).
+  const INCOME_TYPES = new Set(['payment', 'stake_return']);
+
   for (const row of rows) {
-    if (row.type === 'payment' || row.type === 'stake_return') {
-      totalEarned += row.total_amount;
-    }
+    if (!INCOME_TYPES.has(row.type)) continue;
+    totalEarned += row.total_amount;
     totalFees += row.total_fee;
     netRevenue += row.total_net;
     taskCount += row.cnt;
