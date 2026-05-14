@@ -1,11 +1,21 @@
 import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import { useAccount, useBalance } from 'wagmi';
+import { useAccount, useBalance, useWalletClient } from 'wagmi';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { BrowserProvider, parseEther } from 'ethers';
 import { Breadcrumb, PageHeader, SectionRule, Tag, StatCard } from '../components/bb';
 import { truncateAddress } from '../lib/utils';
 import { get, post, patch } from '../lib/api';
 import { API_BASE_URL } from '../config/constants';
+
+// Top-up amount when the agent runs low on gas. Same default as the deploy
+// funding step — round trip + LLM call + submitEvidence costs ~0.0004 0G, so
+// 0.05 0G covers ~125 tasks before the next top-up.
+const TOP_UP_AMOUNT = '0.05';
+
+// Below this the agent can't reliably pay for a submitEvidence + a USDC sweep
+// tx. UI surfaces a "Top Up Gas" call to action when balance is under this.
+const LOW_GAS_THRESHOLD = 0.005;
 
 interface AgentTool { type: string; name: string; description: string; url?: string; endpointUrl?: string; method?: string; toolName?: string; }
 interface AgentDetails {
@@ -22,6 +32,7 @@ const STATUS_TONE: Record<string, 'ok' | 'warn' | 'err' | 'neutral'> = {
 export default function AgentDetail() {
   const { id } = useParams<{ id: string }>();
   const { address } = useAccount();
+  const { data: walletClient } = useWalletClient();
   const qc = useQueryClient();
 
   const [agent, setAgent] = useState<AgentDetails | null>(null);
@@ -33,10 +44,20 @@ export default function AgentDetail() {
   const [editInstructions, setEditInstructions] = useState('');
   const [editModel, setEditModel] = useState('');
 
-  const { data: balance } = useBalance({
+  // Gas-management UI state — separate from the agent's start/pause/stop
+  // actions so the buttons can show their own progress without interfering.
+  const [topUpStatus, setTopUpStatus] = useState<'idle' | 'sending' | 'error'>('idle');
+  const [topUpError, setTopUpError] = useState('');
+  const [recoverStatus, setRecoverStatus] = useState<'idle' | 'sending' | 'done' | 'error'>('idle');
+  const [recoverInfo, setRecoverInfo] = useState<{ txHash: string; amount: string } | null>(null);
+  const [recoverError, setRecoverError] = useState('');
+
+  const { data: balance, refetch: refetchBalance } = useBalance({
     address: agent?.walletAddress as `0x${string}` | undefined,
     query: { enabled: !!agent?.walletAddress },
   });
+  const balanceEther = balance ? parseFloat(balance.formatted) : 0;
+  const isLowGas = !!balance && balanceEther < LOW_GAS_THRESHOLD;
 
   useEffect(() => {
     if (!id) return;
@@ -75,6 +96,50 @@ export default function AgentDetail() {
     onSuccess: (data) => { setAgent(data); setTab('logs'); },
   });
 
+  // Owner-signed 0G transfer from owner wallet → agent wallet. No backend
+  // involvement; same primitive as the deploy-funding step. We refresh the
+  // useBalance hook after the tx confirms so the UI tile updates immediately
+  // instead of waiting on a poll cycle.
+  async function handleTopUp() {
+    if (!address || !walletClient || !agent?.walletAddress) return;
+    setTopUpStatus('sending');
+    setTopUpError('');
+    try {
+      const provider = new BrowserProvider(walletClient.transport);
+      const signer = await provider.getSigner();
+      const tx = await signer.sendTransaction({
+        to: agent.walletAddress,
+        value: parseEther(TOP_UP_AMOUNT),
+      });
+      await tx.wait();
+      await refetchBalance();
+      setTopUpStatus('idle');
+    } catch (err) {
+      setTopUpError((err as Error).message || 'top-up failed');
+      setTopUpStatus('error');
+    }
+  }
+
+  // Backend signs the sweep tx using the agent's stored rawPrivateKey and
+  // sends the wallet's balance (minus a small gas reserve) back to the owner.
+  // Only valid when the agent is stopped — sweeping a running agent would
+  // race with its in-flight submitEvidence txs.
+  async function handleRecoverFunds() {
+    if (!address || !id) return;
+    if (!confirm(`Recover remaining 0G from this agent's wallet back to ${address.slice(0, 8)}…? This cannot be undone.`)) return;
+    setRecoverStatus('sending');
+    setRecoverError('');
+    try {
+      const data = await post<{ txHash: string; amountSent: string; recipient: string }>(`/api/v1/agents/${id}/recover-funds`, { ownerAddress: address });
+      setRecoverInfo({ txHash: data.txHash, amount: data.amountSent });
+      setRecoverStatus('done');
+      await refetchBalance();
+    } catch (err) {
+      setRecoverError((err as Error).message || 'recover failed');
+      setRecoverStatus('error');
+    }
+  }
+
   if (loading) return <div className="text-xs font-mono text-ink-3 py-20 text-center">loading…</div>;
   if (!agent) return <div className="text-xs font-mono text-ink-3 py-20 text-center">agent not found</div>;
 
@@ -105,11 +170,49 @@ export default function AgentDetail() {
         </div>
       )}
 
-      <div className="grid grid-cols-3 gap-0 border border-line mb-8">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-0 border border-line mb-2">
         <StatCard label="tasks completed" value={String(agent.tasksCompleted ?? 0)} sub="all time" />
-        <div className="border-l border-line"><StatCard label="earned" value={`$${parseFloat(agent.totalEarned ?? '0').toFixed(2)}`} sub="USDC" subColor="ok" /></div>
-        <div className="border-l border-line"><StatCard label="wallet balance" value={balance ? parseFloat(balance.formatted).toFixed(4) : '—'} sub={balance?.symbol ?? '0G'} /></div>
+        <div className="border-t sm:border-t-0 sm:border-l border-line"><StatCard label="earned" value={`$${parseFloat(agent.totalEarned ?? '0').toFixed(2)}`} sub="USDC" subColor="ok" /></div>
+        <div className="border-t sm:border-t-0 sm:border-l border-line"><StatCard label="wallet balance" value={balance ? parseFloat(balance.formatted).toFixed(4) : '—'} sub={isLowGas ? 'low gas — top up' : (balance?.symbol ?? '0G')} subColor={isLowGas ? 'warn' : undefined} /></div>
       </div>
+
+      {/* Gas management — only relevant to the agent owner. Top Up nudges any
+          agent whose wallet is below threshold; Recover Funds sweeps remaining
+          balance back to the owner once the agent is stopped. */}
+      {isOwner && agent.walletAddress && (
+        <div className="border border-line border-t-0 mb-8 px-4 py-3 flex flex-wrap items-center gap-3 text-[11px] font-mono">
+          <span className="text-ink-3">gas:</span>
+          <button
+            onClick={handleTopUp}
+            disabled={topUpStatus === 'sending'}
+            className={`px-3 py-1.5 border transition-colors disabled:opacity-40 ${
+              isLowGas
+                ? 'border-yellow-400 text-yellow-400 hover:bg-yellow-400 hover:text-bg'
+                : 'border-line text-ink-3 hover:border-cream hover:text-cream'
+            }`}>
+            {topUpStatus === 'sending' ? `sending ${TOP_UP_AMOUNT} 0G…` : `top up gas (+${TOP_UP_AMOUNT} 0G)`}
+          </button>
+          {topUpStatus === 'error' && <span className="text-red-400">{topUpError}</span>}
+
+          {agent.status === 'stopped' && (
+            <button
+              onClick={handleRecoverFunds}
+              disabled={recoverStatus === 'sending' || balanceEther < 0.0015}
+              className="px-3 py-1.5 border border-line text-ink-3 hover:border-red-400 hover:text-red-400 transition-colors disabled:opacity-40">
+              {recoverStatus === 'sending' ? 'sweeping…' : 'recover funds → owner'}
+            </button>
+          )}
+          {recoverStatus === 'done' && recoverInfo && (
+            <span className="text-green-400">
+              swept {parseFloat(recoverInfo.amount).toFixed(4)} 0G · tx {recoverInfo.txHash.slice(0, 10)}…
+            </span>
+          )}
+          {recoverStatus === 'error' && <span className="text-red-400">{recoverError}</span>}
+          {isLowGas && agent.status !== 'stopped' && (
+            <span className="text-yellow-400">⚠ agent will fail to submit evidence below {LOW_GAS_THRESHOLD} 0G</span>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-6">
         {/* Identity */}
@@ -126,11 +229,12 @@ export default function AgentDetail() {
 
         {/* Tabbed right panel */}
         <div className="border border-line flex flex-col">
-          {/* Tabs */}
-          <div className="flex flex-wrap border-b border-line">
+          {/* Tabs — single-row scroll on narrow viewports so they never wrap into
+              a broken-looking two-line bar. snap-x keeps tap targets aligned. */}
+          <div className="flex border-b border-line overflow-x-auto snap-x scrollbar-thin">
             {(['logs', 'tools', 'tasks', ...(isOwner ? ['edit'] : [])] as const).map(t => (
               <button key={t} onClick={() => setTab(t as typeof tab)}
-                className={`flex-1 min-w-[80px] px-3 sm:px-5 py-3 text-[11px] font-mono uppercase tracking-widest border-r border-line transition-colors ${tab === t ? 'text-cream bg-surface-2' : 'text-ink-3 hover:text-ink hover:bg-surface-2'}`}>
+                className={`flex-1 sm:flex-1 shrink-0 snap-start min-w-[88px] px-4 sm:px-5 py-3 text-[11px] font-mono uppercase tracking-widest border-r border-line transition-colors ${tab === t ? 'text-cream bg-surface-2' : 'text-ink-3 hover:text-ink hover:bg-surface-2'}`}>
                 {t}
               </button>
             ))}

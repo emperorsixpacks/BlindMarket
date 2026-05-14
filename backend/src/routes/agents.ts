@@ -7,6 +7,8 @@ import {
 } from '../services/agentRunner.js';
 import { getDecayedReputation } from '../services/reputationDecay.js';
 import * as agentStore from '../services/agentStore.js';
+import { ethers } from 'ethers';
+import { provider } from '../services/chain.js';
 
 export const agentsRouter = Router();
 
@@ -151,6 +153,70 @@ agentsRouter.post('/:id/export-key', async (req, res) => {
     res.status(403).json({ success: false, error: 'Forbidden' }); return;
   }
   res.json({ success: true, data: { agentId: agent.id, walletAddress: agent.walletAddress, encryptedPrivateKey: agent.encryptedPrivateKey } });
+});
+
+// POST /api/v1/agents/:id/recover-funds
+//
+// Sweeps the agent wallet's native 0G balance back to the owner. Used when the
+// owner stops/decommissions an agent and wants their gas budget back. Backend
+// holds rawPrivateKey for the agent so it can sign the sweep directly — no
+// owner signature involved. Owner identity is verified by matching the
+// supplied ownerAddress against the stored agent.ownerAddress.
+//
+// Leaves a small reserve (`GAS_RESERVE`) untouched to cover the sweep tx
+// itself plus a margin — sending the *exact* balance would revert with
+// "insufficient funds for gas".
+agentsRouter.post('/:id/recover-funds', async (req, res) => {
+  try {
+    const agent = await getAgent(req.params.id);
+    if (!agent) { res.status(404).json({ success: false, error: 'Not found' }); return; }
+    const { ownerAddress } = req.body as { ownerAddress?: string };
+    if (!ownerAddress || ownerAddress.toLowerCase() !== agent.ownerAddress.toLowerCase()) {
+      res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Only the agent owner can recover funds' } });
+      return;
+    }
+    if (!agent.rawPrivateKey) {
+      res.status(409).json({ success: false, error: { code: 'NO_KEY', message: 'Agent has no raw private key on record; cannot sign sweep' } });
+      return;
+    }
+
+    const wallet = new ethers.Wallet(
+      agent.rawPrivateKey.startsWith('0x') ? agent.rawPrivateKey : `0x${agent.rawPrivateKey}`,
+      provider,
+    );
+    const balance = await provider.getBalance(wallet.address);
+    // Reserve covers the sweep tx itself (21k gas) plus a fat margin to absorb
+    // any gas-price spike between balance read and tx mine. 0.001 0G ≈ 5x what
+    // a basic transfer costs at 4 gwei.
+    const GAS_RESERVE = ethers.parseEther('0.001');
+    if (balance <= GAS_RESERVE) {
+      res.status(409).json({
+        success: false,
+        error: {
+          code: 'BALANCE_TOO_LOW',
+          message: `Agent wallet balance (${ethers.formatEther(balance)} 0G) is below the gas reserve required to sweep`,
+        },
+      });
+      return;
+    }
+    const sendAmount = balance - GAS_RESERVE;
+    const tx = await wallet.sendTransaction({ to: agent.ownerAddress, value: sendAmount });
+    const receipt = await tx.wait();
+    res.json({
+      success: true,
+      data: {
+        txHash: tx.hash,
+        amountSent: ethers.formatEther(sendAmount),
+        recipient: agent.ownerAddress,
+        blockNumber: receipt?.blockNumber,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      error: { code: 'RECOVER_FAILED', message: (err as Error).message },
+    });
+  }
 });
 
 // PATCH /api/v1/agents/:id

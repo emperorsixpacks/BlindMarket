@@ -1,9 +1,22 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAccount, useWalletClient } from 'wagmi';
+import { useAccount, useWalletClient, useBalance } from 'wagmi';
 import { recoverPublicKey, hashMessage } from 'viem';
+import { BrowserProvider, parseEther, formatEther } from 'ethers';
 import { Breadcrumb, PageHeader, SectionRule } from '../components/bb';
 import { get, post } from '../lib/api';
+
+// How much native 0G to send to a freshly-deployed agent wallet so it can pay
+// gas for its on-chain actions (submitEvidence, USDC sweep, etc). 0.05 0G
+// covers ~125 submitEvidence txs at current gas prices — enough for a
+// reasonable demo session without burning a full faucet drip.
+const DEPLOY_FUND_AMOUNT = '0.05';
+
+// Minimum owner balance to even attempt deploy: fund amount + buffer for the
+// transfer's own gas cost. If the owner's wallet is below this we disable the
+// Deploy button and direct them to the faucet first — better than letting
+// them deploy an agent that immediately fails for lack of gas.
+const MIN_OWNER_BALANCE = '0.06';
 
 type Provider = 'openai' | 'anthropic' | 'groq' | 'gemini';
 type ProviderModels = Record<Provider, string[]>;
@@ -45,9 +58,20 @@ export default function DeployAgentForm() {
   const [newTool, setNewTool] = useState<Tool>({ type: 'http', name: '', description: '', url: '', method: 'POST', authType: 'none', authValue: '', authHeader: 'X-API-Key' });
   const [showToolForm, setShowToolForm] = useState(false);
 
-  const [status, setStatus] = useState<'idle' | 'deploying' | 'done' | 'error'>('idle');
+  const [status, setStatus] = useState<'idle' | 'deploying' | 'funding' | 'done' | 'error'>('idle');
   const [error, setError] = useState('');
   const [agentId, setAgentId] = useState('');
+  const [fundingSkipped, setFundingSkipped] = useState(false);
+
+  // Owner balance gates the deploy button. Without enough 0G to fund the new
+  // agent the whole flow stalls at step 2, so we check up front instead of
+  // letting the user discover the problem after they've signed step 1.
+  const { data: ownerBalance } = useBalance({
+    address: address as `0x${string}` | undefined,
+    query: { enabled: !!address },
+  });
+  const ownerBalanceEther = ownerBalance ? parseFloat(formatEther(ownerBalance.value)) : 0;
+  const hasEnoughForDeploy = ownerBalanceEther >= parseFloat(MIN_OWNER_BALANCE);
 
   useEffect(() => {
     get<ProviderModels>('/api/v1/agents/providers')
@@ -75,15 +99,20 @@ export default function DeployAgentForm() {
     if (!address || !walletClient) return;
     setStatus('deploying');
     setError('');
+    setFundingSkipped(false);
     try {
-      // Derive the secp256k1 public key by recovering it from a signed message
+      // Step 1 — derive owner's secp256k1 pubkey via message signature. Used by
+      // the backend to ECIES-encrypt the agent's private key for at-rest
+      // storage. Free (no gas), just one wallet popup.
       const msg = `BlindMarket agent deployment\nOwner: ${address}`;
       const sig = await walletClient.signMessage({ message: msg });
       const recovered = await recoverPublicKey({ hash: hashMessage(msg), signature: sig });
       // viem returns 0x04... — strip 0x for backend
       const ownerPublicKey = recovered.replace(/^0x/, '');
 
-      const data = await post<{ id: string }>('/api/v1/agents/deploy', {
+      // Step 2 — register the agent server-side. Backend mints the agent's
+      // wallet + INFT and returns walletAddress so we can fund it.
+      const data = await post<{ id: string; walletAddress?: string }>('/api/v1/agents/deploy', {
         ...form,
         ownerAddress: address,
         ownerPublicKey,
@@ -99,6 +128,37 @@ export default function DeployAgentForm() {
         }),
       });
       setAgentId(data.id);
+
+      // Step 3 — fund the new agent wallet with native 0G so it can pay gas
+      // for its own on-chain actions. The owner signs and broadcasts this
+      // directly — no platform treasury involved. If they reject we still
+      // consider the deploy successful and just flag the agent as unfunded;
+      // they can Top Up later from the agent detail page.
+      if (!data.walletAddress) {
+        // Backend didn't return walletAddress — older API or response shape
+        // changed. Treat as success-but-unfunded.
+        console.warn('[deploy] no walletAddress in deploy response, skipping funding step');
+        setFundingSkipped(true);
+        setStatus('done');
+        return;
+      }
+
+      setStatus('funding');
+      try {
+        const provider = new BrowserProvider(walletClient.transport);
+        const signer = await provider.getSigner();
+        const tx = await signer.sendTransaction({
+          to: data.walletAddress,
+          value: parseEther(DEPLOY_FUND_AMOUNT),
+        });
+        await tx.wait();
+      } catch (fundErr) {
+        // Funding rejection is non-fatal — agent record already persists. Let
+        // the user finish the flow and surface the unfunded state on the
+        // success screen so they can Top Up manually.
+        console.warn('[deploy] funding step failed:', (fundErr as Error).message);
+        setFundingSkipped(true);
+      }
       setStatus('done');
     } catch (err) {
       setError((err as Error).message);
@@ -114,11 +174,28 @@ export default function DeployAgentForm() {
           <div className="text-xs font-mono text-green-400 uppercase tracking-widest">✓ agent deployed</div>
           <div className="text-xs font-mono text-ink-3">agent id: {agentId}</div>
           <div className="text-xs font-mono text-ink-3">on-chain wallet minted · INFT identity created</div>
+          {fundingSkipped ? (
+            <div className="mx-auto max-w-md border border-yellow-600/40 bg-yellow-900/10 px-4 py-3 text-[11px] font-mono text-yellow-400 text-left space-y-1">
+              <div className="font-semibold">⚠ agent is unfunded</div>
+              <div className="text-ink-3">
+                this agent's wallet has 0 0G and can't submit evidence on-chain. open the
+                agent's page and click "top up gas" to send {DEPLOY_FUND_AMOUNT} 0G from
+                your wallet.
+              </div>
+            </div>
+          ) : (
+            <div className="text-xs font-mono text-green-400">
+              ✓ funded with {DEPLOY_FUND_AMOUNT} 0G for gas
+            </div>
+          )}
           <div className="flex justify-center gap-4 mt-6">
-            <button onClick={() => navigate('/agents/mine')} className="px-4 py-2 border border-cream text-xs font-mono text-cream hover:bg-cream hover:text-bg transition-colors">
-              my agents →
+            <button onClick={() => navigate(`/agents/${agentId}`)} className="px-4 py-2 border border-cream text-xs font-mono text-cream hover:bg-cream hover:text-bg transition-colors">
+              view agent →
             </button>
-            <button onClick={() => { setStatus('idle'); setAgentId(''); }} className="px-4 py-2 border border-line text-xs font-mono text-ink-3 hover:bg-surface-2">
+            <button onClick={() => navigate('/agents/mine')} className="px-4 py-2 border border-line text-xs font-mono text-ink-3 hover:bg-surface-2">
+              my agents
+            </button>
+            <button onClick={() => { setStatus('idle'); setAgentId(''); setFundingSkipped(false); }} className="px-4 py-2 border border-line text-xs font-mono text-ink-3 hover:bg-surface-2">
               deploy another
             </button>
           </div>
@@ -309,15 +386,39 @@ export default function DeployAgentForm() {
           {!address ? (
             <div className="text-xs font-mono text-ink-3">connect wallet to deploy an agent</div>
           ) : (
-            <div className="flex items-center gap-3 flex-wrap">
-              <button type="submit" disabled={status === 'deploying' || capabilities.length === 0}
-                className="px-6 py-3 border border-cream text-xs font-mono text-cream hover:bg-cream hover:text-bg disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
-                {status === 'deploying' ? 'deploying…' : 'deploy agent →'}
-              </button>
-              {capabilities.length === 0 && (
-                <span className="text-[11px] font-mono text-ink-3">pick at least one capability above to continue</span>
+            <>
+              {/* Two-signature heads-up: deploying signs a message (free), then
+                  funds the agent wallet via a real tx. Spelling this out up
+                  front sets popup expectations so people don't bail at step 2. */}
+              <div className="mb-4 border border-line bg-surface-2 px-4 py-3 text-[11px] font-mono text-ink-3 space-y-1">
+                <div className="text-ink uppercase tracking-widest">deployment uses 2 signatures</div>
+                <div>1. sign a message — no gas, derives owner pubkey for encryption</div>
+                <div>2. send {DEPLOY_FUND_AMOUNT} 0G to the new agent wallet — pays for its gas</div>
+                <div className="text-ink-3/70">your wallet balance: {ownerBalance ? `${parseFloat(formatEther(ownerBalance.value)).toFixed(4)} 0G` : '…'}</div>
+              </div>
+
+              {!hasEnoughForDeploy && ownerBalance && (
+                <div className="mb-4 border border-err/40 bg-err/5 px-4 py-3 text-[11px] font-mono text-err space-y-1">
+                  <div className="font-semibold">⚠ not enough 0G to fund the agent</div>
+                  <div className="text-ink-3">
+                    you need at least {MIN_OWNER_BALANCE} 0G (fund amount + gas for the
+                    transfer). top up your wallet at{' '}
+                    <a href="https://faucet.0g.ai" target="_blank" rel="noreferrer" className="text-cream underline">faucet.0g.ai</a>
+                    {' '}then refresh.
+                  </div>
+                </div>
               )}
-            </div>
+
+              <div className="flex items-center gap-3 flex-wrap">
+                <button type="submit" disabled={status === 'deploying' || status === 'funding' || capabilities.length === 0 || !hasEnoughForDeploy}
+                  className="px-6 py-3 border border-cream text-xs font-mono text-cream hover:bg-cream hover:text-bg disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                  {status === 'deploying' ? 'deploying…' : status === 'funding' ? `funding agent with ${DEPLOY_FUND_AMOUNT} 0G…` : 'deploy + fund agent →'}
+                </button>
+                {capabilities.length === 0 && (
+                  <span className="text-[11px] font-mono text-ink-3">pick at least one capability above to continue</span>
+                )}
+              </div>
+            </>
           )}
           {status === 'error' && <div className="mt-3 text-xs font-mono text-red-400">{error}</div>}
         </div>
