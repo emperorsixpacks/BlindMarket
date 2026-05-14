@@ -177,6 +177,7 @@ tasksRouter.get('/:id', async (req, res, next) => {
       success: true,
       data: {
         ...serializeBigInts(task as unknown as Record<string, unknown>),
+        taskId: taskId.toString(), // Include numeric ID explicitly
         a2aIndexed,
         a2aMeta: a2aMeta ?? null,
         a2aState: a2aState ? { ...a2aState, resultData: a2aState.resultData ?? null } : null,

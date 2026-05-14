@@ -479,16 +479,17 @@ async function pollAndWork() {
       log(`LLM finished for ${acceptedTaskHash.slice(0, 10)}… in ${llmElapsed}s (${text.length} chars)`);
       log(`LLM finish reason: ${result.finishReason}`);
       
-      if (result.toolCalls && result.toolCalls.length > 0) {
-        log(`LLM made ${result.toolCalls.length} tool call(s): ${result.toolCalls.map(tc => tc.toolName).join(', ')}`);
+      const toolCalls = result.toolCalls || [];
+      if (toolCalls.length > 0) {
+        log(`LLM made ${toolCalls.length} tool call(s): ${toolCalls.map(tc => `${tc.toolName}(${JSON.stringify(tc.args).slice(0, 50)}…)`).join(', ')}`);
       }
 
       if (text.length === 0) {
         log(`WARNING: LLM returned an empty string. Final result object: ${JSON.stringify({
           finishReason: result.finishReason,
           usage: result.usage,
-          hasToolCalls: result.toolCalls.length > 0,
-          hasToolResults: result.toolResults.length > 0
+          hasToolCalls: toolCalls.length > 0,
+          hasToolResults: (result.toolResults || []).length > 0
         })}`);
       } else {
         log(`LLM response: "${text.slice(0, 200)}${text.length > 200 ? '…' : ''}"`);

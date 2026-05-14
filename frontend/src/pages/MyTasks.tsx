@@ -64,8 +64,11 @@ function formatReward(raw: string | undefined) {
 // Short id for the visible task identifier — we display the on-chain numeric
 // id when available (familiar #42 form), otherwise the truncated hash.
 function shortId(t: PostedTask): string {
-  if (t.onChain) return `#${t.onChain.taskId}`;
-  return `${t.meta.taskId.slice(0, 10)}…`;
+  // Try onChain first, then fallback to meta.taskId (which is also the numeric ID from the registry)
+  const numericId = t.onChain?.taskId || t.meta.taskId;
+  // bytes32 hashes are length 66 (0x + 64 hex chars). Numeric IDs are much shorter.
+  if (numericId && numericId.length < 20) return `#${numericId}`;
+  return `${numericId.slice(0, 10)}…`;
 }
 
 // On-chain ZERO worker = "no one assigned yet". A non-zero, non-poster
