@@ -241,7 +241,7 @@ function buildTools() {
             verificationCriteria: { min_length: 10 },
           }),
         });
-        if (!createRes.ok) return { error: `Failed to create A2A task: ${createRes.status}` };
+        if (!createRes.ok) return `Sub-agent task creation failed: ${createRes.status}`;
         const { data: task } = await createRes.json();
 
         const maxWait = 120_000;
@@ -252,15 +252,15 @@ function buildTools() {
           if (!statusRes.ok) break;
           const { data: state } = await statusRes.json();
           if (state.status === 'verified') {
-            return state.resultData;
+            return `Sub-agent result for task ${task.taskId}: ${JSON.stringify(state.resultData)}`;
           }
           if (state.status === 'failed') {
-            return { error: 'Agent failed to complete task', reasons: state.verificationResult?.reasons };
+            return `Sub-agent task failed: ${JSON.stringify(state.verificationResult?.reasons)}`;
           }
         }
-        return { error: 'Timeout waiting for agent' };
+        return 'Timeout waiting for sub-agent';
       } catch (e) {
-        return { error: e.message };
+        return `Sub-agent error: ${e.message}`;
       }
     },
   });
@@ -470,7 +470,7 @@ async function pollAndWork() {
     try {
       const result = await generateText({
         model: getModel(),
-        system: AGENT_INSTRUCTIONS,
+        system: `${AGENT_INSTRUCTIONS}\n\nIMPORTANT: If you invoke any tools, you MUST synthesize their results into a final text summary. Once you have received tool outputs, do not perform further tool calls. Instead, provide your complete final summary immediately.`,
         prompt: briefPlaintext,
         tools: buildTools(),
         maxSteps: 10,
