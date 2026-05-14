@@ -613,9 +613,28 @@ function sendHeartbeat() {
   }
 }
 
+// Pretty timestamp for log lines. ISO-ish but trimmed to the second so the
+// UI's monospace column stays narrow — `2026-05-14T10:48:05Z` rather than
+// the full millisecond form. We always emit UTC so logs collected from
+// different timezones line up.
+function nowStamp() {
+  return new Date().toISOString().slice(0, 19) + 'Z';
+}
+
+// ANSI colors are useful when a developer tails the worker locally, but the
+// agent runs as a forked child piping stdout to the parent process, which
+// streams it to the browser. Browsers don't interpret terminal escape codes
+// — they render `\x1b[2m` as literal `[2m`. Detect "am I attached to a TTY?"
+// and skip colors when we're not.
+const COLORED = !!process.stdout.isTTY;
+const ANSI_DIM   = COLORED ? '\x1b[2m'  : '';
+const ANSI_CYAN  = COLORED ? '\x1b[36m' : '';
+const ANSI_RESET = COLORED ? '\x1b[0m'  : '';
+
 function log(msg) {
-  const dim = '\x1b[2m', cyan = '\x1b[36m', reset = '\x1b[0m';
-  console.log(`${dim}[agent:${cyan}${AGENT_ID.slice(0, 8)}${reset}${dim}]${reset} ${msg}`);
+  console.log(
+    `${ANSI_DIM}${nowStamp()} [agent:${ANSI_CYAN}${AGENT_ID.slice(0, 8)}${ANSI_RESET}${ANSI_DIM}]${ANSI_RESET} ${msg}`
+  );
 }
 
 function sleep(ms) {

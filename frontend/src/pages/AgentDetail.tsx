@@ -300,9 +300,37 @@ export default function AgentDetail() {
 
           <div className="flex-1 p-5 overflow-y-auto max-h-[520px]">
             {tab === 'logs' && (
-              logs.length > 0 ? logs.map((line, i) => (
-                <div key={i} className={`px-3 py-1.5 text-xs font-mono ${line.includes('[err]') ? 'text-red-400 bg-red-900/10' : 'text-ink-3 hover:bg-surface-2'}`}>{line}</div>
-              )) : (
+              logs.length > 0 ? logs.map((line, i) => {
+                // Strip any leftover ANSI escape sequences from older buffered
+                // log lines (the worker no longer emits them when forked, but
+                // Redis may still hold pre-fix entries until the ring rotates).
+                const clean = line.replace(/\x1b\[[0-9;]*m/g, '');
+
+                // Worker emits each line as `YYYY-MM-DDTHH:MM:SSZ ...`. Pull
+                // out the timestamp so we can render it dimmed and aligned,
+                // making the actual message easier to scan. Lines without a
+                // timestamp (startup errors, legacy entries) just render whole.
+                const tsMatch = clean.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\s+(.*)$/);
+                const isErr = clean.includes('[err]');
+                return (
+                  <div key={i} className={`px-3 py-1.5 text-xs font-mono flex gap-3 ${isErr ? 'text-red-400 bg-red-900/10' : 'text-ink-3 hover:bg-surface-2'}`}>
+                    {tsMatch ? (
+                      <>
+                        {/* Local-time render of the UTC stamp so the time the
+                            user reads matches the wall clock they're looking
+                            at. We keep the iso form in the title for the
+                            "what time was this in UTC?" power use case. */}
+                        <span className="text-ink-3/60 shrink-0" title={tsMatch[1]}>
+                          {new Date(tsMatch[1]).toLocaleTimeString([], { hour12: false })}
+                        </span>
+                        <span className="break-all">{tsMatch[2]}</span>
+                      </>
+                    ) : (
+                      <span className="break-all">{clean}</span>
+                    )}
+                  </div>
+                );
+              }) : (
                 <div className="text-center py-16 text-xs font-mono text-ink-3">
                   {agent.status === 'running' ? 'waiting for logs…' : 'start the agent to see logs'}
                 </div>
