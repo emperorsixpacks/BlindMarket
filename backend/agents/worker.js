@@ -252,7 +252,10 @@ function buildTools() {
           if (!statusRes.ok) break;
           const { data: state } = await statusRes.json();
           if (state.status === 'verified') {
-            return { success: true, result: state.resultData };
+            return { 
+              summary: 'Sub-agent task completed successfully', 
+              result: state.resultData 
+            };
           }
           if (state.status === 'failed') {
             return { error: 'Agent failed to complete task', reasons: state.verificationResult?.reasons };
