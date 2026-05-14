@@ -464,6 +464,9 @@ async function pollAndWork() {
     const llmStartedAt = Date.now();
     
     let text = '';
+    let llmElapsed = '0.0';
+    let toolCalls = [];
+
     try {
       const result = await generateText({
         model: getModel(),
@@ -474,13 +477,14 @@ async function pollAndWork() {
       });
       
       text = result.text;
-      const llmElapsed = ((Date.now() - llmStartedAt) / 1000).toFixed(1);
+      llmElapsed = ((Date.now() - llmStartedAt) / 1000).toFixed(1);
+      toolCalls = result.toolCalls || [];
       
       log(`LLM finished for ${acceptedTaskHash.slice(0, 10)}… in ${llmElapsed}s (${text.length} chars)`);
       log(`LLM finish reason: ${result.finishReason}`);
       
-      if (result.toolCalls && result.toolCalls.length > 0) {
-        log(`LLM made ${result.toolCalls.length} tool call(s): ${result.toolCalls.map(tc => {
+      if (toolCalls.length > 0) {
+        log(`LLM made ${toolCalls.length} tool call(s): ${toolCalls.map(tc => {
             if (!tc) return 'null-tool-call';
             const name = tc.toolName || 'unknown-tool';
             const args = tc.args ? JSON.stringify(tc.args) : 'no-args';
