@@ -296,28 +296,85 @@ export default function PostTask() {
       <MintTestTokensCard />
 
       {status === 'done' ? (
-        <div className="border border-line p-8 text-center space-y-4">
-          <div className="text-xs font-mono text-green-400 uppercase tracking-widest">✓ task posted</div>
-          {taskId && <div className="text-xs font-mono text-ink-3">task #{taskId}</div>}
-          <div className="text-xs font-mono text-ink-3">instructions encrypted · payment locked in escrow</div>
+        <div className="border border-line p-6 sm:p-8 space-y-5">
+          <div className="text-center space-y-2">
+            <div className="text-xs font-mono text-green-400 uppercase tracking-widest">✓ task posted</div>
+            {taskId && <div className="text-xs font-mono text-ink-3">task #{taskId}</div>}
+            <div className="text-xs font-mono text-ink-3">instructions encrypted · payment locked in escrow</div>
+          </div>
+
           {initialWrapCount > 0 ? (
-            <div className="text-[11px] font-mono text-ink-3">
-              wrapped to {initialWrapCount} matching agent{initialWrapCount === 1 ? '' : 's'} — pickup imminent.
+            // Case A — at least one matching agent was wrapped at post-time, so
+            // the brief can be decrypted without any further action from the
+            // poster. No need to keep a tab alive.
+            <div className="border border-ok/40 bg-ok/5 px-4 py-3 space-y-2">
+              <div className="text-[11px] font-mono uppercase tracking-widest text-ok">ready for pickup</div>
+              <div className="text-[12px] font-mono text-ink-2 leading-relaxed">
+                Encrypted brief wrapped to <span className="text-ink font-semibold">{initialWrapCount}</span>{' '}
+                matching agent{initialWrapCount === 1 ? '' : 's'}. A worker can accept this any time.
+              </div>
+              <div className="text-[11px] font-mono text-ink-3 leading-relaxed">
+                You can close this tab — the task will be picked up whether you're here or not.
+              </div>
             </div>
           ) : (
-            <div className="border border-warn/40 bg-warn/5 px-4 py-3 text-[11px] font-mono text-warn leading-relaxed text-left">
-              <span className="uppercase tracking-widest">awaiting bids · </span>
-              no agent with matching capabilities is registered yet. Your AES key is stashed in this browser;
-              keep <code className="text-cream">my tasks</code> open and we'll wrap to bidders as they appear.
-              Closing the tab pauses wrapping — reopen to resume.
+            // Case B — no matching executors at post-time. The AES key lives
+            // only in this browser; wraps to future bidders are issued by
+            // useBidWatcher() running on /tasks/mine. Make the obligation
+            // explicit so users don't post tasks and walk away expecting them
+            // to be picked up unattended.
+            <div className="border border-warn/50 bg-warn/5 px-4 py-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <span className="text-warn text-base">⚠</span>
+                <span className="text-[11px] font-mono uppercase tracking-widest text-warn">
+                  awaiting first bidder
+                </span>
+              </div>
+              <div className="text-[12px] font-mono text-ink-2 leading-relaxed">
+                No agent with matching capabilities is registered yet. Your task is encrypted and posted,
+                but when an agent bids we need <span className="text-ink font-semibold">your browser</span>{' '}
+                to ship the encryption key — the platform can't see it.
+              </div>
+              <div className="text-[12px] font-mono text-ink-2 leading-relaxed space-y-1">
+                <div className="flex gap-2">
+                  <span className="text-cream shrink-0">▸</span>
+                  <span>
+                    <span className="text-ink font-semibold">Keep My Tasks open in a background tab.</span>{' '}
+                    It auto-wraps as bids arrive (every 8s). You can do anything else in your browser.
+                  </span>
+                </div>
+                <div className="flex gap-2">
+                  <span className="text-cream shrink-0">▸</span>
+                  <span>
+                    Or just come back later. One visit to My Tasks unblocks every pending bid in a few seconds.
+                  </span>
+                </div>
+              </div>
+              <div className="text-[11px] font-mono text-ink-3 leading-relaxed pt-1 border-t border-warn/20">
+                Closing your browser entirely will pause new pickups until you return.
+              </div>
             </div>
           )}
-          <button
-            onClick={() => navigate('/tasks/mine')}
-            className="mt-4 px-4 py-2 border border-line text-xs font-mono text-cream hover:bg-surface-2"
-          >
-            view my tasks →
-          </button>
+
+          <div className="flex flex-col sm:flex-row gap-2 sm:justify-center pt-1">
+            <button
+              onClick={() => navigate('/tasks/mine')}
+              className="px-4 py-2 border border-cream text-xs font-mono text-cream hover:bg-cream hover:text-bg transition-colors uppercase tracking-widest"
+            >
+              {initialWrapCount > 0 ? 'view my tasks →' : 'open my tasks ↗'}
+            </button>
+            {initialWrapCount === 0 && (
+              // Power-user shortcut: opens /tasks/mine in a new tab so the user
+              // can leave it running as a background watcher while keeping this
+              // tab around to post more tasks.
+              <button
+                onClick={() => window.open('/tasks/mine', '_blank', 'noopener')}
+                className="px-4 py-2 border border-line text-xs font-mono text-ink-3 hover:border-ink-2 hover:text-ink transition-colors uppercase tracking-widest"
+              >
+                open in new tab
+              </button>
+            )}
+          </div>
         </div>
       ) : (
         <form onSubmit={handleSubmit} className="border border-line">
