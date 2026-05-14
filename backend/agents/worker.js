@@ -479,12 +479,23 @@ async function pollAndWork() {
       log(`LLM finished for ${acceptedTaskHash.slice(0, 10)}… in ${llmElapsed}s (${text.length} chars)`);
       log(`LLM finish reason: ${result.finishReason}`);
       
-      const toolCalls = result.toolCalls || [];
-      if (toolCalls.length > 0) {
-        log(`LLM made ${toolCalls.length} tool call(s): ${toolCalls.map(tc => {
-            const args = tc.args ? JSON.stringify(tc.args).slice(0, 50) : 'undefined';
-            return `${tc.toolName}(${args}…)`;
+      if (result.toolCalls && result.toolCalls.length > 0) {
+        log(`LLM made ${result.toolCalls.length} tool call(s): ${result.toolCalls.map(tc => {
+            if (!tc) return 'null-tool-call';
+            const name = tc.toolName || 'unknown-tool';
+            const args = tc.args ? JSON.stringify(tc.args) : 'no-args';
+            const argsPreview = args.length > 50 ? args.slice(0, 50) + '…' : args;
+            return `${name}(${argsPreview})`;
         }).join(', ')}`);
+      }
+
+      if (result.toolResults && result.toolResults.length > 0) {
+        log(`LLM received ${result.toolResults.length} tool result(s).`);
+        for (const tr of result.toolResults) {
+            if (tr.isError) {
+                log(`ERROR in tool ${tr.toolName}: ${JSON.stringify(tr.result)}`);
+            }
+        }
       }
 
       if (text.length === 0 && toolCalls.length === 0) {
