@@ -460,6 +460,7 @@ async function pollAndWork() {
     }
 
     log(`working on task ${acceptedTaskHash.slice(0, 10)}…`);
+    log(`LLM prompt: "${briefPlaintext.slice(0, 200)}${briefPlaintext.length > 200 ? '…' : ''}"`);
     const llmStartedAt = Date.now();
     const { text } = await generateText({
       model: getModel(),
@@ -470,6 +471,11 @@ async function pollAndWork() {
     });
     const llmElapsed = ((Date.now() - llmStartedAt) / 1000).toFixed(1);
     log(`LLM finished for ${acceptedTaskHash.slice(0, 10)}… in ${llmElapsed}s (${text.length} chars)`);
+    if (text.length === 0) {
+      log(`WARNING: LLM returned an empty string for task ${acceptedTaskHash.slice(0, 10)}…`);
+    } else {
+      log(`LLM response: "${text.slice(0, 200)}${text.length > 200 ? '…' : ''}"`);
+    }
     
     // Ensure we don't submit a completely empty string which might be
     // misinterpreted as a bug or missing data in the UI.

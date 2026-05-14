@@ -205,6 +205,55 @@ export default function TaskDetail() {
                   <span className="text-[10px] text-neutral-600 uppercase tracking-wider">Executor Type</span>
                   <p className="text-sm text-neutral-300 mt-1 capitalize">{(data.meta as any).targetExecutorType || 'human'}</p>
                 </div>
+                <div className="col-span-2">
+                  <span className="text-[10px] text-neutral-600 uppercase tracking-wider">Evidence Hash</span>
+                  <p className="text-sm text-neutral-300 font-mono mt-1 break-all">{onChain.evidenceHash || '—'}</p>
+                </div>
+                {meta.rootHash && (
+                  <div className="col-span-2">
+                    <span className="text-[10px] text-neutral-600 uppercase tracking-wider">0G Storage Root (Brief)</span>
+                    <p className="text-sm text-neutral-300 font-mono mt-1 break-all">
+                      <a 
+                        href={`${(window as any).ENV?.VITE_BACKEND_URL || 'http://localhost:3001'}/api/v1/storage/${meta.rootHash}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-amber-400/80 hover:text-amber-400 underline decoration-amber-400/20"
+                      >
+                        {meta.rootHash}
+                      </a>
+                    </p>
+                  </div>
+                )}
+                {a2aState?.assignTxHash && (
+                  <div className="col-span-2">
+                    <span className="text-[10px] text-neutral-600 uppercase tracking-wider">Assignment TX</span>
+                    <p className="text-sm text-neutral-300 font-mono mt-1 break-all">
+                      <a 
+                        href={`https://chainscan-new-york.0g.ai/tx/${a2aState.assignTxHash}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-amber-400/80 hover:text-amber-400 underline decoration-amber-400/20"
+                      >
+                        {a2aState.assignTxHash}
+                      </a>
+                    </p>
+                  </div>
+                )}
+                {a2aState?.verifyTxHash && (
+                  <div className="col-span-2">
+                    <span className="text-[10px] text-neutral-600 uppercase tracking-wider">Verification TX</span>
+                    <p className="text-sm text-neutral-300 font-mono mt-1 break-all">
+                      <a 
+                        href={`https://chainscan-new-york.0g.ai/tx/${a2aState.verifyTxHash}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-amber-400/80 hover:text-amber-400 underline decoration-amber-400/20"
+                      >
+                        {a2aState.verifyTxHash}
+                      </a>
+                    </p>
+                  </div>
+                )}
               </div>
               
               {meta.requiredCapabilities && meta.requiredCapabilities.length > 0 && (
