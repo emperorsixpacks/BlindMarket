@@ -133,19 +133,37 @@ export default function Earnings() {
               <div className="px-5 py-8 text-center text-xs font-mono text-ink-3">no agents deployed. run <code className="text-cream">blind register --name my-agent</code></div>
             ) : (
               <>
-                <div className="grid grid-cols-[1fr_160px_100px_80px] gap-4 px-5 py-3 border-b border-line text-[11px] font-mono font-semibold uppercase tracking-widest text-ink-3">
-                  <span>agent</span><span>wallet</span><span>inft</span><span>status</span>
+                {/* Mobile: stacked cards */}
+                <div className="md:hidden">
+                  {agents.map((agent) => (
+                    <div key={agent.id} className="border-b border-line last:border-b-0 px-5 py-4 flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-mono font-semibold text-ink">{agent.name}</div>
+                        <div className="text-[11px] font-mono text-ink-3 mt-0.5 truncate">{agent.walletAddress.slice(0, 8)}…{agent.walletAddress.slice(-4)}</div>
+                        <div className="text-[11px] font-mono text-ink-3 mt-0.5">inft: {agent.inftTokenId != null ? `#${agent.inftTokenId}` : '—'}</div>
+                      </div>
+                      <Tag tone={agent.status === 'running' ? 'ok' : agent.status === 'paused' ? 'warn' : 'neutral'}>
+                        {agent.status}
+                      </Tag>
+                    </div>
+                  ))}
                 </div>
-                {agents.map((agent) => (
-                  <div key={agent.id} className="grid grid-cols-[1fr_160px_100px_80px] gap-4 px-5 py-4 border-b border-line last:border-b-0 text-[13px] font-mono items-center">
-                    <span className="text-ink font-semibold">{agent.name}</span>
-                    <span className="text-ink-3 text-xs truncate">{agent.walletAddress.slice(0, 8)}…{agent.walletAddress.slice(-4)}</span>
-                    <span className="text-ink-3 text-xs">{agent.inftTokenId != null ? `#${agent.inftTokenId}` : '—'}</span>
-                    <Tag tone={agent.status === 'running' ? 'ok' : agent.status === 'paused' ? 'warn' : 'neutral'}>
-                      {agent.status}
-                    </Tag>
+                {/* Desktop: table */}
+                <div className="hidden md:block">
+                  <div className="grid grid-cols-[1fr_160px_100px_80px] gap-4 px-5 py-3 border-b border-line text-[11px] font-mono font-semibold uppercase tracking-widest text-ink-3">
+                    <span>agent</span><span>wallet</span><span>inft</span><span>status</span>
                   </div>
-                ))}
+                  {agents.map((agent) => (
+                    <div key={agent.id} className="grid grid-cols-[1fr_160px_100px_80px] gap-4 px-5 py-4 border-b border-line last:border-b-0 text-[13px] font-mono items-center">
+                      <span className="text-ink font-semibold">{agent.name}</span>
+                      <span className="text-ink-3 text-xs truncate">{agent.walletAddress.slice(0, 8)}…{agent.walletAddress.slice(-4)}</span>
+                      <span className="text-ink-3 text-xs">{agent.inftTokenId != null ? `#${agent.inftTokenId}` : '—'}</span>
+                      <Tag tone={agent.status === 'running' ? 'ok' : agent.status === 'paused' ? 'warn' : 'neutral'}>
+                        {agent.status}
+                      </Tag>
+                    </div>
+                  ))}
+                </div>
               </>
             )}
           </div>
@@ -164,29 +182,42 @@ export default function Earnings() {
             {entriesLoading ? 'loading…' : 'no pending payments.'}
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <div className="grid grid-cols-[80px_100px_100px_100px_1fr_100px] gap-4 px-5 py-3 border-b border-line text-[11px] font-mono font-semibold uppercase tracking-widest text-ink-3 min-w-[560px]">
-              <span>task</span>
-              <span>type</span>
-              <span>amount</span>
-              <span>fee</span>
-              <span>tx_hash</span>
-              <span>submitted</span>
+          <>
+            {/* Mobile cards */}
+            <div className="md:hidden">
+              {pending.map((p) => (
+                <div key={p.id} className="border-b border-line last:border-b-0 px-5 py-4 space-y-2">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-mono font-semibold text-ink">{formatUsd(p.amount)}</div>
+                      <div className="text-[10px] font-mono text-ink-3 mt-0.5">{p.task_id ? `task #${p.task_id}` : 'no task'} · fee {formatUsd(p.fee)}</div>
+                    </div>
+                    <Tag tone={typeTone(p.type)}>{p.type}</Tag>
+                  </div>
+                  <div className="text-[11px] font-mono text-ink-3 flex justify-between">
+                    <span className="truncate">{shortHash(p.tx_hash) || '—'}</span>
+                    <span>{formatTime(p.created_at)}</span>
+                  </div>
+                </div>
+              ))}
             </div>
-            {pending.map((p) => (
-              <div
-                key={p.id}
-                className="grid grid-cols-[80px_100px_100px_100px_1fr_100px] gap-4 px-5 py-4 border-b border-line last:border-b-0 text-[13px] font-mono min-w-[560px]"
-              >
-                <span className="text-ink-3">{p.task_id ? `#${p.task_id}` : '—'}</span>
-                <Tag tone={typeTone(p.type)}>{p.type}</Tag>
-                <span className="text-ink font-semibold">{formatUsd(p.amount)}</span>
-                <span className="text-ink-3">{formatUsd(p.fee)}</span>
-                <span className="text-ink-3 truncate">{shortHash(p.tx_hash)}</span>
-                <span className="text-ink-3">{formatTime(p.created_at)}</span>
+            {/* Desktop table */}
+            <div className="hidden md:block">
+              <div className="grid grid-cols-[80px_100px_100px_100px_1fr_100px] gap-4 px-5 py-3 border-b border-line text-[11px] font-mono font-semibold uppercase tracking-widest text-ink-3">
+                <span>task</span><span>type</span><span>amount</span><span>fee</span><span>tx_hash</span><span>submitted</span>
               </div>
-            ))}
-          </div>
+              {pending.map((p) => (
+                <div key={p.id} className="grid grid-cols-[80px_100px_100px_100px_1fr_100px] gap-4 px-5 py-4 border-b border-line last:border-b-0 text-[13px] font-mono">
+                  <span className="text-ink-3">{p.task_id ? `#${p.task_id}` : '—'}</span>
+                  <Tag tone={typeTone(p.type)}>{p.type}</Tag>
+                  <span className="text-ink font-semibold">{formatUsd(p.amount)}</span>
+                  <span className="text-ink-3">{formatUsd(p.fee)}</span>
+                  <span className="text-ink-3 truncate">{shortHash(p.tx_hash)}</span>
+                  <span className="text-ink-3">{formatTime(p.created_at)}</span>
+                </div>
+              ))}
+            </div>
+          </>
         )}
       </div>
 
@@ -205,35 +236,55 @@ export default function Earnings() {
             </div>
           )}
           {entries.length > 0 && (
-            <div className="overflow-x-auto">
-              <div className="grid grid-cols-[100px_90px_60px_100px_90px_1fr_80px] gap-4 px-5 py-3 border-b border-line text-[11px] font-mono font-semibold uppercase tracking-widest text-ink-3 min-w-[640px]">
-                <span>time</span>
-                <span>type</span>
-                <span>ref</span>
-                <span>amount</span>
-                <span>net</span>
-                <span>tx_hash</span>
-                <span>status</span>
+            <>
+              {/* Mobile cards */}
+              <div className="md:hidden">
+                {entries.map((tx) => (
+                  <div key={tx.id} className="border-b border-line last:border-b-0 px-5 py-4 space-y-2">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className={`text-sm font-mono font-semibold ${tx.amount > 0 ? 'text-ok' : tx.amount < 0 ? 'text-err' : 'text-ink'}`}>
+                          {formatUsd(tx.amount)}
+                        </div>
+                        <div className="text-[10px] font-mono text-ink-3 mt-0.5">net {formatUsd(tx.net)}</div>
+                      </div>
+                      <div className="flex flex-col items-end gap-1">
+                        <Tag tone={typeTone(tx.type)}>{tx.type}</Tag>
+                        <Tag tone={tx.status === 'ok' ? 'ok' : tx.status === 'pending' ? 'warn' : 'err'}>● {tx.status}</Tag>
+                      </div>
+                    </div>
+                    <div className="flex justify-between text-[11px] font-mono text-ink-3">
+                      <span>{formatTime(tx.created_at)}</span>
+                      <span>{tx.task_id ? `#${tx.task_id}` : '—'}</span>
+                    </div>
+                    {tx.tx_hash && (
+                      <div className="text-[10px] font-mono text-ink-3 truncate">{shortHash(tx.tx_hash)}</div>
+                    )}
+                  </div>
+                ))}
               </div>
-              {entries.map((tx) => (
-                <div
-                  key={tx.id}
-                  className="grid grid-cols-[100px_90px_60px_100px_90px_1fr_80px] gap-4 px-5 py-3 border-b border-line last:border-b-0 text-[12px] font-mono min-w-[640px]"
-                >
-                  <span className="text-ink-3">{formatTime(tx.created_at)}</span>
-                  <Tag tone={typeTone(tx.type)}>{tx.type}</Tag>
-                  <span className="text-ink-3 truncate">{tx.task_id ? `#${tx.task_id}` : '—'}</span>
-                  <span className={tx.amount > 0 ? 'text-ok' : tx.amount < 0 ? 'text-err' : 'text-ink-3'}>
-                    {formatUsd(tx.amount)}
-                  </span>
-                  <span className="text-ink-3">{formatUsd(tx.net)}</span>
-                  <span className="text-ink-3 truncate">{shortHash(tx.tx_hash)}</span>
-                  <Tag tone={tx.status === 'ok' ? 'ok' : tx.status === 'pending' ? 'warn' : 'err'}>
-                    ● {tx.status}
-                  </Tag>
+              {/* Desktop table */}
+              <div className="hidden md:block">
+                <div className="grid grid-cols-[100px_90px_60px_100px_90px_1fr_80px] gap-4 px-5 py-3 border-b border-line text-[11px] font-mono font-semibold uppercase tracking-widest text-ink-3">
+                  <span>time</span><span>type</span><span>ref</span><span>amount</span><span>net</span><span>tx_hash</span><span>status</span>
                 </div>
-              ))}
-            </div>
+                {entries.map((tx) => (
+                  <div key={tx.id} className="grid grid-cols-[100px_90px_60px_100px_90px_1fr_80px] gap-4 px-5 py-3 border-b border-line last:border-b-0 text-[12px] font-mono">
+                    <span className="text-ink-3">{formatTime(tx.created_at)}</span>
+                    <Tag tone={typeTone(tx.type)}>{tx.type}</Tag>
+                    <span className="text-ink-3 truncate">{tx.task_id ? `#${tx.task_id}` : '—'}</span>
+                    <span className={tx.amount > 0 ? 'text-ok' : tx.amount < 0 ? 'text-err' : 'text-ink-3'}>
+                      {formatUsd(tx.amount)}
+                    </span>
+                    <span className="text-ink-3">{formatUsd(tx.net)}</span>
+                    <span className="text-ink-3 truncate">{shortHash(tx.tx_hash)}</span>
+                    <Tag tone={tx.status === 'ok' ? 'ok' : tx.status === 'pending' ? 'warn' : 'err'}>
+                      ● {tx.status}
+                    </Tag>
+                  </div>
+                ))}
+              </div>
+            </>
           )}
         </div>
       </Panel>

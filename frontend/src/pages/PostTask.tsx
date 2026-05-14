@@ -346,7 +346,10 @@ export default function PostTask() {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              {/* Stack category + location on phones — at 2-col on a 439px
+                  viewport the placeholder ("describe it — or pi…") gets
+                  clipped. Side-by-side returns at sm. */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-[11px] font-mono uppercase tracking-widest text-ink-3 mb-2">category</label>
                   <input
@@ -358,10 +361,11 @@ export default function PostTask() {
                     placeholder="describe it — or pick a suggestion below"
                     className="w-full bg-surface-2 border border-line px-4 py-3 text-xs font-mono text-ink placeholder-ink-3 focus:outline-none focus:border-cream"
                   />
-                  {/* Suggestion chips — single wrapped row, click to fill the
-                      input. Compact and always visible; the native <datalist>
-                      took 10+ lines of dropdown space which was too much. */}
-                  <div className="mt-2 flex flex-wrap gap-1.5">
+                  {/* Auto-fill grid keeps suggestion chips on a regular column
+                      rhythm instead of the ragged wrap a plain flex produces.
+                      Each cell is ≥90px and stretches to fill, so a row of
+                      chips like "research" + "transcription" sit at equal width. */}
+                  <div className="mt-2 grid grid-cols-[repeat(auto-fill,minmax(90px,1fr))] gap-1.5">
                     {CATEGORY_SUGGESTIONS.map(c => {
                       const active = form.category === c;
                       return (
@@ -369,7 +373,7 @@ export default function PostTask() {
                           key={c}
                           type="button"
                           onClick={() => setForm(f => ({ ...f, category: c }))}
-                          className={`px-2 py-0.5 text-[10px] font-mono border transition-colors ${
+                          className={`px-2 py-1 text-[10px] font-mono border transition-colors text-center ${
                             active
                               ? 'border-cream text-cream bg-cream/10'
                               : 'border-line text-ink-3 hover:border-ink-2 hover:text-ink-2'

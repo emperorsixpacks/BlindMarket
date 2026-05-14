@@ -21,7 +21,14 @@ export function DashboardLayout() {
       <div className="md:ml-[240px] flex flex-col min-h-screen">
         <TopBar onMenuClick={() => setNavOpen(true)} />
         <ChainBanner />
-        <main className="flex-1 p-4 sm:p-6 md:p-8">
+        <main
+          className="flex-1 px-4 sm:px-6 md:px-8 pt-4 sm:pt-6 md:pt-8"
+          style={{
+            // Respect iOS safe-area at the bottom so the last action button
+            // isn't hidden under the home indicator on notched devices.
+            paddingBottom: 'max(1rem, env(safe-area-inset-bottom))',
+          }}
+        >
           <AnimatePresence mode="wait">
             <motion.div
               key={location.pathname}

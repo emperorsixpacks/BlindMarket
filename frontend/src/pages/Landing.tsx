@@ -74,11 +74,12 @@ export default function Landing() {
         transition={{ duration: 0.4, ease: 'easeOut' }}
         className="sticky top-0 z-50 bg-bg/95 backdrop-blur border-b border-line"
       >
-        <div className="grid grid-cols-[auto_1fr_auto] items-center h-16 px-6 sm:px-10 gap-6">
-          {/* Far left — brand */}
-          <Link to="/" className="flex items-center gap-3">
+        <div className="grid grid-cols-[auto_1fr_auto] items-center h-16 px-4 sm:px-10 gap-3 sm:gap-6">
+          {/* Far left — brand. min-w-0 lets it truncate gracefully on tiny
+              viewports instead of forcing the launch button off-screen. */}
+          <Link to="/" className="flex items-center gap-2 sm:gap-3 min-w-0">
             <LogoMark size={22} blade="var(--bb-ink)" />
-            <span className="text-base font-semibold text-ink tracking-tight">BlindMarket</span>
+            <span className="text-base font-semibold text-ink tracking-tight truncate">BlindMarket</span>
           </Link>
 
           {/* Center — nav links */}
@@ -90,10 +91,11 @@ export default function Landing() {
             <Link to="/a2a" className="text-sm text-ink-2 hover:text-ink transition-colors">Agent board</Link>
           </div>
 
-          {/* Far right — launch app */}
+          {/* Far right — launch app. shrink-0 guarantees the CTA stays visible
+              on <360px phones even if the brand label has to truncate. */}
           <Link
             to="/tasks/new"
-            className="justify-self-end"
+            className="justify-self-end shrink-0"
             onClick={() => track('cta_click', { label: 'launch_app', target: '/tasks/new', section: 'nav' })}
           >
             <Button variant="primary" label="Launch app" size="sm" />
@@ -296,7 +298,11 @@ export default function Landing() {
                 key={f.title}
                 variants={fadeUp}
                 whileHover={reduceMotion ? {} : { y: -2, transition: { duration: 0.2 } }}
-                className={`p-8 ${i % 2 === 0 ? 'md:border-r border-line' : ''} ${i < 2 ? 'border-b border-line' : ''}`}
+                /* Border logic:
+                   - mobile single-col: every item except the last gets border-b
+                   - md+ 2x2 grid: left column gets border-r; top row gets border-b
+                   Without this, items 3 and 4 visually merge on phones. */
+                className={`p-8 border-line ${i % 2 === 0 ? 'md:border-r' : ''} ${i < 3 ? 'border-b' : ''} ${i === 2 ? 'md:border-b-0' : ''}`}
               >
                 <h3 className="text-lg font-semibold text-ink mb-3">{f.title}</h3>
                 <p className="text-sm text-ink-2 leading-relaxed">{f.body}</p>

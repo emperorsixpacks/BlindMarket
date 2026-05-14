@@ -81,11 +81,11 @@ export default function MyTasks() {
         }
       />
 
-      <div className="grid grid-cols-4 gap-0 border border-line mb-8">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-0 border border-line mb-8">
         <StatCard label="open" value={String(open)} sub="awaiting worker" />
         <div className="border-l border-line"><StatCard label="active" value={String(active)} sub="in progress" subColor="warn" /></div>
-        <div className="border-l border-line"><StatCard label="completed" value={String(completed)} sub="all time" subColor="ok" /></div>
-        <div className="border-l border-line"><StatCard label="total spent" value={`$${totalSpent.toFixed(2)}`} sub="USDC paid out" /></div>
+        <div className="border-t border-l-0 sm:border-t-0 sm:border-l border-line"><StatCard label="completed" value={String(completed)} sub="all time" subColor="ok" /></div>
+        <div className="border-t border-l border-line sm:border-t-0"><StatCard label="total spent" value={`$${totalSpent.toFixed(2)}`} sub="USDC paid out" /></div>
       </div>
 
       <div className="border border-line">
