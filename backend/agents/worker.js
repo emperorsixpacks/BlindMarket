@@ -467,10 +467,10 @@ async function pollAndWork() {
     try {
       const result = await generateText({
         model: getModel(),
-        system: AGENT_INSTRUCTIONS,
+        system: `${AGENT_INSTRUCTIONS}\n\nCRITICAL: If you use tools, you MUST provide the final summary output in the requested format AFTER tool calls are finished. Do not stop until you have provided the final summary.`,
         prompt: briefPlaintext,
         tools: buildTools(),
-        maxSteps: 5,
+        maxSteps: 10,
       });
       
       text = result.text;
