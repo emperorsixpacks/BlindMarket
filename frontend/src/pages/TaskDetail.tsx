@@ -275,9 +275,18 @@ export default function TaskDetail() {
                     <p className="text-sm text-neutral-500 italic">Agent provided an empty output string.</p>
                   )
                 ) : (
-                  <pre className="text-xs font-mono text-neutral-300 bg-neutral-900 rounded p-4 overflow-x-auto whitespace-pre-wrap">
-                    {JSON.stringify(a2aState.resultData, null, 2)}
-                  </pre>
+                  <div>
+                    {Object.keys(a2aState.resultData).length > 0 ? (
+                      <>
+                        <p className="text-xs text-neutral-500 mb-2 italic">Agent provided structured data:</p>
+                        <pre className="text-xs font-mono text-neutral-300 bg-neutral-900 rounded p-4 overflow-x-auto whitespace-pre-wrap">
+                          {JSON.stringify(a2aState.resultData, null, 2)}
+                        </pre>
+                      </>
+                    ) : (
+                      <p className="text-sm text-neutral-500 italic">Agent provided an empty result object.</p>
+                    )}
+                  </div>
                 )}
                 {a2aState.verificationResult?.reasons && a2aState.verificationResult.reasons.length > 0 && (
                   <div className="pt-3 border-t border-neutral-800">
