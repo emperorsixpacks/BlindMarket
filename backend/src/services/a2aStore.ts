@@ -28,26 +28,26 @@ const KEY = {
 };
 
 export async function setMeta(meta: A2ATaskMeta): Promise<void> {
-  const taskId = meta.taskId.toLowerCase();
+  const tid = meta.taskId.toLowerCase();
   const pipe = redis.pipeline();
-  pipe.set(KEY.meta(taskId), JSON.stringify({ ...meta, taskId }));
+  pipe.set(KEY.meta(tid), JSON.stringify({ ...meta, taskId: tid }));
   // Initialize state only if not already present — preserves the original
   // in-memory semantic (`if (!taskStates.has(...))`). SETNX is atomic.
   pipe.setnx(
-    KEY.state(taskId),
-    JSON.stringify({ taskId, status: 'open' } satisfies A2ATaskState),
+    KEY.state(tid),
+    JSON.stringify({ taskId: tid, status: 'open' } satisfies A2ATaskState),
   );
   if (meta.targetExecutorType === 'agent') {
-    pipe.sadd(KEY.open, taskId);
+    pipe.sadd(KEY.open, tid);
   }
   if (meta.posterAddress) {
-    pipe.sadd(KEY.poster(meta.posterAddress), taskId);
+    pipe.sadd(KEY.poster(meta.posterAddress), tid);
   }
   await pipe.exec();
 }
 
 export async function getMeta(taskId: string): Promise<A2ATaskMeta | undefined> {
-  let raw = await redis.get(KEY.meta(taskId.toLowerCase()));
+  let raw = await redis.get(KEY.meta(taskId));
   if (!raw && taskId.toLowerCase() !== taskId) {
     // Fallback for legacy mixed-case keys
     raw = await redis.get(`a2a:meta:${taskId}`);
@@ -95,7 +95,7 @@ export async function getIndexedHashes(taskHashes: string[]): Promise<Set<string
   if (taskHashes.length === 0) return new Set();
   const pipe = redis.pipeline();
   for (const h of taskHashes) {
-    pipe.exists(KEY.meta(h.toLowerCase()));
+    pipe.exists(KEY.meta(h));
     if (h.toLowerCase() !== h) pipe.exists(`a2a:meta:${h}`);
   }
   const results = await pipe.exec();
@@ -115,7 +115,7 @@ export async function getIndexedHashes(taskHashes: string[]): Promise<Set<string
 }
 
 export async function getState(taskId: string): Promise<A2ATaskState | undefined> {
-  let raw = await redis.get(KEY.state(taskId.toLowerCase()));
+  let raw = await redis.get(KEY.state(taskId));
   if (!raw && taskId.toLowerCase() !== taskId) {
     // Fallback for legacy mixed-case keys
     raw = await redis.get(`a2a:state:${taskId}`);
@@ -173,19 +173,26 @@ export async function tryAccept(
   executorAddress: string,
   acceptedAt: string,
 ): Promise<{ ok: true; state: A2ATaskState } | { ok: false; currentStatus: string }> {
+  const tid = taskId.toLowerCase();
   // Lua: read state, verify status='open', merge patch, write back, update
   // index sets. cjson is bundled with Redis 6+; if a deployment uses an older
   // build the SET fails loudly and we'll surface it at boot.
-  const tid = taskId.toLowerCase();
   const lua = `
     local stateKey = KEYS[1]
     local openSetKey = KEYS[2]
     local executorSetKey = KEYS[3]
-    local taskId = ARGV[1]
+    local tid = ARGV[1]
     local executorAddress = ARGV[2]
     local acceptedAt = ARGV[3]
+    local originalTaskId = ARGV[4]
 
     local raw = redis.call('GET', stateKey)
+    if not raw and originalTaskId ~= tid then
+        -- Fallback for legacy mixed-case keys
+        raw = redis.call('GET', 'a2a:state:' .. originalTaskId)
+        if raw then stateKey = 'a2a:state:' .. originalTaskId end
+    end
+
     if not raw then return {'missing'} end
 
     local s = cjson.decode(raw)
@@ -195,8 +202,11 @@ export async function tryAccept(
     s.executorAddress = executorAddress
     s.acceptedAt = acceptedAt
     redis.call('SET', stateKey, cjson.encode(s))
-    redis.call('SREM', openSetKey, taskId)
-    redis.call('SADD', executorSetKey, taskId)
+    redis.call('SREM', openSetKey, tid)
+    if tid ~= originalTaskId then
+        redis.call('SREM', openSetKey, originalTaskId)
+    end
+    redis.call('SADD', executorSetKey, tid)
     return {'ok', cjson.encode(s)}
   `;
 
@@ -209,13 +219,14 @@ export async function tryAccept(
     tid,
     executorAddress,
     acceptedAt,
+    taskId, // original taskId for fallback
   )) as [string, string?];
 
   if (result[0] === 'ok') {
     return { ok: true, state: JSON.parse(result[1]!) as A2ATaskState };
   }
   if (result[0] === 'missing') {
-    throw new Error(`No A2A state for task ${tid}`);
+    throw new Error(`No A2A state for task ${taskId}`);
   }
   return { ok: false, currentStatus: result[1] ?? 'unknown' };
 }
