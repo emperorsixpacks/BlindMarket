@@ -470,7 +470,7 @@ async function pollAndWork() {
     try {
       const result = await generateText({
         model: getModel(),
-        system: `${AGENT_INSTRUCTIONS}\n\nIMPORTANT: If you invoke any tools, you MUST synthesize their results into a final text summary. Once you have received tool outputs, do not perform further tool calls. Instead, provide your complete final summary immediately.`,
+        system: `${AGENT_INSTRUCTIONS}\n\nNOTE: You have access to tools. If used, synthesize their results into a final text summary immediately after tool interaction.`,
         prompt: briefPlaintext,
         tools: buildTools(),
         maxSteps: 10,
