@@ -18,8 +18,8 @@ import type { A2ATaskMeta, A2ATaskState, AgentCapability } from '../types.js';
 //   - a2a:executor:<addr> contains a taskId iff state.executorAddress==addr.
 
 const KEY = {
-  meta: (taskId: string) => `a2a:meta:${taskId}`,
-  state: (taskId: string) => `a2a:state:${taskId}`,
+  meta: (taskId: string) => `a2a:meta:${taskId.toLowerCase()}`,
+  state: (taskId: string) => `a2a:state:${taskId.toLowerCase()}`,
   open: 'a2a:open',
   executor: (addr: string) => `a2a:executor:${addr.toLowerCase()}`,
   // Tasks posted by a given address — populated when meta.posterAddress is set.
@@ -28,25 +28,30 @@ const KEY = {
 };
 
 export async function setMeta(meta: A2ATaskMeta): Promise<void> {
+  const taskId = meta.taskId.toLowerCase();
   const pipe = redis.pipeline();
-  pipe.set(KEY.meta(meta.taskId), JSON.stringify(meta));
+  pipe.set(KEY.meta(taskId), JSON.stringify({ ...meta, taskId }));
   // Initialize state only if not already present — preserves the original
   // in-memory semantic (`if (!taskStates.has(...))`). SETNX is atomic.
   pipe.setnx(
-    KEY.state(meta.taskId),
-    JSON.stringify({ taskId: meta.taskId, status: 'open' } satisfies A2ATaskState),
+    KEY.state(taskId),
+    JSON.stringify({ taskId, status: 'open' } satisfies A2ATaskState),
   );
   if (meta.targetExecutorType === 'agent') {
-    pipe.sadd(KEY.open, meta.taskId);
+    pipe.sadd(KEY.open, taskId);
   }
   if (meta.posterAddress) {
-    pipe.sadd(KEY.poster(meta.posterAddress), meta.taskId);
+    pipe.sadd(KEY.poster(meta.posterAddress), taskId);
   }
   await pipe.exec();
 }
 
 export async function getMeta(taskId: string): Promise<A2ATaskMeta | undefined> {
-  const raw = await redis.get(KEY.meta(taskId));
+  let raw = await redis.get(KEY.meta(taskId.toLowerCase()));
+  if (!raw && taskId.toLowerCase() !== taskId) {
+    // Fallback for legacy mixed-case keys
+    raw = await redis.get(`a2a:meta:${taskId}`);
+  }
   return raw ? (JSON.parse(raw) as A2ATaskMeta) : undefined;
 }
 
@@ -61,7 +66,14 @@ export async function mergeWrappedKeys(
   taskId: string,
   additions: Record<string, string>,
 ): Promise<A2ATaskMeta | undefined> {
-  const raw = await redis.get(KEY.meta(taskId));
+  const tid = taskId.toLowerCase();
+  let raw = await redis.get(KEY.meta(tid));
+  let finalTid = tid;
+  if (!raw && tid !== taskId) {
+    // Fallback for legacy mixed-case keys
+    raw = await redis.get(`a2a:meta:${taskId}`);
+    if (raw) finalTid = taskId;
+  }
   if (!raw) return undefined;
   const meta = JSON.parse(raw) as A2ATaskMeta;
   const merged = { ...(meta.wrappedKeys ?? {}) };
@@ -69,7 +81,7 @@ export async function mergeWrappedKeys(
     merged[addr.toLowerCase()] = blob;
   }
   meta.wrappedKeys = merged;
-  await redis.set(KEY.meta(taskId), JSON.stringify(meta));
+  await redis.set(`a2a:meta:${finalTid}`, JSON.stringify(meta));
   return meta;
 }
 
@@ -82,18 +94,32 @@ export async function mergeWrappedKeys(
 export async function getIndexedHashes(taskHashes: string[]): Promise<Set<string>> {
   if (taskHashes.length === 0) return new Set();
   const pipe = redis.pipeline();
-  for (const h of taskHashes) pipe.exists(KEY.meta(h));
+  for (const h of taskHashes) {
+    pipe.exists(KEY.meta(h.toLowerCase()));
+    if (h.toLowerCase() !== h) pipe.exists(`a2a:meta:${h}`);
+  }
   const results = await pipe.exec();
   if (!results) return new Set();
   const indexed = new Set<string>();
+  let resultIdx = 0;
   for (let i = 0; i < taskHashes.length; i++) {
-    if (results[i]?.[1] === 1) indexed.add(taskHashes[i].toLowerCase());
+    const h = taskHashes[i];
+    const existsLower = results[resultIdx++]?.[1] === 1;
+    let existsOriginal = false;
+    if (h.toLowerCase() !== h) {
+      existsOriginal = results[resultIdx++]?.[1] === 1;
+    }
+    if (existsLower || existsOriginal) indexed.add(h.toLowerCase());
   }
   return indexed;
 }
 
 export async function getState(taskId: string): Promise<A2ATaskState | undefined> {
-  const raw = await redis.get(KEY.state(taskId));
+  let raw = await redis.get(KEY.state(taskId.toLowerCase()));
+  if (!raw && taskId.toLowerCase() !== taskId) {
+    // Fallback for legacy mixed-case keys
+    raw = await redis.get(`a2a:state:${taskId}`);
+  }
   return raw ? (JSON.parse(raw) as A2ATaskState) : undefined;
 }
 
@@ -101,20 +127,27 @@ export async function updateState(
   taskId: string,
   patch: Partial<A2ATaskState>,
 ): Promise<A2ATaskState> {
-  const existingRaw = await redis.get(KEY.state(taskId));
+  const tid = taskId.toLowerCase();
+  let existingRaw = await redis.get(KEY.state(tid));
+  let finalTid = tid;
+  if (!existingRaw && tid !== taskId) {
+    // Fallback for legacy mixed-case keys
+    existingRaw = await redis.get(`a2a:state:${taskId}`);
+    if (existingRaw) finalTid = taskId;
+  }
   if (!existingRaw) throw new Error(`No A2A state for task ${taskId}`);
   const existing = JSON.parse(existingRaw) as A2ATaskState;
-  const updated: A2ATaskState = { ...existing, ...patch, taskId };
+  const updated: A2ATaskState = { ...existing, ...patch, taskId: finalTid };
 
   const pipe = redis.pipeline();
-  pipe.set(KEY.state(taskId), JSON.stringify(updated));
+  pipe.set(`a2a:state:${finalTid}`, JSON.stringify(updated));
   // Drop from open index when status leaves 'open'
   if (existing.status === 'open' && updated.status !== 'open') {
-    pipe.srem(KEY.open, taskId);
+    pipe.srem(KEY.open, finalTid);
   }
   // Index by executor when an executorAddress is first set
   if (!existing.executorAddress && updated.executorAddress) {
-    pipe.sadd(KEY.executor(updated.executorAddress), taskId);
+    pipe.sadd(KEY.executor(updated.executorAddress), finalTid);
   }
   await pipe.exec();
   return updated;
@@ -143,6 +176,7 @@ export async function tryAccept(
   // Lua: read state, verify status='open', merge patch, write back, update
   // index sets. cjson is bundled with Redis 6+; if a deployment uses an older
   // build the SET fails loudly and we'll surface it at boot.
+  const tid = taskId.toLowerCase();
   const lua = `
     local stateKey = KEYS[1]
     local openSetKey = KEYS[2]
@@ -169,10 +203,10 @@ export async function tryAccept(
   const result = (await redis.eval(
     lua,
     3,
-    KEY.state(taskId),
+    KEY.state(tid),
     KEY.open,
     KEY.executor(executorAddress),
-    taskId,
+    tid,
     executorAddress,
     acceptedAt,
   )) as [string, string?];
@@ -181,7 +215,7 @@ export async function tryAccept(
     return { ok: true, state: JSON.parse(result[1]!) as A2ATaskState };
   }
   if (result[0] === 'missing') {
-    throw new Error(`No A2A state for task ${taskId}`);
+    throw new Error(`No A2A state for task ${tid}`);
   }
   return { ok: false, currentStatus: result[1] ?? 'unknown' };
 }
