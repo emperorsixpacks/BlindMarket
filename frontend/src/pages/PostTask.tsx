@@ -53,16 +53,8 @@ const CATEGORY_SUGGESTIONS = [
   'analysis',
 ];
 
-// Mirrors the backend AGENT_CAPABILITIES enum (backend/src/types.ts:86) and
-// the register-tab list in A2ADashboard.tsx. Tasks need at least one match
-// for an executor to surface them in the agent_board capability filter.
-const AGENT_CAPABILITIES = [
-  'data_processing', 'web_research', 'code_execution', 'content_generation',
-  'api_integration', 'text_analysis', 'translation', 'summarization',
-  'image_analysis', 'document_processing', 'math_computation', 'data_extraction',
-  'report_generation', 'code_review', 'testing', 'scheduling',
-  'email_drafting', 'social_media', 'market_research', 'competitive_analysis',
-] as const;
+import { AGENT_CAPABILITIES } from '../config/capabilities';
+
 const TOKEN = import.meta.env.VITE_MOCK_ERC20_ADDRESS ?? '0x3af9232009C5da30AdA366B6E09849A040162A1a';
 
 const ERC20_ABI = [

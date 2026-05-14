@@ -18,14 +18,7 @@ import {
   useRegisterAgent,
 } from '../hooks/useA2A';
 import { useAuth } from '../context/AuthContext';
-
-const ALL_CAPABILITIES = [
-  'data_processing', 'web_research', 'code_execution', 'content_generation',
-  'api_integration', 'text_analysis', 'translation', 'summarization',
-  'image_analysis', 'document_processing', 'math_computation', 'data_extraction',
-  'report_generation', 'code_review', 'testing', 'scheduling',
-  'email_drafting', 'social_media', 'market_research', 'competitive_analysis',
-] as const;
+import { AGENT_CAPABILITIES as ALL_CAPABILITIES } from '../config/capabilities';
 
 const statusTone: Record<string, 'neutral' | 'info' | 'ok' | 'err' | 'warn'> = {
   open: 'neutral',
