@@ -254,8 +254,8 @@ export default function TaskDetail() {
             )}
           </div>
 
-          {/* Agent output — shown when A2A state has resultData */}
-          {a2aState?.resultData && (
+          {/* Agent output — shown when A2A state has resultData OR a verification result */}
+          {(a2aState?.resultData || a2aState?.verificationResult) && (
             <div className="card-dark mb-6 overflow-hidden">
               <div className="px-6 py-4 border-b border-neutral-800 flex items-center justify-between">
                 <h2 className="text-sm font-semibold text-white">Agent Output</h2>
@@ -266,8 +266,14 @@ export default function TaskDetail() {
                 )}
               </div>
               <div className="px-6 py-5 space-y-4">
-                {typeof a2aState.resultData.output === 'string' ? (
-                  <p className="text-sm text-neutral-300 whitespace-pre-wrap leading-relaxed">{a2aState.resultData.output}</p>
+                {!a2aState.resultData ? (
+                  <p className="text-sm text-neutral-500 italic">No output data provided by agent.</p>
+                ) : typeof a2aState.resultData.output === 'string' ? (
+                  a2aState.resultData.output.trim() ? (
+                    <p className="text-sm text-neutral-300 whitespace-pre-wrap leading-relaxed">{a2aState.resultData.output}</p>
+                  ) : (
+                    <p className="text-sm text-neutral-500 italic">Agent provided an empty output string.</p>
+                  )
                 ) : (
                   <pre className="text-xs font-mono text-neutral-300 bg-neutral-900 rounded p-4 overflow-x-auto whitespace-pre-wrap">
                     {JSON.stringify(a2aState.resultData, null, 2)}
