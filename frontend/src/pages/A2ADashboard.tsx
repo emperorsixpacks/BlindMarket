@@ -32,9 +32,6 @@ const statusTone: Record<string, 'neutral' | 'info' | 'ok' | 'err' | 'warn'> = {
 type Tab = 'register' | 'browse_tasks' | 'my_executions';
 
 export default function A2ADashboard() {
-  // Default to browse_tasks — most visitors are here to find agent-targeted
-  // work, not to register. Deployed agents auto-register on startup, so the
-  // register tab is a power-user surface for externally-operated executors.
   const [activeTab, setActiveTab] = useState<Tab>('browse_tasks');
   const [displayName, setDisplayName] = useState('');
   const [selectedCaps, setSelectedCaps] = useState<string[]>([]);
@@ -45,8 +42,6 @@ export default function A2ADashboard() {
 
   const { isAuthenticated } = useAuth();
   const { data: profile } = useAgentProfile();
-  // Gate the two list queries on tab visibility so we don't poll for data
-  // the user can't see. (Previously these always fired regardless of tab.)
   const { data: browse, isLoading: browseLoading } = useBrowseAgentTasks({
     enabled: activeTab === 'browse_tasks',
   });
@@ -78,10 +73,6 @@ export default function A2ADashboard() {
       />
 
       <div className="flex gap-6 border-b border-line mb-8">
-        {/* Tab order reflects frequency-of-use: browse first (most visitors),
-            executions second (the executor's own follow-ups), register last
-            (power-user surface for external executors — in-platform deployed
-            agents auto-register on start). */}
         {(['browse_tasks', 'my_executions', 'register'] as const).map((tab) => {
           return (
             <button
@@ -99,15 +90,9 @@ export default function A2ADashboard() {
         })}
       </div>
 
-      {/* Register tab — single column on mobile, side-by-side preview on lg+
-          (Agent-card preview at 340px would crush the form on a phone). */}
       {activeTab === 'register' && (
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-0 border border-line">
           <div className="p-6 space-y-5">
-            {/* Clarifying note: most people don't need this form.
-                Deployed-in-platform agents auto-register via worker.js on
-                startup. The form is here for externally-operated executors
-                that aren't running on our infrastructure. */}
             <div className="border border-line bg-surface-2 px-4 py-3 text-[11px] font-mono text-ink-3 leading-relaxed">
               <span className="text-cream">heads up:</span> if you deployed an
               agent via <Link to="/agents/deploy" className="text-ink-2 underline hover:text-cream">deploy_agent</Link>,
@@ -202,7 +187,6 @@ export default function A2ADashboard() {
             </div>
           </div>
 
-          {/* Right rail */}
           <div className="border-l border-line p-6 space-y-6">
             <SectionRule num="I" title="agent card preview" />
             <pre className="bg-surface-2 border border-line p-4 text-xs font-mono text-ink-3 leading-relaxed overflow-x-auto">
@@ -226,7 +210,6 @@ export default function A2ADashboard() {
         </div>
       )}
 
-      {/* Browse tasks tab — cards on mobile, table at md+. */}
       {activeTab === 'browse_tasks' && (
         <div className="border border-line">
           {browseLoading && (
@@ -238,45 +221,52 @@ export default function A2ADashboard() {
             </div>
           )}
 
-          {/* Mobile cards */}
           <div className="md:hidden">
-            {browse?.tasks?.map((entry) => (
-              <div key={entry.meta.taskId} className="border-b border-line last:border-b-0 px-5 py-4 space-y-2">
-                <div className="flex items-start justify-between gap-3">
-                  <span className="text-[11px] font-mono text-ink-3 truncate">{entry.meta.taskId.slice(0, 14)}…</span>
-                  <Tag tone={statusTone[entry.state.status] ?? 'neutral'}>{entry.state.status}</Tag>
-                </div>
-                <div>
-                  <div className="text-[10px] font-mono uppercase tracking-widest text-ink-3 mb-1">required caps</div>
-                  <div className="text-[13px] font-mono text-ink">{entry.meta.requiredCapabilities.join(', ') || '—'}</div>
-                </div>
-                <div className="flex gap-2 pt-1">
-                  <Tag tone="neutral">{entry.meta.verificationMode}</Tag>
-                  <Tag tone="info">{entry.meta.targetExecutorType}</Tag>
-                </div>
-              </div>
-            ))}
+            {browse?.tasks?.map((entry) => {
+              const onChainId = (entry as any).onChain?.taskId;
+              return (
+                <Link key={entry.meta.taskId} to={`/tasks/${onChainId || entry.meta.taskId}`} className="block border-b border-line last:border-b-0 px-5 py-4 space-y-2 hover:bg-surface-2 transition-colors">
+                  <div className="flex items-start justify-between gap-3">
+                    <span className="text-[11px] font-mono text-ink-3 truncate">
+                      {onChainId ? `#${onChainId}` : `${entry.meta.taskId.slice(0, 14)}…`}
+                    </span>
+                    <Tag tone={statusTone[entry.state.status] ?? 'neutral'}>{entry.state.status}</Tag>
+                  </div>
+                  <div>
+                    <div className="text-[10px] font-mono uppercase tracking-widest text-ink-3 mb-1">required caps</div>
+                    <div className="text-[13px] font-mono text-ink">{entry.meta.requiredCapabilities.join(', ') || '—'}</div>
+                  </div>
+                  <div className="flex gap-2 pt-1">
+                    <Tag tone="neutral">{entry.meta.verificationMode}</Tag>
+                    <Tag tone="info">{entry.meta.targetExecutorType}</Tag>
+                  </div>
+                </Link>
+              );
+            })}
           </div>
 
-          {/* Desktop table */}
           <div className="hidden md:block">
             <div className="grid grid-cols-[120px_1fr_120px_120px_90px] gap-6 px-5 py-3 border-b border-line text-[11px] font-mono font-semibold uppercase tracking-widest text-ink-3">
               <span>id</span><span>required caps</span><span>verification</span><span>target</span><span>status</span>
             </div>
-            {browse?.tasks?.map((entry) => (
-              <div key={entry.meta.taskId} className="grid grid-cols-[120px_1fr_120px_120px_90px] gap-6 px-5 py-4 border-b border-line last:border-b-0 text-[13px] font-mono">
-                <span className="text-ink-3">{entry.meta.taskId.slice(0, 10)}…</span>
-                <span className="text-ink truncate">{entry.meta.requiredCapabilities.join(', ') || '—'}</span>
-                <Tag tone="neutral">{entry.meta.verificationMode}</Tag>
-                <Tag tone="info">{entry.meta.targetExecutorType}</Tag>
-                <Tag tone={statusTone[entry.state.status] ?? 'neutral'}>{entry.state.status}</Tag>
-              </div>
-            ))}
+            {browse?.tasks?.map((entry) => {
+              const onChainId = (entry as any).onChain?.taskId;
+              return (
+                <Link key={entry.meta.taskId} to={`/tasks/${onChainId || entry.meta.taskId}`} className="grid grid-cols-[120px_1fr_120px_120px_90px] gap-6 px-5 py-4 border-b border-line last:border-b-0 text-[13px] font-mono hover:bg-surface-2 transition-colors group">
+                  <span className="text-ink-3 group-hover:text-cream transition-colors">
+                    {onChainId ? `#${onChainId}` : `${entry.meta.taskId.slice(0, 10)}…`}
+                  </span>
+                  <span className="text-ink truncate">{entry.meta.requiredCapabilities.join(', ') || '—'}</span>
+                  <Tag tone="neutral">{entry.meta.verificationMode}</Tag>
+                  <Tag tone="info">{entry.meta.targetExecutorType}</Tag>
+                  <Tag tone={statusTone[entry.state.status] ?? 'neutral'}>{entry.state.status}</Tag>
+                </Link>
+              );
+            })}
           </div>
         </div>
       )}
 
-      {/* My executions tab */}
       {activeTab === 'my_executions' && (
         <Panel>
           {execsLoading ? (
@@ -296,14 +286,16 @@ export default function A2ADashboard() {
             </div>
           ) : (
             <div className="border border-line">
-              {/* Mobile cards */}
               <div className="md:hidden">
                 {execs.executions.map((e) => {
                   const hasResult = !!e.state.resultData;
+                  const onChainId = (e as any).onChain?.taskId;
                   return (
                     <div key={e.meta.taskId} className="border-b border-line last:border-b-0 px-5 py-4 space-y-2">
                       <div className="flex items-start justify-between gap-3">
-                        <span className="text-[11px] font-mono text-ink-3 truncate">{e.meta.taskId.slice(0, 14)}…</span>
+                        <Link to={`/tasks/${onChainId || e.meta.taskId}`} className="text-[11px] font-mono text-cream hover:underline truncate">
+                          {onChainId ? `#${onChainId}` : `${e.meta.taskId.slice(0, 14)}…`}
+                        </Link>
                         <Tag tone={statusTone[e.state.status] ?? 'neutral'}>{e.state.status}</Tag>
                       </div>
                       <div className="grid grid-cols-2 gap-3 pt-1 text-[11px] font-mono">
@@ -336,19 +328,19 @@ export default function A2ADashboard() {
                 })}
               </div>
 
-              {/* Desktop table — each row is wrapped in <details> so the
-                  submitted result expands inline below the row when clicked.
-                  Keeps the dense tabular view while making the work visible. */}
               <div className="hidden md:block">
                 <div className="grid grid-cols-[80px_1fr_100px_120px_90px_70px] gap-4 px-5 py-3 border-b border-line text-[11px] font-mono font-semibold uppercase tracking-widest text-ink-3">
                   <span>task</span><span>accepted</span><span>status</span><span>submitted</span><span>verified</span><span>result</span>
                 </div>
                 {execs.executions.map((e) => {
                   const hasResult = !!e.state.resultData;
+                  const onChainId = (e as any).onChain?.taskId;
                   return (
                     <details key={e.meta.taskId} className="border-b border-line last:border-b-0 group">
                       <summary className={`grid grid-cols-[80px_1fr_100px_120px_90px_70px] gap-4 px-5 py-3 text-[12px] font-mono list-none ${hasResult ? 'cursor-pointer hover:bg-surface-2' : 'cursor-default'} transition-colors`}>
-                        <span className="text-ink-3">{e.meta.taskId.slice(0, 10)}…</span>
+                        <Link to={`/tasks/${onChainId || e.meta.taskId}`} className="text-cream hover:underline truncate">
+                          {onChainId ? `#${onChainId}` : `${e.meta.taskId.slice(0, 10)}…`}
+                        </Link>
                         <span className="text-ink-3">{e.state.acceptedAt ? new Date(e.state.acceptedAt).toLocaleString() : '—'}</span>
                         <Tag tone={statusTone[e.state.status] ?? 'neutral'}>{e.state.status}</Tag>
                         <span className="text-ink-3">{e.state.submittedAt ? new Date(e.state.submittedAt).toLocaleString() : '—'}</span>

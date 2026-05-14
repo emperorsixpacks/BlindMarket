@@ -29,14 +29,25 @@ const KEY = {
 
 export async function setMeta(meta: A2ATaskMeta): Promise<void> {
   const tid = meta.taskId.toLowerCase();
+  
+  // Check if a legacy mixed-case state already exists to avoid shadowing it
+  // with a new empty 'open' state in the lowercased key.
+  let stateExists = (await redis.exists(KEY.state(tid))) === 1;
+  if (!stateExists && tid !== meta.taskId) {
+    stateExists = (await redis.exists(`a2a:state:${meta.taskId}`)) === 1;
+  }
+
   const pipe = redis.pipeline();
   pipe.set(KEY.meta(tid), JSON.stringify({ ...meta, taskId: tid }));
-  // Initialize state only if not already present — preserves the original
-  // in-memory semantic (`if (!taskStates.has(...))`). SETNX is atomic.
-  pipe.setnx(
-    KEY.state(tid),
-    JSON.stringify({ taskId: tid, status: 'open' } satisfies A2ATaskState),
-  );
+  
+  // Only initialize state if it doesn't exist in either lowercased or legacy mixed-case form
+  if (!stateExists) {
+    pipe.set(
+      KEY.state(tid),
+      JSON.stringify({ taskId: tid, status: 'open' } satisfies A2ATaskState),
+    );
+  }
+
   if (meta.targetExecutorType === 'agent') {
     pipe.sadd(KEY.open, tid);
   }
