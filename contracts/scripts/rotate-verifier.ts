@@ -30,7 +30,14 @@ async function main() {
     );
   }
 
-  const deploymentsPath = path.resolve(__dirname, "../deployments/0g-testnet.json");
+  const { chainId } = await ethers.provider.getNetwork();
+  const isMainnet = Number(chainId) === 16661;
+  const deployFile = isMainnet ? "0g-mainnet.json" : "0g-testnet.json";
+  
+  const deploymentsPath = path.resolve(__dirname, `../deployments/${deployFile}`);
+  if (!fs.existsSync(deploymentsPath)) {
+    throw new Error(`Deployment file not found: ${deploymentsPath}`);
+  }
   const deployments = JSON.parse(fs.readFileSync(deploymentsPath, "utf-8"));
   const proxyAddress: string = deployments.contracts?.BlindEscrow;
   if (!proxyAddress) throw new Error("BlindEscrow address missing from deployments file");

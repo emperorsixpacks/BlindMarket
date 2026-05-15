@@ -70,12 +70,14 @@ async function main() {
   console.log(`  private key written to: ${BACKEND_ENV_PATH} (${KEY_NAME})`);
   console.log("");
   console.log("Next steps:");
-  console.log(`  1. Fund this address with 0G for gas:  ${addr}`);
-  console.log("     (faucet: https://faucet.0g.ai)");
+  console.log(`  1. Fund this address with gas (approx 0.1 0G): ${addr}`);
+  console.log("     (Testnet faucet: https://faucet.0g.ai)");
   console.log("  2. Rotate the on-chain verifier role to it:");
-  console.log(
-    `       MARKETPLACE_SIGNER_ADDRESS=${addr} npx hardhat run scripts/rotate-verifier.ts --network 0g-testnet`,
-  );
+  console.log("     # For Testnet:");
+  console.log(`     MARKETPLACE_SIGNER_ADDRESS=${addr} npx hardhat run scripts/rotate-verifier.ts --network 0g-testnet`);
+  console.log("     # For Mainnet (Requires checklist env var):");
+  console.log(`     export I_HAVE_READ_MAINNET_CHECKLIST=yes`);
+  console.log(`     MARKETPLACE_SIGNER_ADDRESS=${addr} npx hardhat run scripts/rotate-verifier.ts --network 0g-mainnet`);
 }
 
 main().catch((e) => {
