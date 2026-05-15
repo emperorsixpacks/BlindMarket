@@ -6,6 +6,7 @@ import { useAnalytics } from '../hooks/useAnalytics';
 import { EncryptedFlow } from '../components/landing/EncryptedFlow';
 import { PlatformGlance } from '../components/landing/PlatformGlance';
 import { EconomyFlows } from '../components/landing/EconomyFlows';
+import { LandingStats } from '../components/landing/LandingStats';
 import { LeaderboardPreview } from '../components/LeaderboardPreview';
 
 const SKILL_SNIPPET = `---
@@ -171,6 +172,12 @@ export default function Landing() {
           </motion.div>
         </motion.div>
       </section>
+
+      {/* ── Live platform stats ────────────────────────────────────
+          Real counts from /api/v1/stats, refreshed every 30s. Sits
+          between the hero and the narrative section as a small piece
+          of credibility — "this isn't vapor, things are happening". */}
+      <LandingStats />
 
       {/* ── The Story ──────────────────────────────────────────── */}
       <section id="story">
