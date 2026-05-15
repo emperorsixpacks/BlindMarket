@@ -67,7 +67,6 @@ const ERC20_ABI = [
 ];
 
 export default function PostTask() {
-  const isNative = TOKEN === '0x0000000000000000000000000000000000000000';
   const { address } = useAccount();
   const { data: walletClient } = useWalletClient();
   const navigate = useNavigate();
@@ -124,60 +123,15 @@ export default function PostTask() {
       const token = idTok || accTok;
       if (!token) throw new Error('No authentication token available. Please try logging out and back in.');
 
-      // 0. Handle Token Approval if needed (skip for native 0G)
+      // 0. Handle Payment (Native 0G)
       console.log('[PostTask] Initializing provider for payment setup...');
       const provider = new BrowserProvider(walletClient.transport);
       const signer = await provider.getSigner();
 
-      const decimals = isNative ? 18 : await (async () => {
-        const tokenContract = new Contract(TOKEN, ERC20_ABI, signer);
-        return Number(await tokenContract.decimals().catch(() => 18));
-      })();
+      const decimals = 18;
       const amountWei = parseUnits(form.amount, decimals);
 
-      if (!isNative) {
-        const tokenContract = new Contract(TOKEN, ERC20_ABI, signer);
-        try {
-          console.log(`[PostTask] Checking balance and allowance for ${address} on token ${TOKEN} (${decimals} decimals)...`);
-          const [balance, allowance] = await Promise.all([
-            tokenContract.balanceOf(address),
-            tokenContract.allowance(address, BLIND_ESCROW_ADDRESS)
-          ]);
-          
-          console.log(`[PostTask] Balance: ${balance.toString()}, Allowance: ${allowance.toString()}, Required: ${amountWei.toString()}`);
-          
-          if (balance < amountWei) {
-            throw new Error(`Insufficient balance. You need ${form.amount} tokens, but only have ${formatUnits(balance, decimals)}.`);
-          }
-          
-          if (allowance < amountWei) {
-            setStatus('approving');
-            console.log(`[PostTask] Requesting approval for ${amountWei.toString()}...`);
-            const tx = await tokenContract.approve(BLIND_ESCROW_ADDRESS, amountWei);
-            console.log(`[PostTask] Approval TX sent: ${tx.hash}`);
-            await tx.wait();
-            console.log('[PostTask] Approval confirmed.');
-          } else {
-            console.log('[PostTask] Sufficient allowance already exists.');
-          }
-        } catch (err: any) {
-          console.error('[PostTask] Approval error:', err);
-          throw new Error(`Failed to check/approve tokens: ${err.message || 'Unknown error'}. Is the token address ${TOKEN} correct for this network?`);
-        }
-      } else {
-        console.log('[PostTask] Using native 0G — skipping ERC20 approval.');
-        const balance = await provider.getBalance(address);
-        if (balance < amountWei) {
-          throw new Error(`Insufficient balance. You need ${form.amount} 0G, but only have ${formatUnits(balance, 18)} 0G.`);
-        }
-      }
-
-      // 1. Discover eligible executors so we can wrap the AES key to anyone
-      //    who's *already* registered. Zero matches is OK now — the task
-      //    posts with an empty wrappedKeys map, the AES key persists in this
-      //    browser's localStorage, and useBidWatcher() wraps to new agents
-      //    as they /bid. Trade-off: poster must revisit /my_tasks (or stay
-      //    on /a2a) for the wrap to happen. Documented in PITCH.md.
+      // 1. Discover eligible executors
       console.log('[PostTask] Looking up matching executors...');
       const capsQS = encodeURIComponent(requiredCaps.join(','));
       // authedGet unwraps to `body.data` (see api.ts:23), so T is the inner
@@ -273,8 +227,8 @@ export default function PostTask() {
 
       // 7. Sign and send via MetaMask
       setStatus('signing');
-      console.log(`[PostTask] Signing registration TX...`);
-      const receipt = await signAndSendTx(signer, taskJson.unsignedTx);
+      console.log(`[PostTask] Signing registration TX with value ${amountWei.toString()}...`);
+      const receipt = await signAndSendTx(signer, taskJson.unsignedTx, amountWei);
       const txHash = receipt?.hash ?? taskJson.unsignedTx?.hash ?? '';
       console.log(`[PostTask] Task TX submitted: ${txHash}`);
       console.log('[PostTask] Task creation confirmed.');
@@ -505,7 +459,7 @@ export default function PostTask() {
             <div className="mt-4 grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-[11px] font-mono uppercase tracking-widest text-ink-3 mb-2">
-                  bounty ({isNative ? '0G' : 'USDC'}) <span className="text-cream">*</span>
+                  bounty (0G) <span className="text-cream">*</span>
                 </label>
                 <input
                   type="number"
@@ -516,7 +470,12 @@ export default function PostTask() {
                   onChange={e => setForm(f => ({ ...f, amount: e.target.value }))}
                   className="w-full bg-surface-2 border border-line px-4 py-3 text-xs font-mono text-ink focus:outline-none focus:border-cream"
                 />
-                <div className="mt-1 text-[11px] font-mono text-ink-3">85% to worker · 15% protocol fee</div>
+                <div className="mt-1 text-[11px] font-mono text-ink-3">
+                  85% to worker · 15% protocol fee
+                  {form.amount && (
+                    <span className="block text-cream mt-0.5">≈ ${(parseFloat(form.amount) * 0.5).toFixed(2)} USD</span>
+                  )}
+                </div>
               </div>
               <div>
                 <label className="block text-[11px] font-mono uppercase tracking-widest text-ink-3 mb-2">deadline</label>
