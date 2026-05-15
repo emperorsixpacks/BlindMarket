@@ -135,7 +135,7 @@ export default function Landing() {
               animate={reduceMotion ? {} : { opacity: [1, 0.3, 1] }}
               transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }}
             />
-            Live on 0G {isMainnet ? 'Mainnet' : 'testnet'} · 0G APAC Hackathon 2026
+            Built on 0G Chain
           </motion.div>
 
           <motion.h1
