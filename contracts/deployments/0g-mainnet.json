@@ -3,6 +3,7 @@
   "chainId": 16661,
   "deployer": "0x2f8b1177c83623a560B26B38dE984e154b123D75",
   "timestamp": "2026-05-15T06:55:46.736Z",
+  "note": "Mainnet uses native 0G as the payment token (no MockERC20). Note: BlindReputation and BlindEscrow mainnet addresses collide with two of the testnet addresses — that's deterministic CREATE math, not a copy-paste mistake. Same deployer wallet started from nonce 0 on each chain.",
   "contracts": {
     "Native0G": "0x0000000000000000000000000000000000000000",
     "BlindReputation": "0x3af9232009C5da30AdA366B6E09849A040162A1a",
