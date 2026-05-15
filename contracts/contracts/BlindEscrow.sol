@@ -184,7 +184,7 @@ contract BlindEscrow is Initializable, ReentrancyGuardTransient, PausableUpgrade
         string calldata category,
         string calldata locationZone,
         uint256 duration
-    ) external nonReentrant whenNotPaused returns (uint256 taskId) {
+    ) external payable nonReentrant whenNotPaused returns (uint256 taskId) {
         if (amount == 0) revert ZeroAmount();
         if (taskHash == bytes32(0)) revert EmptyHash();
         if (!allowedTokens[token]) revert TokenNotAllowed();
@@ -209,7 +209,12 @@ contract BlindEscrow is Initializable, ReentrancyGuardTransient, PausableUpgrade
         });
 
         // Interactions last (CEI)
-        IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
+        if (token == address(0)) {
+            if (msg.value != amount) revert ZeroAmount();
+        } else {
+            if (msg.value > 0) revert ZeroAmount();
+            IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
+        }
 
         // Publish to TaskRegistry if connected
         if (address(taskRegistry) != address(0)) {
@@ -217,6 +222,16 @@ contract BlindEscrow is Initializable, ReentrancyGuardTransient, PausableUpgrade
         }
 
         emit TaskCreated(taskId, msg.sender, token, amount, taskHash, category, locationZone, deadline);
+    }
+
+    function _transferPayout(address token, address to, uint256 amount) internal {
+        if (amount == 0) return;
+        if (token == address(0)) {
+            (bool success, ) = to.call{value: amount}("");
+            require(success, "native transfer failed");
+        } else {
+            IERC20(token).safeTransfer(to, amount);
+        }
     }
 
     /**
@@ -311,10 +326,8 @@ contract BlindEscrow is Initializable, ReentrancyGuardTransient, PausableUpgrade
             t.status = TaskStatus.Completed;
 
             // ── Interactions (external calls last) ──
-            IERC20(t.token).safeTransfer(t.worker, payout);
-            if (fee > 0) {
-                IERC20(t.token).safeTransfer(treasury, fee);
-            }
+            _transferPayout(t.token, t.worker, payout);
+            _transferPayout(t.token, treasury, fee);
 
             // Record reputation if connected
             if (address(reputationContract) != address(0)) {
@@ -344,7 +357,7 @@ contract BlindEscrow is Initializable, ReentrancyGuardTransient, PausableUpgrade
         t.status = TaskStatus.Cancelled;
 
         // Interactions
-        IERC20(t.token).safeTransfer(t.agent, t.amount);
+        _transferPayout(t.token, t.agent, t.amount);
 
         // Close listing if connected
         if (address(taskRegistry) != address(0)) {
@@ -374,7 +387,7 @@ contract BlindEscrow is Initializable, ReentrancyGuardTransient, PausableUpgrade
         t.status = TaskStatus.Cancelled;
 
         // Interactions
-        IERC20(t.token).safeTransfer(t.agent, t.amount);
+        _transferPayout(t.token, t.agent, t.amount);
 
         emit DeadlineExpired(taskId, t.amount);
     }
@@ -408,10 +421,8 @@ contract BlindEscrow is Initializable, ReentrancyGuardTransient, PausableUpgrade
             uint256 payout = t.amount - fee;
             t.status = TaskStatus.Completed;
 
-            IERC20(t.token).safeTransfer(t.worker, payout);
-            if (fee > 0) {
-                IERC20(t.token).safeTransfer(treasury, fee);
-            }
+            _transferPayout(t.token, t.worker, payout);
+            _transferPayout(t.token, treasury, fee);
 
             if (address(reputationContract) != address(0)) {
                 reputationContract.rate(t.worker, 3, taskId); // neutral score for disputed completion
@@ -422,7 +433,7 @@ contract BlindEscrow is Initializable, ReentrancyGuardTransient, PausableUpgrade
         } else {
             t.status = TaskStatus.Cancelled;
 
-            IERC20(t.token).safeTransfer(t.agent, t.amount);
+            _transferPayout(t.token, t.agent, t.amount);
 
             if (address(reputationContract) != address(0)) {
                 reputationContract.recordDispute(t.worker, taskId);
@@ -467,7 +478,6 @@ contract BlindEscrow is Initializable, ReentrancyGuardTransient, PausableUpgrade
     }
 
     function allowToken(address token) external onlyAdmin {
-        if (token == address(0)) revert ZeroAddress();
         allowedTokens[token] = true;
         emit TokenAllowed(token);
     }

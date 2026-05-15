@@ -700,7 +700,7 @@
             "label": "_tasks",
             "offset": 0,
             "slot": "1",
-            "type": "t_mapping(t_uint256,t_struct(Task)10795_storage)",
+            "type": "t_mapping(t_uint256,t_struct(Task)2661_storage)",
             "contract": "BlindEscrow",
             "src": "contracts/BlindEscrow.sol:70"
           },
@@ -756,7 +756,7 @@
             "label": "reputationContract",
             "offset": 0,
             "slot": "8",
-            "type": "t_contract(IBlindReputation)14729",
+            "type": "t_contract(IBlindReputation)4277",
             "contract": "BlindEscrow",
             "src": "contracts/BlindEscrow.sol:81"
           },
@@ -764,7 +764,7 @@
             "label": "taskRegistry",
             "offset": 0,
             "slot": "9",
-            "type": "t_contract(ITaskRegistry)14755",
+            "type": "t_contract(ITaskRegistry)4303",
             "contract": "BlindEscrow",
             "src": "contracts/BlindEscrow.sol:84"
           }
@@ -774,7 +774,7 @@
             "label": "bool",
             "numberOfBytes": "1"
           },
-          "t_struct(InitializableStorage)390_storage": {
+          "t_struct(InitializableStorage)303_storage": {
             "label": "struct Initializable.InitializableStorage",
             "members": [
               {
@@ -816,15 +816,15 @@
             "label": "bytes32",
             "numberOfBytes": "32"
           },
-          "t_contract(IBlindReputation)14729": {
+          "t_contract(IBlindReputation)4277": {
             "label": "contract IBlindReputation",
             "numberOfBytes": "20"
           },
-          "t_contract(ITaskRegistry)14755": {
+          "t_contract(ITaskRegistry)4303": {
             "label": "contract ITaskRegistry",
             "numberOfBytes": "20"
           },
-          "t_enum(TaskStatus)10769": {
+          "t_enum(TaskStatus)2635": {
             "label": "enum BlindEscrow.TaskStatus",
             "members": [
               "Funded",
@@ -841,7 +841,7 @@
             "label": "mapping(address => bool)",
             "numberOfBytes": "32"
           },
-          "t_mapping(t_uint256,t_struct(Task)10795_storage)": {
+          "t_mapping(t_uint256,t_struct(Task)2661_storage)": {
             "label": "mapping(uint256 => struct BlindEscrow.Task)",
             "numberOfBytes": "32"
           },
@@ -849,7 +849,7 @@
             "label": "string",
             "numberOfBytes": "32"
           },
-          "t_struct(Task)10795_storage": {
+          "t_struct(Task)2661_storage": {
             "label": "struct BlindEscrow.Task",
             "members": [
               {
@@ -890,7 +890,7 @@
               },
               {
                 "label": "status",
-                "type": "t_enum(TaskStatus)10769",
+                "type": "t_enum(TaskStatus)2635",
                 "offset": 0,
                 "slot": "6"
               },
@@ -969,6 +969,7 @@
       },
       "allAddresses": [
         "0x13098AC28b7BC7241D1725aedd9C9dA03dE21712",
+        "0x1533F2dE3883579E788B369B1F544A6c1ff5f883",
         "0x567dE0C352Bdb0df7a53E4bd5f0d5ef2Eb8449d0"
       ]
     }

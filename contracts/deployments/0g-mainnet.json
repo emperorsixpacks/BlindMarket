@@ -1,0 +1,14 @@
+{
+  "network": "0g-mainnet",
+  "chainId": 16661,
+  "deployer": "0x2f8b1177c83623a560B26B38dE984e154b123D75",
+  "timestamp": "2026-05-15T06:55:46.736Z",
+  "contracts": {
+    "Native0G": "0x0000000000000000000000000000000000000000",
+    "BlindReputation": "0x3af9232009C5da30AdA366B6E09849A040162A1a",
+    "TaskRegistry": "0x9CCF9c196006B573FaA9C9c9CebDd1296dbd5cE0",
+    "BlindEscrow": "0x3d0374963DaaD43e31d42373eb11156A8e8ce2Ff",
+    "INFT": "0xfE70a007AFD022A4824d1975A1facFA266F66E28",
+    "ValidatorPool": "0xaf013c36504EAb1E7a3D94abA7d066e2Ba60786c"
+  }
+}

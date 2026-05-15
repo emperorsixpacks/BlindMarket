@@ -1,0 +1,711 @@
+{
+  "manifestVersion": "3.2",
+  "proxies": [
+    {
+      "address": "0xCca5ab873158b888158AD9Dc36fb4Ee683eFbEBf",
+      "txHash": "0xa282929ba1b8ac090fc047cb422634fd832c43e70ca751155d143241b95e3ead",
+      "kind": "uups"
+    },
+    {
+      "address": "0xdf8a78438f3CD1E6b9f3BccC74A21B120d28cce8",
+      "txHash": "0xcd087bc81c43d8d3270480709f800b05c364c0098163afdc61b90dd8a85deca1",
+      "kind": "uups"
+    },
+    {
+      "address": "0x960647982936D65Ced03dC966d1bC6C6803dc4e5",
+      "txHash": "0x2c618bbffa7f4211d90a943bfcbd579d65caf1324abef4c62aa1dfa71f7e4122",
+      "kind": "uups"
+    },
+    {
+      "address": "0xe8CFC167059Da81b76757d3c94CFAA4F7557a4E7",
+      "txHash": "0x08ee5bb07561ee11e8d7c6d1b8a43fced92c9c28cccfda7009e3e460273cdad8",
+      "kind": "uups"
+    },
+    {
+      "address": "0x4AFf5FE7f19779EEfBA8515fB1BaE84A8F3a20B6",
+      "txHash": "0xaec907cc907dc840e040e87f42022e761b55d43c9f3e510259f0c972f83bc2dd",
+      "kind": "uups"
+    },
+    {
+      "address": "0x3af9232009C5da30AdA366B6E09849A040162A1a",
+      "txHash": "0x6bb735ef117c924d47a4fde51985c2f01f10e9cc04dda4fcaa3542f75c29d1d7",
+      "kind": "uups"
+    },
+    {
+      "address": "0x9CCF9c196006B573FaA9C9c9CebDd1296dbd5cE0",
+      "txHash": "0xba8886ef35639d99c2502af9e2bc3b6ddb154e3ee4d172d96b03c962ea48c0cb",
+      "kind": "uups"
+    },
+    {
+      "address": "0x3d0374963DaaD43e31d42373eb11156A8e8ce2Ff",
+      "txHash": "0xe8769430395d48c58e8c91d4a44e4ececc621102a780f3062fa56a20002192a5",
+      "kind": "uups"
+    }
+  ],
+  "impls": {
+    "78744acef54387088621c34b5fca0f0d5797f2b5e92224ec20df563ebf332cd2": {
+      "address": "0xaBf70843E0380F1e749d2b85C30dD6820Ff5C731",
+      "txHash": "0xdb41741233aa4b3186b50f62a0cf492aa9be3fcce3d4d4b06a2b8673faa81f8d",
+      "layout": {
+        "solcVersion": "0.8.24",
+        "storage": [
+          {
+            "label": "reputations",
+            "offset": 0,
+            "slot": "0",
+            "type": "t_mapping(t_address,t_struct(Reputation)11764_storage)",
+            "contract": "BlindReputation",
+            "src": "contracts/BlindReputation.sol:31"
+          },
+          {
+            "label": "authorizedRaters",
+            "offset": 0,
+            "slot": "1",
+            "type": "t_mapping(t_address,t_bool)",
+            "contract": "BlindReputation",
+            "src": "contracts/BlindReputation.sol:32"
+          },
+          {
+            "label": "ratedTasks",
+            "offset": 0,
+            "slot": "2",
+            "type": "t_mapping(t_bytes32,t_bool)",
+            "contract": "BlindReputation",
+            "src": "contracts/BlindReputation.sol:33"
+          },
+          {
+            "label": "admin",
+            "offset": 0,
+            "slot": "3",
+            "type": "t_address",
+            "contract": "BlindReputation",
+            "src": "contracts/BlindReputation.sol:35"
+          },
+          {
+            "label": "pendingAdmin",
+            "offset": 0,
+            "slot": "4",
+            "type": "t_address",
+            "contract": "BlindReputation",
+            "src": "contracts/BlindReputation.sol:36"
+          }
+        ],
+        "types": {
+          "t_bool": {
+            "label": "bool",
+            "numberOfBytes": "1"
+          },
+          "t_struct(InitializableStorage)390_storage": {
+            "label": "struct Initializable.InitializableStorage",
+            "members": [
+              {
+                "label": "_initialized",
+                "type": "t_uint64",
+                "offset": 0,
+                "slot": "0"
+              },
+              {
+                "label": "_initializing",
+                "type": "t_bool",
+                "offset": 8,
+                "slot": "0"
+              }
+            ],
+            "numberOfBytes": "32"
+          },
+          "t_struct(PausableStorage)49_storage": {
+            "label": "struct PausableUpgradeable.PausableStorage",
+            "members": [
+              {
+                "label": "_paused",
+                "type": "t_bool",
+                "offset": 0,
+                "slot": "0"
+              }
+            ],
+            "numberOfBytes": "32"
+          },
+          "t_uint64": {
+            "label": "uint64",
+            "numberOfBytes": "8"
+          },
+          "t_address": {
+            "label": "address",
+            "numberOfBytes": "20"
+          },
+          "t_bytes32": {
+            "label": "bytes32",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_address,t_bool)": {
+            "label": "mapping(address => bool)",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_address,t_struct(Reputation)11764_storage)": {
+            "label": "mapping(address => struct BlindReputation.Reputation)",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_bytes32,t_bool)": {
+            "label": "mapping(bytes32 => bool)",
+            "numberOfBytes": "32"
+          },
+          "t_struct(Reputation)11764_storage": {
+            "label": "struct BlindReputation.Reputation",
+            "members": [
+              {
+                "label": "tasksCompleted",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "0"
+              },
+              {
+                "label": "totalScore",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "1"
+              },
+              {
+                "label": "disputes",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "2"
+              }
+            ],
+            "numberOfBytes": "96"
+          },
+          "t_uint256": {
+            "label": "uint256",
+            "numberOfBytes": "32"
+          }
+        },
+        "namespaces": {
+          "erc7201:openzeppelin.storage.Pausable": [
+            {
+              "contract": "PausableUpgradeable",
+              "label": "_paused",
+              "type": "t_bool",
+              "src": "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol:21",
+              "offset": 0,
+              "slot": "0"
+            }
+          ],
+          "erc7201:openzeppelin.storage.Initializable": [
+            {
+              "contract": "Initializable",
+              "label": "_initialized",
+              "type": "t_uint64",
+              "src": "@openzeppelin/contracts/proxy/utils/Initializable.sol:69",
+              "offset": 0,
+              "slot": "0"
+            },
+            {
+              "contract": "Initializable",
+              "label": "_initializing",
+              "type": "t_bool",
+              "src": "@openzeppelin/contracts/proxy/utils/Initializable.sol:73",
+              "offset": 8,
+              "slot": "0"
+            }
+          ]
+        }
+      }
+    },
+    "ff98e97a2b5492f47b1a52a1cd48057f08611b71473a6a2d8e1c2d2b027f0a4b": {
+      "address": "0x1E9Abb2F2e66b8Af35BED730500A94760E133a3B",
+      "txHash": "0xc75eaccb0a52b74d626cca027e18fa2dcc0f9be5302ac5c3e8d732ba83f66987",
+      "layout": {
+        "solcVersion": "0.8.24",
+        "storage": [
+          {
+            "label": "taskList",
+            "offset": 0,
+            "slot": "0",
+            "type": "t_array(t_struct(TaskMeta)12718_storage)dyn_storage",
+            "contract": "TaskRegistry",
+            "src": "contracts/TaskRegistry.sol:35"
+          },
+          {
+            "label": "taskIdToIndex",
+            "offset": 0,
+            "slot": "1",
+            "type": "t_mapping(t_uint256,t_uint256)",
+            "contract": "TaskRegistry",
+            "src": "contracts/TaskRegistry.sol:36"
+          },
+          {
+            "label": "taskExists",
+            "offset": 0,
+            "slot": "2",
+            "type": "t_mapping(t_uint256,t_bool)",
+            "contract": "TaskRegistry",
+            "src": "contracts/TaskRegistry.sol:37"
+          },
+          {
+            "label": "authorizedPublishers",
+            "offset": 0,
+            "slot": "3",
+            "type": "t_mapping(t_address,t_bool)",
+            "contract": "TaskRegistry",
+            "src": "contracts/TaskRegistry.sol:38"
+          },
+          {
+            "label": "openTaskCount",
+            "offset": 0,
+            "slot": "4",
+            "type": "t_uint256",
+            "contract": "TaskRegistry",
+            "src": "contracts/TaskRegistry.sol:39"
+          },
+          {
+            "label": "admin",
+            "offset": 0,
+            "slot": "5",
+            "type": "t_address",
+            "contract": "TaskRegistry",
+            "src": "contracts/TaskRegistry.sol:41"
+          },
+          {
+            "label": "pendingAdmin",
+            "offset": 0,
+            "slot": "6",
+            "type": "t_address",
+            "contract": "TaskRegistry",
+            "src": "contracts/TaskRegistry.sol:42"
+          }
+        ],
+        "types": {
+          "t_bool": {
+            "label": "bool",
+            "numberOfBytes": "1"
+          },
+          "t_struct(InitializableStorage)390_storage": {
+            "label": "struct Initializable.InitializableStorage",
+            "members": [
+              {
+                "label": "_initialized",
+                "type": "t_uint64",
+                "offset": 0,
+                "slot": "0"
+              },
+              {
+                "label": "_initializing",
+                "type": "t_bool",
+                "offset": 8,
+                "slot": "0"
+              }
+            ],
+            "numberOfBytes": "32"
+          },
+          "t_struct(PausableStorage)49_storage": {
+            "label": "struct PausableUpgradeable.PausableStorage",
+            "members": [
+              {
+                "label": "_paused",
+                "type": "t_bool",
+                "offset": 0,
+                "slot": "0"
+              }
+            ],
+            "numberOfBytes": "32"
+          },
+          "t_uint64": {
+            "label": "uint64",
+            "numberOfBytes": "8"
+          },
+          "t_address": {
+            "label": "address",
+            "numberOfBytes": "20"
+          },
+          "t_array(t_struct(TaskMeta)12718_storage)dyn_storage": {
+            "label": "struct TaskRegistry.TaskMeta[]",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_address,t_bool)": {
+            "label": "mapping(address => bool)",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_uint256,t_bool)": {
+            "label": "mapping(uint256 => bool)",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_uint256,t_uint256)": {
+            "label": "mapping(uint256 => uint256)",
+            "numberOfBytes": "32"
+          },
+          "t_string_storage": {
+            "label": "string",
+            "numberOfBytes": "32"
+          },
+          "t_struct(TaskMeta)12718_storage": {
+            "label": "struct TaskRegistry.TaskMeta",
+            "members": [
+              {
+                "label": "taskId",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "0"
+              },
+              {
+                "label": "agent",
+                "type": "t_address",
+                "offset": 0,
+                "slot": "1"
+              },
+              {
+                "label": "category",
+                "type": "t_string_storage",
+                "offset": 0,
+                "slot": "2"
+              },
+              {
+                "label": "locationZone",
+                "type": "t_string_storage",
+                "offset": 0,
+                "slot": "3"
+              },
+              {
+                "label": "reward",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "4"
+              },
+              {
+                "label": "createdAt",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "5"
+              },
+              {
+                "label": "isOpen",
+                "type": "t_bool",
+                "offset": 0,
+                "slot": "6"
+              }
+            ],
+            "numberOfBytes": "224"
+          },
+          "t_uint256": {
+            "label": "uint256",
+            "numberOfBytes": "32"
+          }
+        },
+        "namespaces": {
+          "erc7201:openzeppelin.storage.Pausable": [
+            {
+              "contract": "PausableUpgradeable",
+              "label": "_paused",
+              "type": "t_bool",
+              "src": "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol:21",
+              "offset": 0,
+              "slot": "0"
+            }
+          ],
+          "erc7201:openzeppelin.storage.Initializable": [
+            {
+              "contract": "Initializable",
+              "label": "_initialized",
+              "type": "t_uint64",
+              "src": "@openzeppelin/contracts/proxy/utils/Initializable.sol:69",
+              "offset": 0,
+              "slot": "0"
+            },
+            {
+              "contract": "Initializable",
+              "label": "_initializing",
+              "type": "t_bool",
+              "src": "@openzeppelin/contracts/proxy/utils/Initializable.sol:73",
+              "offset": 8,
+              "slot": "0"
+            }
+          ]
+        }
+      }
+    },
+    "b86acbd957842ef2b283ba5e4a576e0039f89f4d6ed8c0f0da51ae003731cc1e": {
+      "address": "0x4B804C0c50Bb66A1B2C2Ab0B863bD218965D7454",
+      "txHash": "0x526c61ec816c987acd1dd580d853e5859246cf40530c756fc3a57e2bcaa4da8b",
+      "layout": {
+        "solcVersion": "0.8.24",
+        "storage": [
+          {
+            "label": "nextTaskId",
+            "offset": 0,
+            "slot": "0",
+            "type": "t_uint256",
+            "contract": "BlindEscrow",
+            "src": "contracts/BlindEscrow.sol:70"
+          },
+          {
+            "label": "_tasks",
+            "offset": 0,
+            "slot": "1",
+            "type": "t_mapping(t_uint256,t_struct(Task)2661_storage)",
+            "contract": "BlindEscrow",
+            "src": "contracts/BlindEscrow.sol:70"
+          },
+          {
+            "label": "admin",
+            "offset": 0,
+            "slot": "2",
+            "type": "t_address",
+            "contract": "BlindEscrow",
+            "src": "contracts/BlindEscrow.sol:73"
+          },
+          {
+            "label": "pendingAdmin",
+            "offset": 0,
+            "slot": "3",
+            "type": "t_address",
+            "contract": "BlindEscrow",
+            "src": "contracts/BlindEscrow.sol:73"
+          },
+          {
+            "label": "treasury",
+            "offset": 0,
+            "slot": "4",
+            "type": "t_address",
+            "contract": "BlindEscrow",
+            "src": "contracts/BlindEscrow.sol:75"
+          },
+          {
+            "label": "verifier",
+            "offset": 0,
+            "slot": "5",
+            "type": "t_address",
+            "contract": "BlindEscrow",
+            "src": "contracts/BlindEscrow.sol:75"
+          },
+          {
+            "label": "feeBps",
+            "offset": 0,
+            "slot": "6",
+            "type": "t_uint256",
+            "contract": "BlindEscrow",
+            "src": "contracts/BlindEscrow.sol:76"
+          },
+          {
+            "label": "allowedTokens",
+            "offset": 0,
+            "slot": "7",
+            "type": "t_mapping(t_address,t_bool)",
+            "contract": "BlindEscrow",
+            "src": "contracts/BlindEscrow.sol:78"
+          },
+          {
+            "label": "reputationContract",
+            "offset": 0,
+            "slot": "8",
+            "type": "t_contract(IBlindReputation)4314",
+            "contract": "BlindEscrow",
+            "src": "contracts/BlindEscrow.sol:81"
+          },
+          {
+            "label": "taskRegistry",
+            "offset": 0,
+            "slot": "9",
+            "type": "t_contract(ITaskRegistry)4340",
+            "contract": "BlindEscrow",
+            "src": "contracts/BlindEscrow.sol:84"
+          }
+        ],
+        "types": {
+          "t_bool": {
+            "label": "bool",
+            "numberOfBytes": "1"
+          },
+          "t_struct(InitializableStorage)303_storage": {
+            "label": "struct Initializable.InitializableStorage",
+            "members": [
+              {
+                "label": "_initialized",
+                "type": "t_uint64",
+                "offset": 0,
+                "slot": "0"
+              },
+              {
+                "label": "_initializing",
+                "type": "t_bool",
+                "offset": 8,
+                "slot": "0"
+              }
+            ],
+            "numberOfBytes": "32"
+          },
+          "t_struct(PausableStorage)49_storage": {
+            "label": "struct PausableUpgradeable.PausableStorage",
+            "members": [
+              {
+                "label": "_paused",
+                "type": "t_bool",
+                "offset": 0,
+                "slot": "0"
+              }
+            ],
+            "numberOfBytes": "32"
+          },
+          "t_uint64": {
+            "label": "uint64",
+            "numberOfBytes": "8"
+          },
+          "t_address": {
+            "label": "address",
+            "numberOfBytes": "20"
+          },
+          "t_bytes32": {
+            "label": "bytes32",
+            "numberOfBytes": "32"
+          },
+          "t_contract(IBlindReputation)4314": {
+            "label": "contract IBlindReputation",
+            "numberOfBytes": "20"
+          },
+          "t_contract(ITaskRegistry)4340": {
+            "label": "contract ITaskRegistry",
+            "numberOfBytes": "20"
+          },
+          "t_enum(TaskStatus)2635": {
+            "label": "enum BlindEscrow.TaskStatus",
+            "members": [
+              "Funded",
+              "Assigned",
+              "Submitted",
+              "Verified",
+              "Completed",
+              "Cancelled",
+              "Disputed"
+            ],
+            "numberOfBytes": "1"
+          },
+          "t_mapping(t_address,t_bool)": {
+            "label": "mapping(address => bool)",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_uint256,t_struct(Task)2661_storage)": {
+            "label": "mapping(uint256 => struct BlindEscrow.Task)",
+            "numberOfBytes": "32"
+          },
+          "t_string_storage": {
+            "label": "string",
+            "numberOfBytes": "32"
+          },
+          "t_struct(Task)2661_storage": {
+            "label": "struct BlindEscrow.Task",
+            "members": [
+              {
+                "label": "agent",
+                "type": "t_address",
+                "offset": 0,
+                "slot": "0"
+              },
+              {
+                "label": "worker",
+                "type": "t_address",
+                "offset": 0,
+                "slot": "1"
+              },
+              {
+                "label": "token",
+                "type": "t_address",
+                "offset": 0,
+                "slot": "2"
+              },
+              {
+                "label": "amount",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "3"
+              },
+              {
+                "label": "taskHash",
+                "type": "t_bytes32",
+                "offset": 0,
+                "slot": "4"
+              },
+              {
+                "label": "evidenceHash",
+                "type": "t_bytes32",
+                "offset": 0,
+                "slot": "5"
+              },
+              {
+                "label": "status",
+                "type": "t_enum(TaskStatus)2635",
+                "offset": 0,
+                "slot": "6"
+              },
+              {
+                "label": "category",
+                "type": "t_string_storage",
+                "offset": 0,
+                "slot": "7"
+              },
+              {
+                "label": "locationZone",
+                "type": "t_string_storage",
+                "offset": 0,
+                "slot": "8"
+              },
+              {
+                "label": "createdAt",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "9"
+              },
+              {
+                "label": "deadline",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "10"
+              },
+              {
+                "label": "submissionAttempts",
+                "type": "t_uint8",
+                "offset": 0,
+                "slot": "11"
+              }
+            ],
+            "numberOfBytes": "384"
+          },
+          "t_uint256": {
+            "label": "uint256",
+            "numberOfBytes": "32"
+          },
+          "t_uint8": {
+            "label": "uint8",
+            "numberOfBytes": "1"
+          }
+        },
+        "namespaces": {
+          "erc7201:openzeppelin.storage.Pausable": [
+            {
+              "contract": "PausableUpgradeable",
+              "label": "_paused",
+              "type": "t_bool",
+              "src": "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol:21",
+              "offset": 0,
+              "slot": "0"
+            }
+          ],
+          "erc7201:openzeppelin.storage.Initializable": [
+            {
+              "contract": "Initializable",
+              "label": "_initialized",
+              "type": "t_uint64",
+              "src": "@openzeppelin/contracts/proxy/utils/Initializable.sol:69",
+              "offset": 0,
+              "slot": "0"
+            },
+            {
+              "contract": "Initializable",
+              "label": "_initializing",
+              "type": "t_bool",
+              "src": "@openzeppelin/contracts/proxy/utils/Initializable.sol:73",
+              "offset": 8,
+              "slot": "0"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

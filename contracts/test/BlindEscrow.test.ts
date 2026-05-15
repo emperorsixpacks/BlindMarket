@@ -105,25 +105,37 @@ describe("BlindEscrow", function () {
       await expect(tx).to.emit(escrow, "TaskCreated");
     });
 
-    it("should reject zero amount", async function () {
+    it("should create a task with native 0G", async function () {
+      const NATIVE = ethers.ZeroAddress;
+      await escrow.connect(admin).allowToken(NATIVE);
+      
+      const nativeAmount = ethers.parseEther("1");
+      const tx = await escrow.connect(agent).createTask(
+        TASK_HASH, NATIVE, nativeAmount, "native", "global", ONE_WEEK,
+        { value: nativeAmount }
+      );
+
+      const task = await escrow.getTask(1);
+      expect(task.token).to.equal(NATIVE);
+      expect(task.amount).to.equal(nativeAmount);
+      
+      expect(await ethers.provider.getBalance(await escrow.getAddress())).to.equal(nativeAmount);
+      await expect(tx).to.emit(escrow, "TaskCreated");
+    });
+
+    it("should reject native task if value != amount", async function () {
+      const NATIVE = ethers.ZeroAddress;
+      await escrow.connect(admin).allowToken(NATIVE);
+      
       await expect(
-        escrow.connect(agent).createTask(TASK_HASH, await token.getAddress(), 0, "test", "test", ONE_WEEK)
+        escrow.connect(agent).createTask(TASK_HASH, NATIVE, ethers.parseEther("1"), "test", "test", ONE_WEEK, { value: ethers.parseEther("0.5") })
       ).to.be.revertedWithCustomError(escrow, "ZeroAmount");
     });
 
-    it("should reject empty task hash", async function () {
+    it("should reject ERC20 task if value > 0", async function () {
       await expect(
-        escrow.connect(agent).createTask(ethers.ZeroHash, await token.getAddress(), AMOUNT, "test", "test", ONE_WEEK)
-      ).to.be.revertedWithCustomError(escrow, "EmptyHash");
-    });
-
-    it("should reject non-whitelisted token", async function () {
-      const BadToken = await ethers.getContractFactory("MockERC20");
-      const badToken = await BadToken.deploy("Bad", "BAD", 18);
-
-      await expect(
-        escrow.connect(agent).createTask(TASK_HASH, await badToken.getAddress(), AMOUNT, "test", "test", ONE_WEEK)
-      ).to.be.revertedWithCustomError(escrow, "TokenNotAllowed");
+        escrow.connect(agent).createTask(TASK_HASH, await token.getAddress(), AMOUNT, "test", "test", ONE_WEEK, { value: 1 })
+      ).to.be.revertedWithCustomError(escrow, "ZeroAmount");
     });
 
     it("should reject deadline too short", async function () {
@@ -566,10 +578,10 @@ describe("BlindEscrow", function () {
       expect(await escrow.allowedTokens(await token2.getAddress())).to.be.false;
     });
 
-    it("should reject allowing zero address token", async function () {
-      await expect(
-        escrow.connect(admin).allowToken(ethers.ZeroAddress)
-      ).to.be.revertedWithCustomError(escrow, "ZeroAddress");
+    it("should allow whitelisting zero address for native payments", async function () {
+      await expect(escrow.connect(admin).allowToken(ethers.ZeroAddress))
+        .to.emit(escrow, "TokenAllowed");
+      expect(await escrow.allowedTokens(ethers.ZeroAddress)).to.be.true;
     });
   });
 
