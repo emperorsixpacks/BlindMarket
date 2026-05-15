@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { isMainnet, OG_CHAIN_ID } from '../../config/constants';
 
 // ── Card primitives ────────────────────────────────────────────
 function Card({ children, className = '' }: { children: ReactNode; className?: string }) {
@@ -132,9 +133,9 @@ function LiveCard() {
             animate={{ opacity: [1, 0.3, 1] }}
             transition={{ duration: 1.6, repeat: Infinity }}
           />
-          <span className="text-ink">Live on 0G testnet</span>
+          <span className="text-ink">Live on {isMainnet ? '0G Mainnet' : '0G testnet'}</span>
         </div>
-        <div className="text-xs text-ink-3">0G Galileo · chain id 16602</div>
+        <div className="text-xs text-ink-3">0G {isMainnet ? 'Mainnet' : 'Galileo'} · chain id {OG_CHAIN_ID}</div>
         <div className="mt-2 text-xs font-mono text-ink-3">
           <div>tee_online <span className="text-ok">●</span></div>
           <div>storage_indexer <span className="text-ok">●</span></div>

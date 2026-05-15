@@ -67,6 +67,7 @@ const ERC20_ABI = [
 ];
 
 export default function PostTask() {
+  const isNative = TOKEN === '0x0000000000000000000000000000000000000000';
   const { address } = useAccount();
   const { data: walletClient } = useWalletClient();
   const navigate = useNavigate();
@@ -128,7 +129,6 @@ export default function PostTask() {
       const provider = new BrowserProvider(walletClient.transport);
       const signer = await provider.getSigner();
 
-      const isNative = TOKEN === '0x0000000000000000000000000000000000000000';
       const decimals = isNative ? 18 : await (async () => {
         const tokenContract = new Contract(TOKEN, ERC20_ABI, signer);
         return Number(await tokenContract.decimals().catch(() => 18));

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { motion, useInView, useReducedMotion } from 'framer-motion';
 import { get } from '../../lib/api';
+import { isMainnet } from '../../config/constants';
 
 /**
  * Live platform-stats block for the landing page.
@@ -184,7 +185,7 @@ export function LandingStats() {
               animate={reduceMotion ? {} : { opacity: [1, 0.3, 1] }}
               transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }}
             />
-            Live · 0G testnet
+            Live · {isMainnet ? '0G Mainnet' : '0G Testnet'}
           </div>
         </motion.div>
 

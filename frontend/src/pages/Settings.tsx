@@ -10,7 +10,7 @@ import {
 } from '../components/bb';
 import { useWallet } from '../context/WalletContext';
 import { useReputation } from '../hooks/useReputation';
-import { OG_CHAIN_ID } from '../config/constants';
+import { isMainnet, OG_CHAIN_ID, OG_RPC_URL } from '../config/constants';
 
 const NOTIF_KEYS = {
   payout: 'bb.notify.payout',
@@ -88,9 +88,9 @@ export default function Settings() {
           <div className="space-y-5">
             <SectionRule num="02" title="network" />
 
-            <FormField label="supported_chain" hint="BlindMarket runs on 0G Galileo (16602)">
+            <FormField label="supported_chain" hint={`BlindMarket runs on 0G ${isMainnet ? 'Mainnet' : 'Galileo'} (${isMainnet ? 16661 : 16602})`}>
               <div className="px-3 py-2.5 bg-surface-2 border border-line text-sm font-mono flex items-center gap-2">
-                <Tag tone={isCorrectChain ? 'ok' : 'warn'}>0g_galileo · 16602</Tag>
+                <Tag tone={isCorrectChain ? 'ok' : 'warn'}>0g_{isMainnet ? 'mainnet' : 'galileo'} · {OG_CHAIN_ID}</Tag>
                 {chainId != null && chainId !== OG_CHAIN_ID && (
                   <>
                     <span className="text-ink-3">currently on chain {chainId}</span>
@@ -145,7 +145,7 @@ export default function Settings() {
               {[
                 { label: 'wallet', value: isConnected ? '● connected' : '○ disconnected', color: isConnected ? 'text-ok' : 'text-ink-3' },
                 { label: 'chain_id', value: chainId != null ? String(chainId) : '—', color: isCorrectChain ? 'text-ok' : 'text-warn' },
-                { label: 'rpc', value: 'evmrpc-testnet.0g.ai', color: 'text-ink-3' },
+                { label: 'rpc', value: OG_RPC_URL.replace(/^https?:\/\//, ''), color: 'text-ink-3' },
               ].map((item) => (
                 <div key={item.label} className="flex items-center justify-between py-1.5">
                   <span className="text-[11px] font-mono text-ink-3">{item.label}</span>

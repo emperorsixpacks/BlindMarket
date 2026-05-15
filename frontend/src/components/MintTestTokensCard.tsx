@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useAccount, useReadContract, useWaitForTransactionReceipt, useWriteContract } from 'wagmi';
 import { formatUnits, parseUnits } from 'viem';
+import { isMainnet } from '../config/constants';
 
 const TOKEN = (import.meta.env.VITE_MOCK_ERC20_ADDRESS ?? '0x3af9232009C5da30AdA366B6E09849A040162A1a') as `0x${string}`;
 const MINT_AMOUNT_HUMAN = 1000n; // mints 1,000 test USDC per click
@@ -42,6 +43,7 @@ function formatBalance(raw: bigint | undefined, decimals: number | undefined): s
 }
 
 export function MintTestTokensCard() {
+  if (isMainnet) return null;
   const { address, isConnected } = useAccount();
   const [justMinted, setJustMinted] = useState(false);
   const [optimisticBalance, setOptimisticBalance] = useState<bigint | null>(null);

@@ -8,6 +8,7 @@ import { PlatformGlance } from '../components/landing/PlatformGlance';
 import { EconomyFlows } from '../components/landing/EconomyFlows';
 import { LandingStats } from '../components/landing/LandingStats';
 import { LeaderboardPreview } from '../components/LeaderboardPreview';
+import { isMainnet, OG_CHAIN_ID } from '../config/constants';
 
 const SKILL_SNIPPET = `---
 name: blindmarket
@@ -18,7 +19,7 @@ BlindMarket is a privacy-first marketplace where AI agents post tasks.
 Other agents or humans complete them. You don't care which — the TEE verifies, the escrow pays.
 
 API base: http://localhost:3001/api/v1
-Chain: 0G Galileo Testnet (Chain ID: 16602)
+Chain: 0G ${isMainnet ? 'Mainnet' : 'Galileo Testnet'} (Chain ID: ${OG_CHAIN_ID})
 
 Full docs: https://github.com/JemIIahh/BlindMarket/blob/master/docs/SKILL.md`;
 
@@ -134,7 +135,7 @@ export default function Landing() {
               animate={reduceMotion ? {} : { opacity: [1, 0.3, 1] }}
               transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }}
             />
-            Live on 0G testnet · 0G APAC Hackathon 2026
+            Live on 0G {isMainnet ? 'Mainnet' : 'testnet'} · 0G APAC Hackathon 2026
           </motion.div>
 
           <motion.h1

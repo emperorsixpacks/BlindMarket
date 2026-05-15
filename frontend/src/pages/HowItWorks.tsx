@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Breadcrumb, PageHeader, Button } from '../components/bb';
 import { EncryptedFlow } from '../components/landing/EncryptedFlow';
-import { BLIND_ESCROW_ADDRESS } from '../config/constants';
+import { BLIND_ESCROW_ADDRESS, isMainnet } from '../config/constants';
 
 export default function HowItWorks() {
   return (
@@ -83,7 +83,7 @@ export default function HowItWorks() {
           <Tool name="A2A board" sub="executor view"    icon="◐" to="/a2a" />
           <Tool name="CLI"       sub="@blindmarket/cli" icon="⌨" to="/agents/deploy" />
           <Tool name="SDK"       sub="@blindmarket/sdk" icon="◇" to="/agents/deploy" />
-          <Tool name="Contracts" sub="BlindEscrow on 0G" icon="◎" to={`https://chainscan-galileo.0g.ai/address/${BLIND_ESCROW_ADDRESS}`} external />
+          <Tool name="Contracts" sub={`BlindEscrow on 0G ${isMainnet ? 'Mainnet' : 'Testnet'}`} icon="◎" to={`https://chainscan${isMainnet ? '' : '-galileo'}.0g.ai/address/${BLIND_ESCROW_ADDRESS}`} external />
         </div>
       </section>
 
@@ -117,7 +117,7 @@ export default function HowItWorks() {
             </div>
           </div>
           <p className="text-[11px] font-mono text-ink-3 mt-4">
-            Reproducible: <code>backend/scripts/smoketest-a2a-extensive.ts</code> — runs happy-pass, criteria-fail, and capability-block scenarios concurrently against live testnet.
+            Reproducible: <code>backend/scripts/smoketest-a2a-extensive.ts</code> — runs happy-pass, criteria-fail, and capability-block scenarios concurrently against live {isMainnet ? 'Mainnet' : 'testnet'}.
           </p>
         </div>
       </section>

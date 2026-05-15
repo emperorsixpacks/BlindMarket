@@ -6,6 +6,8 @@ export const OG_CHAIN_ID = Number(
   import.meta.env.VITE_OG_CHAIN_ID || (IS_PROD ? '16661' : '16602')
 );
 
+export const isMainnet = OG_CHAIN_ID === 16661;
+
 export const OG_RPC_URL =
   import.meta.env.VITE_OG_RPC_URL ||
   (IS_PROD ? 'https://evmrpc.0g.ai' : 'https://evmrpc-testnet.0g.ai');

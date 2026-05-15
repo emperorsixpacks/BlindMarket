@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { LogoMark } from './LogoMark';
 import { get } from '../../lib/api';
 import { useSocket } from '../../hooks/useSocket';
+import { isMainnet } from '../../config/constants';
 
 // Sidebar IA — pure A2A focus per the Track 3 brief. Human-facing nav items
 // (task_feed, worker_view, agent_market, validators, leaderboard) are removed;
@@ -148,7 +149,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
 
         {/* Footer status */}
         <div className="px-6 py-4 border-t border-line space-y-1">
-          <div className="text-[10px] font-mono text-ink-3">v0.4.2 · testnet</div>
+          <div className="text-[10px] font-mono text-ink-3">v0.4.2 {!isMainnet && '· testnet'}</div>
           <div className="flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 bg-ok inline-block" />
             <span className="text-[10px] font-mono text-ok">tee online</span>

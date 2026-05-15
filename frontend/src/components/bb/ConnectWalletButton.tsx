@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { usePrivy } from '@privy-io/react-auth';
 import { useAccount, useChainId, useSwitchChain } from 'wagmi';
 import { ogTestnet } from '../../config/chains';
+import { isMainnet } from '../../config/constants';
 
 function shortenAddress(addr: string) {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
@@ -76,7 +77,7 @@ export function ConnectWalletButton({ variant = 'pill' }: Props) {
       <div className="flex items-center border border-line text-[11px] font-mono">
         <span className="hidden sm:flex px-3 py-1.5 text-ink-2 items-center gap-1.5">
           <span className="w-1.5 h-1.5 bg-ok inline-block" />
-          {ogTestnet.name}
+          {isMainnet ? '0G Mainnet' : ogTestnet.name}
         </span>
         <button
           onClick={() => setMenuOpen(o => !o)}
