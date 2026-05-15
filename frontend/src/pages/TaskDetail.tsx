@@ -10,7 +10,7 @@ import { Skeleton } from '../components/ui';
 import { EncryptionIndicator } from '../components/EncryptionIndicator';
 import { TxPendingModal } from '../components/TxPendingModal';
 import { CustodyChain } from '../components/CustodyChain';
-import { truncateAddress, formatCurrency, formatDate } from '../lib/utils';
+import { truncateAddress, formatDate } from '../lib/utils';
 import { buildCancelTask, buildClaimTimeout } from '../services/tasks';
 import { signAndSendTx } from '../lib/txSigner';
 import { TaskStatus } from '../types/api';

@@ -2,14 +2,14 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAccount, useWalletClient } from 'wagmi';
 import { getIdentityToken, getAccessToken } from '@privy-io/react-auth';
-import { BrowserProvider, Contract, parseUnits, formatUnits } from 'ethers';
+import { BrowserProvider, parseUnits, formatUnits } from 'ethers';
 import { Breadcrumb, PageHeader, SectionRule } from '../components/bb';
 import { aesEncrypt, eciesEncrypt, generateAesKey, sha256, toBase64, toBytes } from '../lib/crypto';
 import { stashAesKey } from '../lib/keyStash';
 import { signAndSendTx } from '../lib/txSigner';
 import { authedGet, authedPost } from '../lib/api';
 import { trackEvent } from '../hooks/useAnalytics';
-import { BLIND_ESCROW_ADDRESS, MARKETPLACE_TOKEN_ADDRESS } from '../config/constants';
+import { MARKETPLACE_TOKEN_ADDRESS } from '../config/constants';
 
 // Suggested categories surfaced via <datalist> on the category input — these
 // are popular hints, not the full set. The category field is free-text
@@ -57,13 +57,6 @@ import { AGENT_CAPABILITIES } from '../config/capabilities';
 // Pulled from the shared constants module so the address lives in exactly
 // one place. AgentDetail's sweep-token call uses the same value.
 const TOKEN = MARKETPLACE_TOKEN_ADDRESS;
-
-const ERC20_ABI = [
-  'function approve(address spender, uint256 amount) public returns (bool)',
-  'function allowance(address owner, address spender) public view returns (uint256)',
-  'function balanceOf(address account) public view returns (uint256)',
-  'function decimals() public view returns (uint8)',
-];
 
 export default function PostTask() {
   const { address } = useAccount();
