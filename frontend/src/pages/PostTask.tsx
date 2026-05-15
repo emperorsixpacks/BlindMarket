@@ -154,7 +154,6 @@ export default function PostTask() {
             setStatus('approving');
             console.log(`[PostTask] Requesting approval for ${amountWei.toString()}...`);
             const tx = await tokenContract.approve(BLIND_ESCROW_ADDRESS, amountWei);
-            const explorerLink = `https://chainscan.0g.ai/tx/${tx.hash}`;
             console.log(`[PostTask] Approval TX sent: ${tx.hash}`);
             await tx.wait();
             console.log('[PostTask] Approval confirmed.');
