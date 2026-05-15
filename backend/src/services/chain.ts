@@ -78,6 +78,10 @@ export async function buildUnsignedTx(
 }
 /** Get decimals for an ERC-20 token */
 export async function getTokenDecimals(tokenAddress: string): Promise<number> {
+  // If native token, return 18
+  if (tokenAddress === '0x0000000000000000000000000000000000000000') {
+    return 18;
+  }
   try {
     const token = new ethers.Contract(tokenAddress, ['function decimals() view returns (uint8)'], provider);
     return Number(await token.decimals());

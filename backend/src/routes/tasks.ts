@@ -138,7 +138,8 @@ tasksRouter.get('/', async (req: AuthRequest, res, next) => {
         ...(chainError ? { chainError } : {}),
       },
     };
-    res.json(body);
+    const replacer = (key: string, value: any) => typeof value === 'bigint' ? value.toString() : value;
+    res.json(JSON.parse(JSON.stringify(body, replacer)));
   } catch (err) {
     next(err);
   }
@@ -188,7 +189,8 @@ tasksRouter.get('/:id', async (req, res, next) => {
         decimals,
       },
     };
-    res.json(body);
+    const replacer = (key: string, value: any) => typeof value === 'bigint' ? value.toString() : value;
+    res.json(JSON.parse(JSON.stringify(body, replacer)));
   } catch (err) {
     next(err);
   }
@@ -260,7 +262,11 @@ tasksRouter.post('/', requireAuth, async (req: AuthRequest, res, next) => {
     };
     rooms.tasks('task:created', { category: data.category, locationZone: data.locationZone, amount: data.amount });
     rooms.platform('stats:update', {});
-    res.json(body);
+    
+    // Custom replacer to handle BigInt serialization
+    res.json(JSON.parse(JSON.stringify(body, (key, value) =>
+      typeof value === 'bigint' ? value.toString() : value
+    )));
   } catch (err) {
     next(err);
   }
@@ -332,7 +338,8 @@ tasksRouter.post('/:id/assign', requireAuth, async (req: AuthRequest, res, next)
     };
     rooms.task(taskId, 'task:assigned', { taskId, worker });
     rooms.tasks('task:assigned', { taskId, worker });
-    res.json(body);
+    const replacer = (key: string, value: any) => typeof value === 'bigint' ? value.toString() : value;
+    res.json(JSON.parse(JSON.stringify(body, replacer)));
   } catch (err) {
     next(err);
   }
@@ -378,7 +385,8 @@ tasksRouter.post('/:id/cancel', requireAuth, async (req: AuthRequest, res, next)
       success: true,
       data: { unsignedTx: tx },
     };
-    res.json(body);
+    const replacer = (key: string, value: any) => typeof value === 'bigint' ? value.toString() : value;
+    res.json(JSON.parse(JSON.stringify(body, replacer)));
   } catch (err) {
     next(err);
   }
@@ -429,7 +437,8 @@ tasksRouter.post('/:id/timeout', requireAuth, async (req: AuthRequest, res, next
       success: true,
       data: { unsignedTx: tx },
     };
-    res.json(body);
+    const replacer = (key: string, value: any) => typeof value === 'bigint' ? value.toString() : value;
+    res.json(JSON.parse(JSON.stringify(body, replacer)));
   } catch (err) {
     next(err);
   }
