@@ -16,20 +16,21 @@ function loadAbi(name: string) {
 }
 
 /**
- * Count unique addresses that have either posted a task or had an agent
- * deployed. SCANs over the a2a poster index (`a2a:poster:<addr>` — one set
- * per poster) and unions with the registered-executor set. Returns a single
- * deduped count of "people who have used the platform".
+ * Count unique HUMAN addresses that have used the platform — i.e., posted
+ * a task or deployed an agent. Explicitly does NOT include the registered
+ * executor set (`agent:executor:all`), because that's filled with
+ * platform-generated agent wallets, not people. Including it produced the
+ * cosmetic bug where "Registered Users" equalled "Active Agents" exactly
+ * — every deployed agent self-registered an executor wallet, so each agent
+ * inflated the user count by one.
  *
- * Both indices store addresses already lowercased, so the Set dedupes
- * cleanly. SCAN is used instead of KEYS to avoid blocking a shared cloud
- * Redis when the key set grows.
+ * Both sources here are keyed on the deployer/poster's own wallet, so the
+ * Set actually counts distinct humans (modulo Privy multi-wallet quirks).
  */
 async function countRegisteredUsers(): Promise<number> {
   const addrs = new Set<string>();
 
-  // Posters — each `a2a:poster:<addr>` key represents one address that
-  // posted at least one A2A task.
+  // Posters — one `a2a:poster:<addr>` key per address that posted a task.
   let cursor = '0';
   do {
     const [next, batch] = await redis.scan(cursor, 'MATCH', 'a2a:poster:*', 'COUNT', 500);
@@ -41,17 +42,13 @@ async function countRegisteredUsers(): Promise<number> {
     }
   } while (cursor !== '0');
 
-  // Agent owners — registered executors keyed by wallet.
-  const executors = await redis.smembers('agent:executor:all');
-  for (const a of executors) if (a.startsWith('0x')) addrs.add(a);
-
-  // Deployed-agent owners (separate from executors above for legacy reasons;
-  // an agent can be deployed but never registered as an executor). loadAll
-  // gives us the canonical list with ownerAddress on each record.
+  // Deployed-agent owners — these are the humans who clicked "deploy agent".
+  // Distinct from the agent's own wallet (which lives in agent:executor:all
+  // and is NOT a human).
   try {
     const agents = await loadAllAgents();
     for (const a of agents) if (a.ownerAddress) addrs.add(a.ownerAddress.toLowerCase());
-  } catch { /* ignore — count from posters + executors still works */ }
+  } catch { /* ignore — count from posters alone still works */ }
 
   return addrs.size;
 }
