@@ -170,7 +170,12 @@ tasksRouter.get('/:id', async (req, res, next) => {
     }
 
     const [task, meta] = await Promise.all([
-      escrowService.getTask(taskId),
+      escrowService.getTask(taskId).catch((err) => {
+        if ((err as Error).message?.includes('could not decode result data')) {
+          throw new AppError(404, 'NOT_FOUND', 'Task not found on chain');
+        }
+        throw err;
+      }),
       registryService.getTaskMeta(taskId).catch(() => null),
     ]);
 
