@@ -8,6 +8,7 @@ import { getTokenDecimals } from '../services/chain.js';
 import type { AuthRequest, ApiResponse, AgentCapability } from '../types.js';
 import { AGENT_CAPABILITIES } from '../types.js';
 import * as a2aStore from '../services/a2aStore.js';
+import { getTaskIdByHash } from '../services/escrowEvents.js';
 import { randomUUID } from 'crypto';
 import * as accountingService from '../services/accountingService.js';
 import { getDb } from '../services/database.js';
@@ -152,10 +153,21 @@ tasksRouter.get('/', async (req: AuthRequest, res, next) => {
 tasksRouter.get('/:id', async (req, res, next) => {
   try {
     const rawId = req.params.id;
-    if (!/^\d+$/.test(rawId)) {
-      throw new AppError(400, 'INVALID_TASK_ID', 'Task ID must be a positive integer');
+
+    const isHexHash = /^0x[0-9a-fA-F]{64}$/.test(rawId);
+    let taskId: number;
+    if (isHexHash) {
+      const resolved = await getTaskIdByHash(rawId);
+      if (!resolved) {
+        throw new AppError(404, 'NOT_FOUND', 'Task not found for the given hash');
+      }
+      taskId = Number(resolved);
+    } else {
+      if (!/^\d+$/.test(rawId)) {
+        throw new AppError(400, 'INVALID_TASK_ID', 'Task ID must be a positive integer or a 0x-prefixed task hash');
+      }
+      taskId = parseInt(rawId, 10);
     }
-    const taskId = parseInt(rawId, 10);
 
     const [task, meta] = await Promise.all([
       escrowService.getTask(taskId),
