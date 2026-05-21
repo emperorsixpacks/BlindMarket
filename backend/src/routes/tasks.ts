@@ -162,11 +162,6 @@ tasksRouter.get('/:id', async (req, res, next) => {
       if (!resolved) {
         throw new AppError(404, 'NOT_INDEXED_YET', 'Task hash not found — create transaction may not be confirmed or indexed yet. Retry in a few seconds.');
       }
-      if (resolved === 'pending') {
-        const body: ApiResponse = { success: true, data: { status: 'pending_confirmation' } };
-        res.json(body);
-        return;
-      }
       taskId = Number(resolved);
     } else {
       if (!/^\d+$/.test(rawId)) {
@@ -264,10 +259,6 @@ tasksRouter.post('/', requireAuth, async (req: AuthRequest, res, next) => {
         rootHash: data.rootHash,
         wrappedKeys: wrappedKeysNormalized,
       });
-      // Pre-seed a pending marker so GET /tasks/:hash can find the task
-      // immediately instead of returning NOT_INDEXED_YET while the indexer
-      // waits for the create tx to confirm.
-      await redis.set(`a2a:hash2id:${data.taskHash.toLowerCase()}`, 'pending');
     }
 
     // Record escrow_lock accounting event

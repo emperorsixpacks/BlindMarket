@@ -14,16 +14,10 @@ export async function getOpenTasks(offset = 0, limit = 20): Promise<TaskMeta[]> 
   return res.tasks;
 }
 
-export interface PendingTask {
-  status: 'pending_confirmation';
-}
-
-export async function getTask(taskId: string): Promise<{ onChain: OnChainTask; meta: TaskMeta } | PendingTask> {
-  const raw = await get<any>(`/api/v1/tasks/${taskId}`);
-  if (raw.status === 'pending_confirmation') {
-    return { status: 'pending_confirmation' };
-  }
-  const { meta, ...onChain } = raw as OnChainTask & { meta: TaskMeta | null };
+export async function getTask(taskId: string): Promise<{ onChain: OnChainTask; meta: TaskMeta }> {
+  // Backend returns task fields at top level + nested meta
+  const raw = await get<OnChainTask & { meta: TaskMeta | null }>(`/api/v1/tasks/${taskId}`);
+  const { meta, ...onChain } = raw;
   return {
     onChain,
     meta: meta ?? {
