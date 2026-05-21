@@ -1,7 +1,7 @@
 import { ethers } from "hardhat";
 
 async function main() {
-  const escrowAddr = "0x7B420523E2b5d6C0f0e5deF75b1D9a901167f041";
+  const escrowAddr = "0xb97042C7249C112573181E40DC6702346C9fa18E";
   const nativeAddr = "0x0000000000000000000000000000000000000000";
 
   const BlindEscrow = await ethers.getContractFactory("BlindEscrow");
