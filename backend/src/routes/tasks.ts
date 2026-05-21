@@ -5,7 +5,7 @@ import { AppError } from '../middleware/errorHandler.js';
 import * as escrowService from '../services/escrow.js';
 import * as registryService from '../services/registry.js';
 import { getTokenDecimals } from '../services/chain.js';
-import type { AuthRequest, ApiResponse, AgentCapability } from '../types.js';
+import type { AuthRequest, ApiResponse } from '../types.js';
 import { AGENT_CAPABILITIES } from '../types.js';
 import * as a2aStore from '../services/a2aStore.js';
 import { redis } from '../services/redis.js';
@@ -238,28 +238,13 @@ tasksRouter.post('/', requireAuth, async (req: AuthRequest, res, next) => {
       isNative ? amountBigInt : undefined,
     );
 
-    // Store A2A metadata if this is an agent-targeted task
-    if (data.targetExecutorType === 'agent') {
-      // Lowercase wrappedKeys addresses so /accept can look up the slice using
-      // the same key regardless of EIP-55 vs lowercase form in the request.
-      const wrappedKeysNormalized = data.wrappedKeys
-        ? Object.fromEntries(
-            Object.entries(data.wrappedKeys).map(([addr, blob]) => [addr.toLowerCase(), blob]),
-          )
-        : undefined;
-      // Use taskHash as a stable ID (actual on-chain taskId isn't known until tx confirms)
-      await a2aStore.setMeta({
-        taskId: data.taskHash,
-        targetExecutorType: data.targetExecutorType,
-        verificationMode: data.verificationMode ?? 'manual',
-        verificationCriteria: data.verificationCriteria,
-        requiredCapabilities: (data.requiredCapabilities ?? []) as AgentCapability[],
-        // Authenticated poster — used by the manual-verify inbox query later.
-        posterAddress: from,
-        rootHash: data.rootHash,
-        wrappedKeys: wrappedKeysNormalized,
-      });
-    }
+    // Note: A2A meta is NOT written here. Doing so unconditionally produced
+    // phantom Redis entries (createTask reverts with TokenNotAllowed, gas
+    // shortfall, etc. → no TaskCreated event → indexer can't resolve the
+    // hash → submit fails forever with NOT_INDEXED). The poster's frontend
+    // must call POST /api/v1/a2a/tasks/index AFTER the tx confirms; that
+    // endpoint verifies the receipt and the TaskCreated event before writing
+    // anything. See routes/a2a.ts for the verified-write path.
 
     // Record escrow_lock accounting event
     try {

@@ -224,6 +224,23 @@ export default function PostTask() {
       const txHash = receipt?.hash ?? taskJson.unsignedTx?.hash ?? '';
       console.log(`[PostTask] Task TX confirmed: hash=${txHash} block=${receipt?.blockNumber}`);
 
+      // 8. Register A2A meta on the backend, gated on the receipt. Previously
+      //    meta was written eagerly in step 6 — but if the createTask tx
+      //    reverted (TokenNotAllowed, gas shortfall, etc.) Redis kept a
+      //    phantom entry that agents could accept and decrypt but never
+      //    submit against. The /a2a/tasks/index endpoint re-parses the
+      //    TaskCreated event server-side and only persists meta once it has
+      //    confirmed the on-chain task exists.
+      await authedPost('/api/v1/a2a/tasks/index', {
+        txHash,
+        taskHash,
+        verificationMode: 'auto' as const,
+        verificationCriteria: { min_length: 10 },
+        requiredCapabilities: requiredCaps,
+        rootHash,
+        wrappedKeys,
+      }, token);
+
       setTaskId(taskJson.taskId ?? null);
       setInitialWrapCount(Object.keys(wrappedKeys).length);
       setStatus('done');

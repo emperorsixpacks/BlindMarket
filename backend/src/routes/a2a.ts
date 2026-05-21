@@ -10,7 +10,8 @@ import { settleAssignment, settleVerification } from '../services/a2aSettlement.
 import { getTaskIdByHash } from '../services/escrowEvents.js';
 import * as escrowService from '../services/escrow.js';
 import * as accountingService from '../services/accountingService.js';
-import { provider } from '../services/chain.js';
+import { provider, escrow } from '../services/chain.js';
+import { redis } from '../services/redis.js';
 import { ethers } from 'ethers';
 import type { AuthRequest, ApiResponse, AgentCapability } from '../types.js';
 import { AGENT_CAPABILITIES } from '../types.js';
@@ -36,6 +37,36 @@ const registerSchema = z.object({
 
 const submitSchema = z.object({
   resultData: z.record(z.unknown()),
+});
+
+// POST /tasks/index — verified A2A meta write. The poster's frontend calls
+// this AFTER the createTask tx confirms, supplying the txHash so the backend
+// can re-parse the receipt and confirm the on-chain task actually exists
+// before persisting anything to Redis. Without this gate, writing meta
+// speculatively in POST /tasks left phantom entries whenever a tx reverted
+// (token-not-allowed, gas, etc.) and agents got stuck retrying NOT_INDEXED.
+const indexTaskSchema = z.object({
+  txHash: z.string().regex(/^0x[0-9a-fA-F]{64}$/, 'txHash must be a 32-byte hex string'),
+  taskHash: z.string().regex(/^0x[0-9a-fA-F]{64}$/, 'taskHash must be a bytes32 hex string'),
+  verificationMode: z.enum(['manual', 'auto', 'oracle']).optional(),
+  verificationCriteria: z
+    .object({
+      required_fields: z.array(z.string()).optional(),
+      min_length: z.number().int().positive().optional(),
+      contains_keywords: z.array(z.string()).optional(),
+    })
+    .optional(),
+  requiredCapabilities: z
+    .array(z.enum(AGENT_CAPABILITIES as unknown as [string, ...string[]]))
+    .optional(),
+  rootHash: z.string().min(1).max(256).optional(),
+  wrappedKeys: z
+    .record(
+      z.string().regex(/^0x[0-9a-fA-F]{40}$/, 'wrappedKeys address must be 0x-prefixed EOA hex'),
+      z.string().regex(/^[0-9a-fA-F]+$/, 'wrappedKeys value must be hex (no 0x prefix)').min(2).max(8192),
+    )
+    .refine((m) => Object.keys(m).length <= 200, { message: 'wrappedKeys cannot exceed 200 entries' })
+    .optional(),
 });
 
 const verifySchema = z.object({
@@ -469,6 +500,136 @@ a2aRouter.post('/tasks/:id/wrap-to', requireAuth, async (req: AuthRequest, res, 
     };
     res.json(body);
   } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/v1/a2a/tasks/index
+ *
+ * Verified A2A meta write. The poster's frontend calls this AFTER the
+ * createTask tx has confirmed on chain. We re-fetch the receipt server-side,
+ * parse the TaskCreated event, and assert:
+ *
+ *   - tx confirmed with status=1
+ *   - exactly one TaskCreated log emitted from the escrow address
+ *   - log.taskHash === claimed taskHash
+ *   - log.agent === authenticated caller
+ *
+ * Only then do we write meta + eagerly populate the hash2id / id2hash
+ * mappings so /submit doesn't have to wait for the forward-only indexer to
+ * catch up. Idempotent — re-calling with the same txHash is a no-op-ish
+ * merge so a network blip mid-deploy can't strand a task.
+ */
+a2aRouter.post('/tasks/index', requireAuth, async (req: AuthRequest, res, next) => {
+  try {
+    const data = indexTaskSchema.parse(req.body);
+    const address = req.user!.address;
+    const taskHash = data.taskHash.toLowerCase();
+
+    const receipt = await provider.getTransactionReceipt(data.txHash);
+    if (!receipt) {
+      throw new AppError(
+        404,
+        'RECEIPT_NOT_FOUND',
+        'Transaction receipt not yet visible to RPC — wait a couple of blocks and retry',
+      );
+    }
+    if (receipt.status !== 1) {
+      throw new AppError(
+        409,
+        'TX_REVERTED',
+        `createTask tx reverted (status=${receipt.status}) — nothing to index`,
+      );
+    }
+
+    // Parse logs from the configured escrow address only. We don't trust a
+    // receipt that originated from some other contract — a malicious poster
+    // could otherwise pass a tx hash from a different escrow with a colliding
+    // taskHash.
+    const escrowAddress = (await escrow.getAddress()).toLowerCase();
+    const taskCreatedTopic = ethers.id(
+      'TaskCreated(uint256,address,address,uint256,bytes32,string,string,uint256)',
+    );
+    const matching = receipt.logs.filter(
+      (l) => l.address.toLowerCase() === escrowAddress && l.topics[0] === taskCreatedTopic,
+    );
+    if (matching.length === 0) {
+      throw new AppError(
+        409,
+        'NO_TASK_CREATED',
+        'Receipt contains no TaskCreated event from the configured BlindEscrow address',
+      );
+    }
+    if (matching.length > 1) {
+      throw new AppError(
+        409,
+        'MULTIPLE_TASK_CREATED',
+        'Receipt contains multiple TaskCreated events — ambiguous index target',
+      );
+    }
+    const parsed = escrow.interface.parseLog({
+      topics: matching[0].topics as string[],
+      data: matching[0].data,
+    });
+    if (!parsed) {
+      throw new AppError(500, 'PARSE_FAILED', 'Failed to decode TaskCreated log');
+    }
+    const onChainTaskId = (parsed.args.taskId as bigint).toString();
+    const onChainTaskHash = (parsed.args.taskHash as string).toLowerCase();
+    const onChainAgent = (parsed.args.agent as string).toLowerCase();
+
+    if (onChainTaskHash !== taskHash) {
+      throw new AppError(
+        409,
+        'HASH_MISMATCH',
+        `Claimed taskHash (${taskHash.slice(0, 10)}…) does not match on-chain TaskCreated.taskHash (${onChainTaskHash.slice(0, 10)}…)`,
+      );
+    }
+    if (onChainAgent !== address.toLowerCase()) {
+      throw new AppError(
+        403,
+        'NOT_TASK_AGENT',
+        'Authenticated caller is not the on-chain agent (creator) for this task',
+      );
+    }
+
+    // All checks passed — eagerly seed the indexer mapping so /submit
+    // resolves the hash immediately without waiting for the forward-only
+    // event poller to catch up.
+    await Promise.all([
+      redis.set(`a2a:hash2id:${taskHash}`, onChainTaskId),
+      redis.set(`a2a:id2hash:${onChainTaskId}`, taskHash),
+    ]);
+
+    const wrappedKeysNormalized = data.wrappedKeys
+      ? Object.fromEntries(
+          Object.entries(data.wrappedKeys).map(([addr, blob]) => [addr.toLowerCase(), blob]),
+        )
+      : undefined;
+
+    await a2aStore.setMeta({
+      taskId: taskHash,
+      targetExecutorType: 'agent',
+      verificationMode: data.verificationMode ?? 'manual',
+      verificationCriteria: data.verificationCriteria,
+      requiredCapabilities: (data.requiredCapabilities ?? []) as AgentCapability[],
+      posterAddress: address,
+      rootHash: data.rootHash,
+      wrappedKeys: wrappedKeysNormalized,
+    });
+
+    console.log(
+      `[a2a] indexed taskHash=${taskHash.slice(0, 10)}… → onChainId=${onChainTaskId} poster=${address}`,
+    );
+
+    const body: ApiResponse = {
+      success: true,
+      data: { taskHash, onChainTaskId, indexed: true },
+    };
+    res.json(body);
+  } catch (err) {
+    console.error(`[a2a] index failed:`, (err as Error).message);
     next(err);
   }
 });
