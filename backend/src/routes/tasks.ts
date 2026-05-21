@@ -159,10 +159,10 @@ tasksRouter.get('/:id', async (req, res, next) => {
     if (isHexHash) {
       const hashKey = `a2a:hash2id:${rawId.toLowerCase()}`;
       const resolved = await redis.get(hashKey);
-      if (!resolved) {
+      if (!resolved || !/^\d+$/.test(resolved)) {
         throw new AppError(404, 'NOT_INDEXED_YET', 'Task hash not found — create transaction may not be confirmed or indexed yet. Retry in a few seconds.');
       }
-      taskId = Number(resolved);
+      taskId = parseInt(resolved, 10);
     } else {
       if (!/^\d+$/.test(rawId)) {
         throw new AppError(400, 'INVALID_TASK_ID', 'Task ID must be a positive integer or a 0x-prefixed task hash');
