@@ -157,9 +157,12 @@ tasksRouter.get('/:id', async (req, res, next) => {
     const isHexHash = /^0x[0-9a-fA-F]{64}$/.test(rawId);
     let taskId: number;
     if (isHexHash) {
+      // Quick single Redis lookup — no retries or backfill. If the create tx
+      // just confirmed the event indexer may not have caught up yet; caller
+      // should retry after a few seconds.
       const resolved = await getTaskIdByHash(rawId);
       if (!resolved) {
-        throw new AppError(404, 'NOT_FOUND', 'Task not found for the given hash');
+        throw new AppError(404, 'NOT_INDEXED_YET', 'Task hash not found — create transaction may not be confirmed or indexed yet. Retry in a few seconds.');
       }
       taskId = Number(resolved);
     } else {
