@@ -354,21 +354,41 @@ function buildTools() {
 // signer, or submitEvidence broadcast giving up. Without this, the task is
 // stuck in Redis state 'accepted'/'submitted' while on-chain it's still
 // Funded with no worker — invisible on the agent board, irrecoverable.
+//
+// Retries on 503 (e.g. ON_CHAIN_CHECK_FAILED when the RPC is briefly
+// unreachable). Terminal non-503 errors are logged and abandoned — the
+// poster can always rescue with a manual /release call.
 async function releaseTask(taskHash) {
-  try {
-    const res = await fetchWithTimeout(`${BACKEND_URL}/api/v1/a2a/tasks/${taskHash}/release`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${AGENT_PLATFORM_TOKEN}` },
-    });
-    if (res.ok) {
-      log(`released ${taskHash.slice(0, 10)}… back to open`);
-      appliedTasks.delete(taskHash);
-    } else {
+  const RELEASE_MAX_ATTEMPTS = 4;
+  const RELEASE_RETRY_DELAY_MS = 8_000;
+  for (let attempt = 1; attempt <= RELEASE_MAX_ATTEMPTS; attempt++) {
+    try {
+      const res = await fetchWithTimeout(`${BACKEND_URL}/api/v1/a2a/tasks/${taskHash}/release`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${AGENT_PLATFORM_TOKEN}` },
+      });
+      if (res.ok) {
+        log(`released ${taskHash.slice(0, 10)}… back to open`);
+        appliedTasks.delete(taskHash);
+        return;
+      }
       const errText = await res.text().catch(() => '');
-      log(`release failed for ${taskHash.slice(0, 10)}…: ${res.status} ${errText.slice(0, 120)}`);
+      if (res.status === 503 && attempt < RELEASE_MAX_ATTEMPTS) {
+        log(`release attempt ${attempt}/${RELEASE_MAX_ATTEMPTS} for ${taskHash.slice(0, 10)}…: 503 — retrying in ${RELEASE_RETRY_DELAY_MS / 1000}s`);
+        await sleep(RELEASE_RETRY_DELAY_MS);
+        continue;
+      }
+      log(`release failed for ${taskHash.slice(0, 10)}… after ${attempt} attempt(s): ${res.status} ${errText.slice(0, 120)}`);
+      return;
+    } catch (e) {
+      if (attempt < RELEASE_MAX_ATTEMPTS) {
+        log(`release attempt ${attempt}/${RELEASE_MAX_ATTEMPTS} for ${taskHash.slice(0, 10)}…: network error ${e.message} — retrying in ${RELEASE_RETRY_DELAY_MS / 1000}s`);
+        await sleep(RELEASE_RETRY_DELAY_MS);
+        continue;
+      }
+      log(`release error for ${taskHash.slice(0, 10)}… after ${attempt} attempt(s): ${e.message}`);
+      return;
     }
-  } catch (e) {
-    log(`release error for ${taskHash.slice(0, 10)}…: ${e.message}`);
   }
 }
 

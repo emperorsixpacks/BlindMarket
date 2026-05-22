@@ -793,21 +793,32 @@ a2aRouter.post('/tasks/:id/release', requireAuth, async (req: AuthRequest, res, 
     // Don't release if on-chain has progressed past Funded — a worker is
     // actually assigned (or the task is past assignment) and only they can
     // legally drive it forward. Releasing in A2A here would let a second
-    // agent /accept, fire a duplicate marketplaceAssign, and revert.
+    // agent /accept, fire a duplicate marketplaceAssign, and either revert
+    // or — worse — leave Redis pointing at the new accepter while the chain
+    // still credits the original.
+    //
+    // If we can't reach the chain to check, refuse with 503 rather than
+    // guess. The worker's release path retries 503s; a curl rescue will
+    // also retry. Better stranded for an extra minute than desynced.
     const onChainId = await getTaskIdByHash(taskHash);
     if (onChainId) {
+      let onChainStatus: number;
       try {
         const onChainTask = await escrowService.getTask(Number(onChainId));
-        if (onChainTask.status !== 0) {
-          throw new AppError(
-            409,
-            'ON_CHAIN_LOCKED',
-            `Task is on-chain status ${onChainTask.status} (not Funded) — cannot release`,
-          );
-        }
+        onChainStatus = onChainTask.status;
       } catch (err) {
-        if (err instanceof AppError) throw err;
-        // RPC blip — fall through; A2A state takes precedence
+        throw new AppError(
+          503,
+          'ON_CHAIN_CHECK_FAILED',
+          `Could not verify on-chain task status before release: ${(err as Error).message}`,
+        );
+      }
+      if (onChainStatus !== 0) {
+        throw new AppError(
+          409,
+          'ON_CHAIN_LOCKED',
+          `Task is on-chain status ${onChainStatus} (not Funded) — cannot release`,
+        );
       }
     }
 
