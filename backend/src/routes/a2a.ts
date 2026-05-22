@@ -750,6 +750,82 @@ a2aRouter.post('/tasks/:id/submit', requireAuth, async (req: AuthRequest, res, n
 });
 
 /**
+ * POST /api/v1/a2a/tasks/:id/release
+ *
+ * Reverts an accepted/submitted task back to 'open' so it shows up on the
+ * agent board again. Used when the accepted executor failed to broadcast
+ * submitEvidence (e.g. assignment race, RPC error, agent crash) — without
+ * this the task is stranded in Redis state while on-chain it's still Funded
+ * with no worker, so the poster's view shows OPEN/NO WORKER YET but no agent
+ * can pick it up.
+ *
+ * Authorized for the current executor (the one who accepted) or the poster
+ * (who has standing to rescue their own task). Refuses if the on-chain task
+ * has progressed past Funded — in that case a worker really is on-chain
+ * and releasing in A2A state would lose alignment with the contract.
+ */
+a2aRouter.post('/tasks/:id/release', requireAuth, async (req: AuthRequest, res, next) => {
+  try {
+    const taskHash = req.params.id as string;
+    const address = req.user!.address;
+
+    const meta = await a2aStore.getMeta(taskHash);
+    if (!meta) throw new AppError(404, 'NOT_FOUND', 'Task not found or not A2A-enabled');
+
+    const state = await a2aStore.getState(taskHash);
+    if (!state) throw new AppError(404, 'NOT_FOUND', 'Task state missing');
+
+    const isExecutor = state.executorAddress?.toLowerCase() === address.toLowerCase();
+    const isPoster = meta.posterAddress?.toLowerCase() === address.toLowerCase();
+    if (!isExecutor && !isPoster) {
+      throw new AppError(403, 'FORBIDDEN', 'Only the executor or poster can release a task');
+    }
+
+    if (state.status === 'open') {
+      const body: ApiResponse = { success: true, data: { taskId: taskHash, status: 'open', noop: true } };
+      res.json(body);
+      return;
+    }
+    if (state.status !== 'accepted' && state.status !== 'in_progress' && state.status !== 'submitted') {
+      throw new AppError(409, 'INVALID_STATE', `Cannot release in state: ${state.status}`);
+    }
+
+    // Don't release if on-chain has progressed past Funded — a worker is
+    // actually assigned (or the task is past assignment) and only they can
+    // legally drive it forward. Releasing in A2A here would let a second
+    // agent /accept, fire a duplicate marketplaceAssign, and revert.
+    const onChainId = await getTaskIdByHash(taskHash);
+    if (onChainId) {
+      try {
+        const onChainTask = await escrowService.getTask(Number(onChainId));
+        if (onChainTask.status !== 0) {
+          throw new AppError(
+            409,
+            'ON_CHAIN_LOCKED',
+            `Task is on-chain status ${onChainTask.status} (not Funded) — cannot release`,
+          );
+        }
+      } catch (err) {
+        if (err instanceof AppError) throw err;
+        // RPC blip — fall through; A2A state takes precedence
+      }
+    }
+
+    await a2aStore.releaseToOpen(taskHash);
+    console.log(`[a2a] release: ${taskHash} reverted to open by ${address}`);
+
+    const body: ApiResponse = {
+      success: true,
+      data: { taskId: taskHash, status: 'open' },
+    };
+    res.json(body);
+  } catch (err) {
+    console.error(`[a2a] release failed for ${req.params.id}:`, (err as Error).message);
+    next(err);
+  }
+});
+
+/**
  * POST /api/v1/a2a/tasks/:id/finalize
  *
  * Called by the executor after their submitEvidence tx confirms on chain.

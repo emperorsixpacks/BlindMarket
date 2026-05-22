@@ -299,6 +299,46 @@ export async function getPosterTasks(
   return loadTasksByIndex(KEY.poster(address));
 }
 
+/**
+ * Revert a task from accepted/in_progress/submitted back to 'open' so another
+ * executor (or the same one on next poll) can pick it up. Used when the
+ * accepted executor fails terminally to broadcast submitEvidence — without
+ * this the task would stay stranded in Redis (not in a2a:open set, so
+ * invisible to agent_board) while on-chain it's still Funded with no worker.
+ *
+ * Caller is responsible for the precondition check that this is safe — i.e.
+ * the on-chain task hasn't progressed past Funded. This function just rewrites
+ * the A2A state machine.
+ */
+export async function releaseToOpen(taskId: string): Promise<void> {
+  const tid = taskId.toLowerCase();
+  let existingRaw = await redis.get(KEY.state(tid));
+  let finalTid = tid;
+  if (!existingRaw && tid !== taskId) {
+    existingRaw = await redis.get(`a2a:state:${taskId}`);
+    if (existingRaw) finalTid = taskId;
+  }
+  if (!existingRaw) throw new Error(`No A2A state for task ${taskId}`);
+  const existing = JSON.parse(existingRaw) as A2ATaskState;
+  if (existing.status === 'open') return;
+
+  const metaRaw = (await redis.get(KEY.meta(finalTid))) ?? (await redis.get(`a2a:meta:${taskId}`));
+  if (!metaRaw) throw new Error(`No A2A meta for task ${taskId}`);
+  const meta = JSON.parse(metaRaw) as A2ATaskMeta;
+
+  const released: A2ATaskState = { taskId: finalTid, status: 'open' };
+
+  const pipe = redis.pipeline();
+  pipe.set(`a2a:state:${finalTid}`, JSON.stringify(released));
+  if (meta.targetExecutorType === 'agent') {
+    pipe.sadd(KEY.open, finalTid);
+  }
+  if (existing.executorAddress) {
+    pipe.srem(KEY.executor(existing.executorAddress), finalTid);
+  }
+  await pipe.exec();
+}
+
 /** Helper used by getExecutorTasks and getPosterTasks — same shape, different
  *  index. Returns meta+state pairs for every taskId in the named set. */
 async function loadTasksByIndex(

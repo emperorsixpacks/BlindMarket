@@ -348,6 +348,30 @@ function buildTools() {
 
 // ── Main loop ────────────────────────────────────────────────────────────────
 
+// Revert an accepted task back to 'open' on the backend so other agents
+// (or this one on the next poll) can pick it up. Called whenever the worker
+// fails to push the task forward — /submit retries exhausted, missing
+// signer, or submitEvidence broadcast giving up. Without this, the task is
+// stuck in Redis state 'accepted'/'submitted' while on-chain it's still
+// Funded with no worker — invisible on the agent board, irrecoverable.
+async function releaseTask(taskHash) {
+  try {
+    const res = await fetchWithTimeout(`${BACKEND_URL}/api/v1/a2a/tasks/${taskHash}/release`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${AGENT_PLATFORM_TOKEN}` },
+    });
+    if (res.ok) {
+      log(`released ${taskHash.slice(0, 10)}… back to open`);
+      appliedTasks.delete(taskHash);
+    } else {
+      const errText = await res.text().catch(() => '');
+      log(`release failed for ${taskHash.slice(0, 10)}…: ${res.status} ${errText.slice(0, 120)}`);
+    }
+  } catch (e) {
+    log(`release error for ${taskHash.slice(0, 10)}…: ${e.message}`);
+  }
+}
+
 async function pollAndWork() {
   try {
     sendHeartbeat();
@@ -578,18 +602,24 @@ async function pollAndWork() {
         continue;
       }
       log(`submit failed for ${acceptedTaskHash.slice(0, 10)}… after ${attempt} attempt(s): ${submitRes.status} ${errText.slice(0, 160)}`);
+      await releaseTask(acceptedTaskHash);
       return;
     }
-    if (!submitRes || !submitRes.ok) return;
+    if (!submitRes || !submitRes.ok) {
+      await releaseTask(acceptedTaskHash);
+      return;
+    }
     const submitJson = await submitRes.json();
     const unsignedSubmitEvidence = submitJson.data?.unsignedSubmitEvidence;
     if (!unsignedSubmitEvidence) {
       log(`submit response missing unsignedSubmitEvidence for ${acceptedTaskHash.slice(0, 10)}…`);
+      await releaseTask(acceptedTaskHash);
       return;
     }
 
     if (!signerWallet) {
       log(`cannot broadcast submitEvidence: signer not initialised (missing AGENT_PRIVATE_KEY)`);
+      await releaseTask(acceptedTaskHash);
       return;
     }
     const MAX_SUBMIT_ATTEMPTS = 3;
@@ -611,10 +641,14 @@ async function pollAndWork() {
           continue;
         }
         log(`submitEvidence broadcast failed for ${acceptedTaskHash.slice(0, 10)}… after ${attempt} attempt(s): ${label}`);
+        await releaseTask(acceptedTaskHash);
         return;
       }
     }
-    if (!broadcastOk) return;
+    if (!broadcastOk) {
+      await releaseTask(acceptedTaskHash);
+      return;
+    }
 
     log(`finalizing task ${acceptedTaskHash.slice(0, 10)}…`);
     const finalizeRes = await fetchWithTimeout(`${BACKEND_URL}/api/v1/a2a/tasks/${acceptedTaskHash}/finalize`, {
