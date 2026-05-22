@@ -551,12 +551,12 @@ async function pollAndWork() {
     const resultData = { output: finalOutput, agent: AGENT_ID };
 
     log(`submitting task ${acceptedTaskHash.slice(0, 10)}…`);
-    // Retry the /submit call on transient indexer-lag failures (503 NOT_INDEXED).
-    // Backend's on-demand backfill in escrowEvents.ts heals the hash→id gap on
-    // the first miss; we just need to give it a window to land. Bailing immediately
-    // (as the original code did) discarded the LLM result and stuck the task
-    // in an accepted-but-unsubmittable state.
-    const SUBMIT_API_MAX_ATTEMPTS = 4;
+    // Retry the /submit call on transient backend-side gates:
+    //   - 503 NOT_INDEXED      → TaskCreated event hasn't been indexed yet
+    //   - 503 NOT_ASSIGNED_YET → marketplaceAssign tx hasn't confirmed yet
+    // Both heal on their own within tens of seconds; bailing immediately
+    // discards the LLM result and strands the task in accepted-but-unsubmittable.
+    const SUBMIT_API_MAX_ATTEMPTS = 6;
     const SUBMIT_API_RETRY_DELAY_MS = 8_000;
     let submitRes;
     for (let attempt = 1; attempt <= SUBMIT_API_MAX_ATTEMPTS; attempt++) {
@@ -567,12 +567,13 @@ async function pollAndWork() {
           'Authorization': `Bearer ${AGENT_PLATFORM_TOKEN}`,
         },
         body: JSON.stringify({ resultData }),
-      });
+      }, 60_000); // backend may poll up to ~20s waiting for assignment confirmation
       if (submitRes.ok) break;
       const errText = await submitRes.text();
-      const isIndexerLag = submitRes.status === 503 && /NOT_INDEXED/.test(errText);
-      if (isIndexerLag && attempt < SUBMIT_API_MAX_ATTEMPTS) {
-        log(`submit attempt ${attempt}/${SUBMIT_API_MAX_ATTEMPTS} for ${acceptedTaskHash.slice(0, 10)}…: 503 NOT_INDEXED — retrying in ${SUBMIT_API_RETRY_DELAY_MS / 1000}s`);
+      const isTransient = submitRes.status === 503 && /NOT_INDEXED|NOT_ASSIGNED_YET/.test(errText);
+      if (isTransient && attempt < SUBMIT_API_MAX_ATTEMPTS) {
+        const code = /NOT_ASSIGNED_YET/.test(errText) ? 'NOT_ASSIGNED_YET' : 'NOT_INDEXED';
+        log(`submit attempt ${attempt}/${SUBMIT_API_MAX_ATTEMPTS} for ${acceptedTaskHash.slice(0, 10)}…: 503 ${code} — retrying in ${SUBMIT_API_RETRY_DELAY_MS / 1000}s`);
         await sleep(SUBMIT_API_RETRY_DELAY_MS);
         continue;
       }

@@ -685,6 +685,33 @@ a2aRouter.post('/tasks/:id/submit', requireAuth, async (req: AuthRequest, res, n
       );
     }
 
+    // Wait briefly for the on-chain assignment to confirm before issuing the
+    // unsigned submitEvidence. /accept fires settleAssignment fire-and-forget,
+    // so task.worker can still be 0x0 here even though our A2A state moved to
+    // 'accepted'. Broadcasting submitEvidence in that window reverts with
+    // NotWorker() — wastes gas, no recovery on the worker side. Return 503 so
+    // the worker's existing 503-retry loop handles the wait.
+    const ASSIGNMENT_WAIT_DEADLINE_MS = 20_000;
+    const ASSIGNMENT_POLL_INTERVAL_MS = 2_000;
+    const assignDeadline = Date.now() + ASSIGNMENT_WAIT_DEADLINE_MS;
+    let onChainWorker = '';
+    while (true) {
+      const onChainTask = await escrowService.getTask(Number(onChainId));
+      onChainWorker = onChainTask.worker;
+      if (onChainWorker.toLowerCase() === address.toLowerCase()) break;
+      if (Date.now() >= assignDeadline) {
+        console.warn(
+          `[a2a] submit: on-chain assignment not confirmed for ${taskHash} after ${ASSIGNMENT_WAIT_DEADLINE_MS}ms (task.worker=${onChainWorker}, caller=${address})`,
+        );
+        throw new AppError(
+          503,
+          'NOT_ASSIGNED_YET',
+          `On-chain assignment not yet confirmed — task.worker=${onChainWorker}, caller=${address}. Retry shortly.`,
+        );
+      }
+      await new Promise((r) => setTimeout(r, ASSIGNMENT_POLL_INTERVAL_MS));
+    }
+
     // Deterministic evidence hash = keccak256(JSON.stringify(resultData)).
     // The contract stores this bytes32 and it acts as the commitment for the
     // off-chain payload the verifier will evaluate.
