@@ -27,7 +27,8 @@ import { analyticsRouter } from './routes/analytics.js';
 import { getDb } from './services/database.js';
 import { startEscrowEventLoop } from './services/escrowEvents.js';
 import { isBridgeConfigured } from './services/a2aSettlement.js';
-import { marketplaceSigner } from './services/chain.js';
+import { marketplaceSigner, escrow } from './services/chain.js';
+import { config as appConfig } from './config.js';
 
 const app = express();
 
@@ -114,9 +115,37 @@ httpServer.listen(config.port, () => {
   // when an agent accepts/submits. Off-by-default if MARKETPLACE_SIGNER_PRIVATE_KEY
   // is unset; when on, log the signer address so it's clear which key is signing.
   if (isBridgeConfigured() && marketplaceSigner) {
-    void marketplaceSigner.getAddress().then((addr) => {
-      console.log(`[a2aSettlement] bridge active — marketplace signer = ${addr}`);
-    });
+    void (async () => {
+      const signerAddr = await marketplaceSigner.getAddress();
+      console.log(`[a2aSettlement] bridge active — marketplace signer = ${signerAddr}`);
+      // Verify the signer actually holds the on-chain verifier role. Without
+      // this, marketplaceAssign/completeVerification revert with NotVerifier()
+      // on every call and the fire-and-forget bridge swallows the error,
+      // leaving tasks stuck at accepted forever. This was the 2-day-debug
+      // root cause: the role was set to the founder wallet at deploy and
+      // never rotated. Print the exact rotation command so the operator
+      // has zero ambiguity about the fix.
+      try {
+        const onChainVerifier = (await escrow.verifier()) as string;
+        if (onChainVerifier.toLowerCase() !== signerAddr.toLowerCase()) {
+          console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+          console.error('[a2aSettlement] ⛔ VERIFIER ROLE MISMATCH — bridge will silently fail every call');
+          console.error(`    escrow.verifier()        = ${onChainVerifier}`);
+          console.error(`    marketplaceSigner.addr   = ${signerAddr}`);
+          console.error(`    escrow contract address  = ${appConfig.blindEscrowAddress}`);
+          console.error('    Fix from contracts/ with the current admin key:');
+          console.error(`    MARKETPLACE_SIGNER_ADDRESS=${signerAddr} \\`);
+          console.error(`      npx hardhat run scripts/rotate-verifier.ts --network 0g-${appConfig.ogChainId === 16661 ? 'mainnet' : 'testnet'}`);
+          console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        } else {
+          console.log(`[a2aSettlement] ✓ verifier role confirmed (escrow.verifier() == signer)`);
+        }
+      } catch (e) {
+        console.error(
+          `[a2aSettlement] ⛔ could not read escrow.verifier() — escrow contract at ${appConfig.blindEscrowAddress} may be wrong or unreachable: ${(e as Error).message}`,
+        );
+      }
+    })();
   } else {
     console.warn(
       '[a2aSettlement] bridge DISABLED — MARKETPLACE_SIGNER_PRIVATE_KEY not set. ' +
