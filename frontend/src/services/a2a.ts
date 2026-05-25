@@ -41,6 +41,9 @@ export interface A2ATaskEntry {
 export async function registerAgent(data: {
   displayName: string;
   capabilities: string[];
+  // Required by the backend — uncompressed secp256k1 hex (130 chars, leading
+  // 04, no 0x). The dashboard derives this from a local executor identity.
+  publicKey: string;
   agentCardUrl?: string;
   mcpEndpointUrl?: string;
 }): Promise<{ agent: AgentExecutor }> {

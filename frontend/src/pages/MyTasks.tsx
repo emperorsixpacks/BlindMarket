@@ -6,6 +6,7 @@ import { Breadcrumb, PageHeader, SectionRule, Tag, StatCard } from '../component
 import { useSocket } from '../hooks/useSocket';
 import { useBidWatcher } from '../hooks/useBidWatcher';
 import { authedGet } from '../lib/api';
+import { getAesKey } from '../lib/keyStash';
 
 // ── Shapes returned by GET /api/v1/a2a/tasks/posted ──────────────────────
 //
@@ -31,6 +32,10 @@ interface PostedTask {
     resultData?: Record<string, unknown>;
     verificationResult?: { passed: boolean; reasons?: string[] };
   };
+  // Count of executors the brief's AES key is ECIES-wrapped to and persisted
+  // server-side. 0 on an open encrypted task = the key exists only in a
+  // browser's localStorage (the "key at risk" state). Added by GET /tasks/posted.
+  wrapCount?: number;
   onChain: null | {
     taskId: string;           // numeric on-chain id, as string
     status: number;           // 0=Funded 1=Assigned 2=Submitted 3=Verified 4=Completed 5=Cancelled 6=Disputed
@@ -218,6 +223,14 @@ export default function MyTasks() {
               const status = effectiveStatus(t);
               const isDone = status === 3 || status === 4 || status === 6;
               const hasResult = !!t.state.resultData;
+              // "Key at risk": an open, encrypted task whose AES key has not
+              // been wrapped to any executor server-side. The only copy is in a
+              // browser's localStorage — if that's cleared before an agent is
+              // wrapped, the brief becomes permanently undecryptable. keyHere
+              // tells us whether THIS browser still holds it (recoverable but
+              // fragile) or not (likely already lost / on another device).
+              const keyAtRisk = status === 0 && !!t.meta.rootHash && (t.wrapCount ?? 0) === 0;
+              const keyHere = keyAtRisk && !!getAesKey(t.meta.taskId);
               const taskId = t.onChain?.taskId || t.meta.taskId;
               const taskUrl = `/tasks/${taskId}`;
               const cardClass = `bg-bg p-5 flex flex-col gap-3 min-h-[200px] group hover:bg-surface-2 transition-colors cursor-pointer`;
@@ -244,6 +257,21 @@ export default function MyTasks() {
                     {t.state.verificationResult?.passed === false && t.state.verificationResult.reasons && t.state.verificationResult.reasons.length > 0 && (
                       <div className="mt-2 text-[10px] font-mono text-err leading-relaxed">
                         failed: {t.state.verificationResult.reasons.join(' · ')}
+                      </div>
+                    )}
+                    {keyAtRisk && (
+                      <div
+                        className={`mt-2 border px-2 py-1.5 text-[10px] font-mono leading-relaxed ${
+                          keyHere ? 'border-warn/50 bg-warn/5 text-warn' : 'border-err/50 bg-err/5 text-err'
+                        }`}
+                        onClick={(e) => e.preventDefault()}
+                        title={keyHere
+                          ? 'The encryption key for this task is only in this browser. Register a matching agent and keep this page open so the key gets wrapped to it. Clearing this browser before then loses the key permanently.'
+                          : 'The encryption key is not on the server and not in this browser. Recover it from the device you posted from, or repost — it cannot be decrypted from here.'}
+                      >
+                        ⚠ key at risk — {keyHere
+                          ? 'only copy is in this browser'
+                          : 'not on server or this browser'}
                       </div>
                     )}
                   </div>

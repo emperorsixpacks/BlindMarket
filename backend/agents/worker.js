@@ -64,6 +64,24 @@ function eciesDecryptK1(blob, privKeyHex) {
   return aesGcmDecrypt(aesBlob, aesKey);
 }
 
+// Derive the uncompressed secp256k1 public key (130 hex chars, leading 04, no
+// 0x prefix) from a private key hex. Used so the worker can always supply a
+// pubkey at /a2a/register even when AGENT_PUBLIC_KEY isn't injected — the
+// backend requires one. Returns '' if no/invalid key so the caller can surface
+// a clear error instead of crashing. Format matches the backend ECIES and the
+// keypair generated at deploy time (createECDH + uncompressed encoding).
+function derivePublicKeyHex(privKeyHex) {
+  if (!privKeyHex) return '';
+  try {
+    const clean = privKeyHex.startsWith('0x') ? privKeyHex.slice(2) : privKeyHex;
+    const ecdh = createECDH('secp256k1');
+    ecdh.setPrivateKey(Buffer.from(clean, 'hex'));
+    return ecdh.getPublicKey('hex', 'uncompressed');
+  } catch {
+    return '';
+  }
+}
+
 const AGENT_ID = process.env.AGENT_ID ?? 'unknown';
 const AGENT_NAME = process.env.AGENT_NAME ?? 'Agent';
 const AGENT_INSTRUCTIONS = process.env.AGENT_INSTRUCTIONS ?? '';
@@ -73,10 +91,13 @@ const AGENT_API_KEY = process.env.AGENT_API_KEY ?? '';
 const AGENT_PLATFORM_TOKEN = process.env.AGENT_PLATFORM_TOKEN ?? '';
 const AGENT_PRIVATE_KEY = process.env.AGENT_PRIVATE_KEY ?? '';
 // Uncompressed secp256k1 hex (130 chars, leading 04, no 0x prefix). Sent to
-// /a2a/register so posters can wrap the AES key to it at task creation. Empty
-// string when missing — register schema treats it as optional and the executor
-// just won't be able to decrypt new encrypted-flow tasks until reconfigured.
-const AGENT_PUBLIC_KEY = process.env.AGENT_PUBLIC_KEY ?? '';
+// /a2a/register so posters can wrap the AES key to it at task creation. The
+// backend now REQUIRES this at registration — a pubkey-less executor can't be
+// sent a wrapped brief and would spin on NEEDS_WRAP — so we never leave it
+// empty: if AGENT_PUBLIC_KEY is unset we derive it from the private key the
+// worker already holds. Same curve/format as the backend ECIES and the keypair
+// generated at deploy time, so the derived value matches what posters wrap to.
+const AGENT_PUBLIC_KEY = process.env.AGENT_PUBLIC_KEY || derivePublicKeyHex(AGENT_PRIVATE_KEY);
 const OG_RPC_URL = process.env.OG_RPC_URL ?? 'https://evmrpc-testnet.0g.ai';
 const OG_CHAIN_ID = Number(process.env.OG_CHAIN_ID ?? 16602);
 const AGENT_TOOLS_RAW = process.env.AGENT_TOOLS ?? '[]';
@@ -728,6 +749,14 @@ function sendHeartbeat() {
 }
 
 async function ensureRegisteredAsA2AExecutor() {
+  // The backend requires a pubkey at registration. We derive it from the
+  // private key when the env var is missing, so this should only ever be empty
+  // if the worker was started with neither — in which case it can't decrypt
+  // encrypted briefs anyway. Fail loudly instead of POSTing an invalid body.
+  if (!AGENT_PUBLIC_KEY) {
+    log('cannot register as A2A executor: no public key available (set AGENT_PUBLIC_KEY or AGENT_PRIVATE_KEY). Encrypted tasks require a pubkey to wrap the brief to.');
+    return;
+  }
   try {
     const res = await fetchWithTimeout(`${BACKEND_URL}/api/v1/a2a/register`, {
       method: 'POST',
@@ -738,7 +767,7 @@ async function ensureRegisteredAsA2AExecutor() {
       body: JSON.stringify({
         displayName: AGENT_NAME,
         capabilities: agentCapabilities,
-        ...(AGENT_PUBLIC_KEY ? { publicKey: AGENT_PUBLIC_KEY } : {}),
+        publicKey: AGENT_PUBLIC_KEY,
       }),
     });
     if (res.ok) {

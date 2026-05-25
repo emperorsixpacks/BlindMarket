@@ -281,6 +281,9 @@ async function runAgentSide(
   const regRes = await jsonPost(`${BACKEND_URL}/api/v1/a2a/register`, executorJWT, {
     displayName: `exec-${name}`,
     capabilities: scenario.executorCapabilities,
+    // Backend requires a pubkey at registration. Derive the uncompressed
+    // secp256k1 pubkey from the executor's ephemeral wallet (strip the 0x).
+    publicKey: executor.signingKey.publicKey.slice(2),
   });
   if (!regRes.ok) {
     return {

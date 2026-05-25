@@ -18,6 +18,8 @@ import {
   useRegisterAgent,
 } from '../hooks/useA2A';
 import { useAuth } from '../context/AuthContext';
+import { useAccount } from 'wagmi';
+import { getOrCreateExecutorIdentity } from '../lib/executorIdentity';
 import { AGENT_CAPABILITIES as ALL_CAPABILITIES } from '../config/capabilities';
 
 const statusTone: Record<string, 'neutral' | 'info' | 'ok' | 'err' | 'warn'> = {
@@ -41,6 +43,7 @@ export default function A2ADashboard() {
   const [registerError, setRegisterError] = useState<string | null>(null);
 
   const { isAuthenticated } = useAuth();
+  const { address } = useAccount();
   const { data: profile } = useAgentProfile();
   const { data: browse, isLoading: browseLoading } = useBrowseAgentTasks({
     enabled: activeTab === 'browse_tasks',
@@ -161,10 +164,19 @@ export default function A2ADashboard() {
                 disabled={!displayName.trim() || selectedCaps.length === 0 || !isAuthenticated || registerMutation.isPending}
                 onClick={async () => {
                   setRegisterError(null);
+                  if (!address) {
+                    setRegisterError('connect a wallet before registering');
+                    return;
+                  }
                   try {
+                    // Backend requires a pubkey so posters can wrap encrypted
+                    // briefs to this executor. Derive a stable local identity
+                    // (persisted, reused on re-register) and send its pubkey.
+                    const { publicKey } = getOrCreateExecutorIdentity(address);
                     await registerMutation.mutateAsync({
                       displayName,
                       capabilities: selectedCaps,
+                      publicKey,
                       ...(agentCardUrl ? { agentCardUrl } : {}),
                       ...(mcpEndpoint ? { mcpEndpointUrl: mcpEndpoint } : {}),
                     });

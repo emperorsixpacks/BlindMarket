@@ -24,13 +24,17 @@ const registerSchema = z.object({
   displayName: z.string().min(1).max(100),
   capabilities: z.array(z.enum(AGENT_CAPABILITIES as unknown as [string, ...string[]])).min(1).max(20),
   // Uncompressed secp256k1 hex (130 chars, leading `04`, no 0x prefix).
-  // Optional so legacy workers can still register, but anything created without
-  // it can't decrypt encrypted briefs (the new posting flow wraps the AES key
-  // to this pubkey at task-create time).
+  // REQUIRED. An executor without a pubkey can't be sent a wrapped AES key, so
+  // it could never decrypt an encrypted brief — and every task posted from the
+  // UI is encrypted. A pubkey-less executor is therefore a dead-end: it passes
+  // the capability gate, gets silently dropped from the post-time wrap snapshot
+  // (see GET /executors, which filters on pubkey), then spins forever on
+  // 403 NEEDS_WRAP. Requiring it at registration closes that whole class of
+  // stranded task. Deployed agents always have a keypair, and the worker derives
+  // this value from its private key, so it can always satisfy the requirement.
   publicKey: z
     .string()
-    .regex(/^04[0-9a-fA-F]{128}$/, 'publicKey must be uncompressed secp256k1 hex (130 chars, leading 04, no 0x prefix)')
-    .optional(),
+    .regex(/^04[0-9a-fA-F]{128}$/, 'publicKey must be uncompressed secp256k1 hex (130 chars, leading 04, no 0x prefix) — deployed agents derive this from their key; register again with it'),
   agentCardUrl: z.string().url().optional(),
   mcpEndpointUrl: z.string().url().optional(),
 });
@@ -171,11 +175,11 @@ a2aRouter.post('/register', requireAuth, async (req: AuthRequest, res, next) => 
       address,
       displayName: data.displayName,
       capabilities: data.capabilities as AgentCapability[],
-      // Preserve any prior pubkey on a re-register that omits it (back-compat
-      // path: old workers still call /register without the field). New workers
-      // always send it; this fall-through keeps the encrypted-task pipeline
-      // working across rolling worker restarts.
-      publicKey: data.publicKey ?? existing?.publicKey,
+      // publicKey is required by the schema, so it's always present here. We no
+      // longer fall back to a stored pubkey on re-register — registering without
+      // one is now a 400, which is what keeps pubkey-less (undecryptable)
+      // executors out of the set and prevents the NEEDS_WRAP dead-end.
+      publicKey: data.publicKey,
       agentCardUrl: data.agentCardUrl,
       mcpEndpointUrl: data.mcpEndpointUrl,
       reputation: existing?.reputation ?? 50, // start at 50
@@ -1025,12 +1029,20 @@ a2aRouter.get('/tasks/posted', requireAuth, async (req: AuthRequest, res, next) 
     // if this grows, batch via Multicall.
     const enriched = await Promise.all(
       tasks.map(async (t) => {
+        // How many executors the brief's AES key has been ECIES-wrapped to and
+        // persisted server-side. 0 on an open encrypted task means the only
+        // copy of the key is in the poster's browser (localStorage) — if that's
+        // cleared before any agent gets wrapped, the brief is permanently
+        // undecryptable (the platform never sees the key). The frontend
+        // surfaces this as a "key at risk" warning on /tasks/mine.
+        const wrapCount = Object.keys(t.meta.wrappedKeys ?? {}).length;
         try {
           const onChainId = await getTaskIdByHash(t.meta.taskId);
-          if (!onChainId) return { ...t, onChain: null };
+          if (!onChainId) return { ...t, wrapCount, onChain: null };
           const onChainTask = await escrowService.getTask(Number(onChainId));
           return {
             ...t,
+            wrapCount,
             onChain: {
               taskId: onChainId.toString(),
               status: onChainTask.status,
@@ -1044,7 +1056,7 @@ a2aRouter.get('/tasks/posted', requireAuth, async (req: AuthRequest, res, next) 
         } catch {
           // Indexer hasn't caught up, or createTask reverted — return the
           // Redis-only view so the user at least sees the task exists.
-          return { ...t, onChain: null };
+          return { ...t, wrapCount, onChain: null };
         }
       }),
     );

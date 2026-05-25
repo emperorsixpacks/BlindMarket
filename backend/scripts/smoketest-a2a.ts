@@ -269,6 +269,9 @@ async function main() {
     body: JSON.stringify({
       displayName: 'smoketest-agent',
       capabilities: ['data_processing'],
+      // Backend requires a pubkey at registration. Derive the uncompressed
+      // secp256k1 pubkey from the agent's ephemeral wallet (strip the 0x).
+      publicKey: agent.signingKey.publicKey.slice(2),
     }),
   });
   if (!registerRes.ok) {

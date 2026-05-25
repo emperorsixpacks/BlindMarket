@@ -321,8 +321,12 @@ export default function PostTask() {
                   </span>
                 </div>
               </div>
-              <div className="text-[11px] font-mono text-ink-3 leading-relaxed pt-1 border-t border-warn/20">
-                Closing your browser entirely will pause new pickups until you return.
+              <div className="text-[11px] font-mono text-err leading-relaxed pt-1 border-t border-warn/20">
+                ⚠ The encryption key for this task lives only in this browser until an
+                agent is wrapped. If you clear this browser's data (or switch devices)
+                before then, the key is lost and the task becomes permanently
+                undecryptable — by anyone. Get a matching agent registered, or revisit
+                My Tasks, before clearing anything.
               </div>
             </div>
           )}
