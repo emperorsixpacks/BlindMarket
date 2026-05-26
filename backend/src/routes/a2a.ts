@@ -960,10 +960,31 @@ a2aRouter.post('/tasks/:id/finalize', requireAuth, async (req: AuthRequest, res,
       await recordWorkerDispute(taskHash, address);
     }
 
-    // Fire-and-forget bridge call: marketplace signer calls completeVerification
-    // on chain. Since submitEvidence already confirmed (executor wouldn't have
-    // called /finalize otherwise), the contract status is now Submitted — the
-    // bridge call should succeed.
+    // Verify the submitEvidence tx has confirmed on-chain before asking the
+    // bridge to call completeVerification. If the executor called /finalize
+    // before broadcasting or before the tx mined, the contract status is still
+    // Assigned — the bridge would call completeVerification, get an
+    // InvalidStatus revert, and silently treat it as "already settled" via
+    // isAlreadySettled, leaving the task stuck permanently.
+    const ocId = await getTaskIdByHash(taskHash);
+    if (ocId) {
+      const onChainTask = await escrowService.getTask(Number(ocId));
+      if (onChainTask.status !== 2) { // 2 = Submitted
+        throw new AppError(
+          503,
+          'NOT_SUBMITTED_ON_CHAIN',
+          `SubmitEvidence not yet confirmed on-chain (status=${onChainTask.status}). Wait for the tx to confirm and retry.`,
+        );
+      }
+    } else {
+      throw new AppError(
+        503,
+        'NOT_INDEXED',
+        'On-chain taskId not yet indexed — wait a few seconds and retry',
+      );
+    }
+
+    // Bridge: marketplace signer calls completeVerification on chain.
     void settleVerification(taskHash, verificationResult.passed);
 
     const body: ApiResponse = {
@@ -1024,11 +1045,28 @@ a2aRouter.post('/tasks/:id/verify', requireAuth, async (req: AuthRequest, res, n
       await recordWorkerDispute(taskHash, state.executorAddress);
     }
 
-    // Bridge: marketplace signer calls completeVerification on chain. Assumes
-    // submitEvidence already confirmed (the executor called /finalize earlier,
-    // which only succeeds if state=submitted, which only happens after they
-    // sign submitEvidence — manual mode just deferred verification, not the
-    // on-chain submission).
+    // Verify the submitEvidence tx has confirmed on-chain before calling the
+    // bridge. The executor may have called /finalize (manual mode defers to
+    // /verify) before the submitEvidence tx mined.
+    const ocId = await getTaskIdByHash(taskHash);
+    if (ocId) {
+      const onChainTask = await escrowService.getTask(Number(ocId));
+      if (onChainTask.status !== 2) { // 2 = Submitted
+        throw new AppError(
+          503,
+          'NOT_SUBMITTED_ON_CHAIN',
+          `SubmitEvidence not yet confirmed on-chain (status=${onChainTask.status}). Wait for the tx to confirm and retry.`,
+        );
+      }
+    } else {
+      throw new AppError(
+        503,
+        'NOT_INDEXED',
+        'On-chain taskId not yet indexed — wait a few seconds and retry',
+      );
+    }
+
+    // Bridge: marketplace signer calls completeVerification on chain.
     void settleVerification(taskHash, passed);
 
     const body: ApiResponse = {
