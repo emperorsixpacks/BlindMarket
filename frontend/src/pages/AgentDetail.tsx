@@ -87,7 +87,7 @@ export default function AgentDetail() {
   }, [id]);
 
   const action = useMutation({
-    mutationFn: (act: 'start' | 'pause' | 'stop') =>
+    mutationFn: (act: 'start' | 'pause' | 'stop' | 'restart') =>
       post<AgentDetails>(`/api/v1/agents/${id}/${act}`),
     onSuccess: (data) => { setAgent(data); qc.invalidateQueries({ queryKey: ['my-agents'] }); },
   });
@@ -178,6 +178,7 @@ export default function AgentDetail() {
                 {agent.status !== 'running' && <button disabled={action.isPending} onClick={() => action.mutate('start')} className="px-3 py-1 border border-green-400 text-green-400 hover:bg-green-400 hover:text-bg transition-colors disabled:opacity-40">start</button>}
                 {agent.status === 'running' && <button disabled={action.isPending} onClick={() => action.mutate('pause')} className="px-3 py-1 border border-yellow-400 text-yellow-400 hover:bg-yellow-400 hover:text-bg transition-colors disabled:opacity-40">pause</button>}
                 <button disabled={action.isPending} onClick={() => action.mutate('stop')} className="px-3 py-1 border border-line text-ink-3 hover:border-red-400 hover:text-red-400 transition-colors disabled:opacity-40">stop</button>
+                {agent.status !== 'stopped' && <button disabled={action.isPending} onClick={() => action.mutate('restart')} className="px-3 py-1 border border-line text-ink-3 hover:border-blue-400 hover:text-blue-400 transition-colors disabled:opacity-40">restart</button>}
               </div>
             )}
           </div>

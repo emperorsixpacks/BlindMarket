@@ -424,3 +424,20 @@ agentsRouter.post('/:id/stop', requireAuth, async (req: AuthRequest, res) => {
     });
   }
 });
+
+// POST /api/v1/agents/:id/restart
+// Convenience: stop then start in one call. Same auth as stop/start.
+agentsRouter.post('/:id/restart', requireAuth, async (req: AuthRequest, res) => {
+  try {
+    const agent = await authorizeOwner(req, res, req.params.id);
+    if (!agent) return;
+    await stopAgent(req.params.id);
+    await startAgent(req.params.id);
+    res.json({ success: true, data: await buildActionResponse(req.params.id) });
+  } catch (e: unknown) {
+    res.status(400).json({
+      success: false,
+      error: { code: 'AGENT_ACTION_FAILED', message: (e as Error).message },
+    });
+  }
+});
