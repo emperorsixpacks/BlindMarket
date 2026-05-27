@@ -24,7 +24,7 @@ import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createGroq } from '@ai-sdk/groq';
 import { z } from 'zod';
-import { createHash, randomBytes, createECDH, createDecipheriv, hkdfSync } from 'crypto';
+import { createHash, randomBytes, createECDH, createCipheriv, createDecipheriv, hkdfSync } from 'crypto';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname as pathDirname, join as pathJoin } from 'path';
@@ -48,6 +48,35 @@ function aesGcmDecrypt(blob, key) {
   const decipher = createDecipheriv('aes-256-gcm', key, iv, { authTagLength: TAG_LENGTH });
   decipher.setAuthTag(tag);
   return Buffer.concat([decipher.update(ct), decipher.final()]);
+}
+
+// ── Encrypt counterparts — byte-compatible with backend/src/services/crypto.ts
+// and frontend/src/lib/crypto.ts. Used by delegate_to_agent to post an
+// encrypted sub-task brief the chosen executor can decrypt with the helpers
+// above. ──
+function genAesKey() {
+  return randomBytes(KEY_LENGTH);
+}
+
+function aesGcmEncrypt(plaintext, key) {
+  const iv = randomBytes(IV_LENGTH);
+  const cipher = createCipheriv('aes-256-gcm', key, iv, { authTagLength: TAG_LENGTH });
+  const ct = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return Buffer.concat([iv, tag, ct]); // [12 iv][16 tag][ciphertext]
+}
+
+function eciesEncryptK1(data, recipientPubKeyHex) {
+  const ephemeral = createECDH('secp256k1');
+  ephemeral.generateKeys();
+  const shared = ephemeral.computeSecret(Buffer.from(recipientPubKeyHex, 'hex'));
+  const derived = Buffer.from(hkdfSync('sha256', shared, '', ECIES_HKDF_INFO, KEY_LENGTH));
+  const blob = aesGcmEncrypt(data, derived);
+  return Buffer.concat([ephemeral.getPublicKey(), blob]); // [65 ephemeral pub][aes blob]
+}
+
+function sha256Hex(buf) {
+  return createHash('sha256').update(buf).digest('hex');
 }
 
 function eciesDecryptK1(blob, privKeyHex) {
@@ -104,6 +133,13 @@ const AGENT_TOOLS_RAW = process.env.AGENT_TOOLS ?? '[]';
 const AGENT_CAPABILITIES_RAW = process.env.AGENT_CAPABILITIES ?? '[]';
 const BACKEND_URL = process.env.BACKEND_URL ?? 'http://localhost:3001';
 const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS ?? 30_000);
+// Escrow reward (in 0G) for a sub-task posted via delegate_to_agent, funded
+// from THIS agent's own wallet. Fixed default; ops can tune via env. The model
+// cannot set it (keeps a weak LLM from over-paying out of the agent's balance).
+const DELEGATE_REWARD_OG = process.env.DELEGATE_REWARD_OG ?? '0.0001';
+// Native-0G headroom the agent insists on keeping after funding a sub-task, so
+// it can still pay gas for its own submitEvidence on the task it's working.
+const DELEGATE_GAS_RESERVE_OG = process.env.DELEGATE_GAS_RESERVE_OG ?? '0.005';
 
 // ── Logging helpers ──────────────────────────────────────────────────────
 
@@ -281,37 +317,146 @@ function buildTools() {
       if (!Array.isArray(requiredCapabilities) || requiredCapabilities.length === 0) {
         return 'ERROR: delegate_to_agent requires `requiredCapabilities` (non-empty string array). Either supply at least one capability tag or complete the task yourself.';
       }
+      if (!signerWallet) {
+        return 'ERROR: cannot delegate — this agent has no signer (AGENT_PRIVATE_KEY unset), so it cannot fund a sub-task escrow. Complete the task yourself.';
+      }
+
+      // A delegated sub-task is a real, encrypted, escrow-funded marketplace
+      // task (the executor receives work only via an encrypted brief, and the
+      // accept→submit→verify→settle path is on-chain). This headlessly mirrors
+      // the human PostTask flow: encrypt → 0G Storage → wrap to executors →
+      // createTask (funded from THIS agent's wallet) → verified index → poll.
+      const auth = { 'Authorization': `Bearer ${AGENT_PLATFORM_TOKEN}` };
+      const jsonAuth = { 'Content-Type': 'application/json', ...auth };
       try {
-        const createRes = await fetchWithTimeout(`${BACKEND_URL}/api/v1/a2a/tasks`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+        const NATIVE = '0x0000000000000000000000000000000000000000';
+        const rewardWei = ethers.parseEther(String(DELEGATE_REWARD_OG));
+        const reserveWei = ethers.parseEther(String(DELEGATE_GAS_RESERVE_OG));
+
+        // Balance guard — don't post a sub-task we can't fund without starving
+        // our own gas. Skip cleanly so the model just completes the task itself.
+        const balance = await signerWallet.provider.getBalance(signerWallet.address);
+        if (balance < rewardWei + reserveWei) {
+          return `Delegation skipped: wallet balance ${ethers.formatEther(balance)} 0G is below reward ${DELEGATE_REWARD_OG} + gas reserve ${DELEGATE_GAS_RESERVE_OG} 0G. Complete the task yourself.`;
+        }
+
+        // 1. Encrypt the brief; taskHash = sha256(ciphertext) (same as PostTask).
+        const aesKey = genAesKey();
+        const ciphertext = aesGcmEncrypt(Buffer.from(taskDescription, 'utf8'), aesKey);
+        const taskHash = '0x' + sha256Hex(ciphertext);
+
+        // 2. Upload the encrypted blob to 0G Storage.
+        const upRes = await fetchWithTimeout(`${BACKEND_URL}/api/v1/storage/upload`, {
+          method: 'POST', headers: jsonAuth,
+          body: JSON.stringify({ data: ciphertext.toString('base64') }),
+        });
+        if (!upRes.ok) return `Delegation failed: storage upload ${upRes.status}`;
+        const rootHash = (await upRes.json()).data?.rootHash;
+        if (!rootHash) return 'Delegation failed: storage upload returned no rootHash';
+
+        // 3. Wrap the AES key to every matching executor registered right now.
+        //    Agents that register later use the existing bid/NEEDS_WRAP path.
+        const capsQS = encodeURIComponent(requiredCapabilities.join(','));
+        const exRes = await fetchWithTimeout(`${BACKEND_URL}/api/v1/a2a/executors?capabilities=${capsQS}`, { headers: auth });
+        const executors = exRes.ok ? ((await exRes.json()).data?.executors ?? []) : [];
+        const wrappedKeys = {};
+        for (const ex of executors) {
+          if (!ex.publicKey) continue;
+          try {
+            wrappedKeys[ex.address.toLowerCase()] = eciesEncryptK1(aesKey, ex.publicKey).toString('hex');
+          } catch (e) {
+            log(`delegate: skip wrap for ${ex.address} (${e.message})`);
+          }
+        }
+        if (Object.keys(wrappedKeys).length === 0) {
+          log(`delegate: no matching executor registered for [${requiredCapabilities.join(',')}] — sub-task will sit until one registers`);
+        }
+
+        // 4. Build the createTask tx server-side, then sign + broadcast it from
+        //    this agent's wallet (funds the escrow with native 0G).
+        const buildRes = await fetchWithTimeout(`${BACKEND_URL}/api/v1/tasks`, {
+          method: 'POST', headers: jsonAuth,
           body: JSON.stringify({
-            description: taskDescription,
-            requiredCapabilities,
-            verificationMode: 'auto',
-            verificationCriteria: { min_length: 10 },
+            taskHash, token: NATIVE, amount: rewardWei.toString(),
+            category: 'delegated', locationZone: 'global', duration: '3600',
           }),
         });
-        if (!createRes.ok) return `Sub-agent task creation failed: ${createRes.status}`;
-        const { data: task } = await createRes.json();
+        if (!buildRes.ok) return `Delegation failed: createTask build ${buildRes.status} ${(await buildRes.text()).slice(0, 120)}`;
+        const unsignedTx = (await buildRes.json()).data?.unsignedTx;
+        if (!unsignedTx) return 'Delegation failed: createTask returned no unsignedTx';
 
+        const sent = await signerWallet.sendTransaction(unsignedTx);
+        log(`delegate: createTask broadcast ${sent.hash} for sub-task ${taskHash.slice(0, 10)}…`);
+        const receipt = await sent.wait();
+        if (!receipt || receipt.status !== 1) return `Delegation failed: createTask tx reverted (${sent.hash})`;
+
+        // 5. Verified meta write (re-parses the receipt + TaskCreated event).
+        const idxRes = await fetchWithTimeout(`${BACKEND_URL}/api/v1/a2a/tasks/index`, {
+          method: 'POST', headers: jsonAuth,
+          body: JSON.stringify({
+            txHash: receipt.hash, taskHash,
+            verificationMode: 'auto', verificationCriteria: { min_length: 10 },
+            requiredCapabilities, rootHash, wrappedKeys,
+          }),
+        });
+        if (!idxRes.ok) return `Delegation failed: index ${idxRes.status} ${(await idxRes.text()).slice(0, 120)}`;
+        log(`delegate: sub-task ${taskHash.slice(0, 10)}… posted (reward ${DELEGATE_REWARD_OG} 0G, wrapped to ${Object.keys(wrappedKeys).length} executor(s))`);
+
+        // 6. Poll our own posted-tasks inbox for the outcome. We're the poster,
+        //    so /tasks/posted carries this sub-task's state + resultData.
+        const target = taskHash.toLowerCase();
         const maxWait = 120_000;
         const start = Date.now();
         while (Date.now() - start < maxWait) {
           await sleep(5000);
-          const statusRes = await fetchWithTimeout(`${BACKEND_URL}/api/v1/a2a/tasks/${task.taskId}`);
-          if (!statusRes.ok) break;
-          const { data: state } = await statusRes.json();
-          if (state.status === 'verified') {
-            return `Sub-agent result for task ${task.taskId}: ${JSON.stringify(state.resultData)}`;
+
+          // Late-bidder wrap loop — the agent-runtime equivalent of the
+          // frontend's useBidWatcher. An agent that registered AFTER we posted
+          // can't decrypt the brief (it wasn't in the post-time wrap), so it
+          // hits NEEDS_WRAP and bids. We still hold the AES key, so we wrap it
+          // to each new bidder ourselves — no platform custody, no human
+          // browser. Best-effort: a failure here must not abort the wait.
+          try {
+            const bRes = await fetchWithTimeout(`${BACKEND_URL}/api/v1/a2a/tasks/${taskHash}/bids`, { headers: auth });
+            if (bRes.ok) {
+              const bd = (await bRes.json()).data ?? {};
+              const alreadyWrapped = new Set((bd.wrapped ?? []).map((a) => a.toLowerCase()));
+              const additions = {};
+              for (const bid of (bd.bids ?? [])) {
+                const addr = (bid.address ?? '').toLowerCase();
+                if (!addr || !bid.publicKey || alreadyWrapped.has(addr)) continue;
+                try {
+                  additions[addr] = eciesEncryptK1(aesKey, bid.publicKey).toString('hex');
+                } catch (e) {
+                  log(`delegate: skip late-wrap for ${addr} (${e.message})`);
+                }
+              }
+              if (Object.keys(additions).length > 0) {
+                const wRes = await fetchWithTimeout(`${BACKEND_URL}/api/v1/a2a/tasks/${taskHash}/wrap-to`, {
+                  method: 'POST', headers: jsonAuth, body: JSON.stringify({ wrappedKeys: additions }),
+                });
+                log(`delegate: wrapped ${Object.keys(additions).length} late bidder(s) on ${taskHash.slice(0, 10)}… (${wRes.ok ? 'ok' : wRes.status})`);
+              }
+            }
+          } catch (e) {
+            log(`delegate: late-bidder wrap poll error on ${taskHash.slice(0, 10)}…: ${e.message}`);
           }
-          if (state.status === 'failed') {
-            return `Sub-agent task failed: ${JSON.stringify(state.verificationResult?.reasons)}`;
+
+          const pRes = await fetchWithTimeout(`${BACKEND_URL}/api/v1/a2a/tasks/posted`, { headers: auth });
+          if (!pRes.ok) continue;
+          const posted = (await pRes.json()).data?.tasks ?? [];
+          const t = posted.find((x) => (x.meta?.taskId ?? '').toLowerCase() === target);
+          if (!t) continue;
+          if (t.state?.status === 'verified') {
+            return `Sub-agent completed task ${taskHash.slice(0, 10)}…: ${JSON.stringify(t.state.resultData)}`;
+          }
+          if (t.state?.status === 'failed') {
+            return `Sub-agent task ${taskHash.slice(0, 10)}… failed: ${JSON.stringify(t.state.verificationResult?.reasons ?? [])}`;
           }
         }
-        return 'Timeout waiting for sub-agent';
+        return `Delegated sub-task ${taskHash.slice(0, 10)}… is posted and funded but no agent completed it within 120s. It stays open on the marketplace; the reward escrow remains locked until an agent completes it or the deadline passes.`;
       } catch (e) {
-        return `Sub-agent error: ${e.message}`;
+        return `Delegation error: ${e.message}`;
       }
     },
   });

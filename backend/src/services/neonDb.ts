@@ -67,7 +67,7 @@ async function runMigrations(p: pg.Pool): Promise<void> {
     const { rows: applied } = await client.query<{ id: number }>(
       'SELECT id FROM schema_migrations',
     );
-    const appliedIds = new Set(applied.map((r) => r.id));
+    const appliedIds = new Set(applied.map((r: { id: number }) => r.id));
 
     for (const m of migrations) {
       if (appliedIds.has(m.id)) continue;

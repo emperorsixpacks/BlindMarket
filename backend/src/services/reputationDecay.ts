@@ -141,7 +141,7 @@ export async function getLeaderboard(limit: number = 20): Promise<DecayedReputat
         disputes: row.disputes,
       };
     })
-    .sort((a, b) => b.decayedScore - a.decayedScore);
+    .sort((a: DecayedReputation, b: DecayedReputation) => b.decayedScore - a.decayedScore);
 }
 
 export async function getReputationHistory(address: string, limit: number = 100): Promise<ReputationEvent[]> {
