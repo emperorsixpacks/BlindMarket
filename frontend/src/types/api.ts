@@ -67,6 +67,9 @@ export interface A2ATaskState {
   verificationResult?: {
     passed: boolean;
     reasons: string[];
+    score?: number;
+    breakdown?: Array<{ name: string; score: number; weight: number; reason: string; error?: string }>;
+    errors?: Record<string, string>;
   };
   assignTxHash?: string;
   verifyTxHash?: string;

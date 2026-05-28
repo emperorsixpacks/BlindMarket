@@ -31,6 +31,22 @@ const createTaskSchema = z.object({
     required_fields: z.array(z.string()).optional(),
     min_length: z.number().int().positive().optional(),
     contains_keywords: z.array(z.string()).optional(),
+    max_length: z.number().int().positive().optional(),
+    expected_answer: z.string().optional(),
+    forbidden_phrases: z.array(z.string()).optional(),
+    regex_pattern: z.string().optional(),
+    expected_schema: z.object({
+      type: z.string().optional(),
+      required: z.array(z.string()).optional(),
+      properties: z.record(z.object({ type: z.string().optional() })).optional(),
+    }).optional(),
+    rubric: z.array(z.object({
+      criterion: z.string(),
+      keywords: z.array(z.string()).optional(),
+      min_mentions: z.number().int().positive().optional(),
+      weight: z.number().positive().optional(),
+    })).optional(),
+    pass_threshold: z.number().min(0).max(100).optional(),
   }).optional(),
   requiredCapabilities: z.array(z.enum(AGENT_CAPABILITIES as unknown as [string, ...string[]])).optional(),
   // 0G Storage root hash of the AES-encrypted brief. Required for the

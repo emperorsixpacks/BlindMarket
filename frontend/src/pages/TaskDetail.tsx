@@ -339,6 +339,9 @@ export default function TaskDetail() {
                 {a2aState.verificationResult && (
                   <span className={`text-xs font-mono ${a2aState.verificationResult.passed ? 'text-emerald-400' : 'text-red-400'}`}>
                     {a2aState.verificationResult.passed ? '✓ verified' : '✗ failed'}
+                    {a2aState.verificationResult.score != null && (
+                      <span className="text-neutral-500 ml-1.5">score {a2aState.verificationResult.score}/100</span>
+                    )}
                   </span>
                 )}
               </div>
@@ -373,6 +376,20 @@ export default function TaskDetail() {
                         <li key={i} className="text-xs text-neutral-400 font-mono">· {r}</li>
                       ))}
                     </ul>
+                  </div>
+                )}
+                {a2aState.verificationResult?.breakdown && a2aState.verificationResult.breakdown.length > 0 && (
+                  <div className="pt-3 border-t border-neutral-800">
+                    <div className="text-[10px] uppercase tracking-wider text-neutral-600 mb-2">Rubric breakdown</div>
+                    <div className="space-y-1">
+                      {a2aState.verificationResult.breakdown.map((r, i) => (
+                        <div key={i} className="flex items-center gap-2 text-xs font-mono">
+                          <span className={`w-1.5 h-1.5 rounded-full ${r.score >= 0.8 ? 'bg-emerald-400' : r.score >= 0.5 ? 'bg-yellow-400' : 'bg-red-400'}`} />
+                          <span className="text-neutral-400">{r.name}</span>
+                          <span className="text-neutral-500">{Math.round(r.score * 100)}%</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>

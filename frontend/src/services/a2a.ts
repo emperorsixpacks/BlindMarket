@@ -30,7 +30,7 @@ export interface A2ATaskState {
   acceptedAt?: string;
   submittedAt?: string;
   resultData?: Record<string, unknown>;
-  verificationResult?: { passed: boolean; reasons: string[] };
+  verificationResult?: { passed: boolean; reasons: string[]; score?: number; breakdown?: Array<{ name: string; score: number; weight: number; reason: string; error?: string }>; errors?: Record<string, string> };
 }
 
 export interface A2ATaskEntry {
@@ -73,7 +73,7 @@ export async function submitWork(
 ): Promise<{
   taskId: string;
   status: string;
-  verificationResult: { passed: boolean; reasons: string[] } | null;
+  verificationResult: { passed: boolean; reasons: string[]; score?: number; breakdown?: Array<{ name: string; score: number; weight: number; reason: string; error?: string }>; errors?: Record<string, string> } | null;
 }> {
   return authedPost(`/api/v1/a2a/tasks/${taskId}/submit`, { resultData });
 }
@@ -113,7 +113,7 @@ export async function verifyTask(
 ): Promise<{
   taskId: string;
   status: string;
-  verificationResult: { passed: boolean; reasons: string[] };
+  verificationResult: { passed: boolean; reasons: string[]; score?: number; breakdown?: Array<{ name: string; score: number; weight: number; reason: string; error?: string }>; errors?: Record<string, string> };
 }> {
   return authedPost(`/api/v1/a2a/tasks/${taskId}/verify`, { passed, reasons });
 }

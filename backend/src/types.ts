@@ -162,7 +162,7 @@ export interface A2ATaskState {
   acceptedAt?: string;
   submittedAt?: string;
   resultData?: Record<string, unknown>;
-  verificationResult?: { passed: boolean; reasons: string[] };
+  verificationResult?: { passed: boolean; reasons: string[]; score?: number; breakdown?: Array<{ name: string; score: number; weight: number; reason: string; error?: string }>; errors?: Record<string, string> };
   // Settlement-bridge bookkeeping. Existence of these hashes means the
   // corresponding on-chain call has at least been broadcast; absence means
   // the bridge hasn't run yet (or the broadcast failed and was logged).
@@ -177,9 +177,28 @@ export interface A2ATaskState {
 }
 
 export interface VerificationCriteria {
+  // Legacy (backward-compatible)
   required_fields?: string[];
   min_length?: number;
   contains_keywords?: string[];
+
+  // New rubric fields
+  max_length?: number;
+  expected_answer?: string;            // exact or fuzzy expected output
+  forbidden_phrases?: string[];        // output must NOT contain these
+  regex_pattern?: string;              // regex the output must match
+  expected_schema?: {
+    type?: string;
+    required?: string[];
+    properties?: Record<string, { type?: string }>;
+  };
+  rubric?: Array<{                     // custom per-criterion scoring
+    criterion: string;                 // human-readable label
+    keywords?: string[];               // keywords to check for
+    min_mentions?: number;             // minimum keyword occurrences
+    weight?: number;                   // weight (default 1)
+  }>;
+  pass_threshold?: number;             // 0-100, default 60. Score must meet this to pass.
 }
 
 // ---- Forensic Evidence Verification ----
