@@ -32,7 +32,6 @@ import { runInNewContext } from 'vm';
 import { ethers } from 'ethers';
 import { decryptSensitive } from '../src/services/crypto.js';
 
-const AGENT_PRIVATE_KEY = process.env.AGENT_PRIVATE_KEY ?? '';
 
 // ── ECIES + AES decrypt helpers ──
 
@@ -109,9 +108,9 @@ function nowStamp() {
 }
 
 const COLORED = !!process.stdout.isTTY;
-const ANSI_DIM   = COLORED ? '\x1b[2m'  : '';
-const ANSI_CYAN  = COLORED ? '\x1b[36m' : '';
-const ANSI_RESET = COLORED ? '\x1b[0m'  : '';
+const ANSI_DIM = COLORED ? '\x1b[2m' : '';
+const ANSI_CYAN = COLORED ? '\x1b[36m' : '';
+const ANSI_RESET = COLORED ? '\x1b[0m' : '';
 
 function log(msg) {
   console.log(
@@ -123,7 +122,7 @@ let agentCapabilities = [];
 try {
   const parsed = JSON.parse(AGENT_CAPABILITIES_RAW);
   if (Array.isArray(parsed) && parsed.length > 0) agentCapabilities = parsed;
-} catch {}
+} catch { }
 if (agentCapabilities.length === 0) {
   // Loud warning: an agent reaching this branch means upstream lost its
   // capabilities (a deploy/patch path serialized an empty array). The agent
@@ -216,9 +215,9 @@ try {
 function getModel() {
   switch (AGENT_PROVIDER) {
     case 'anthropic': return createAnthropic({ apiKey: AGENT_API_KEY })(AGENT_MODEL);
-    case 'groq':      return createGroq({ apiKey: AGENT_API_KEY })(AGENT_MODEL);
-    case 'gemini':    return createGoogleGenerativeAI({ apiKey: AGENT_API_KEY })(AGENT_MODEL);
-    default:          return createOpenAI({ apiKey: AGENT_API_KEY })(AGENT_MODEL);
+    case 'groq': return createGroq({ apiKey: AGENT_API_KEY })(AGENT_MODEL);
+    case 'gemini': return createGoogleGenerativeAI({ apiKey: AGENT_API_KEY })(AGENT_MODEL);
+    default: return createOpenAI({ apiKey: AGENT_API_KEY })(AGENT_MODEL);
   }
 }
 
@@ -425,7 +424,7 @@ function buildTools() {
   for (const t of agentTools) {
     // Sanitize tool name: Groq/OpenAI require ^[a-zA-Z0-9_]{1,64}$
     const safeName = t.name.replace(/[^a-zA-Z0-9_]/g, '_').slice(0, 64);
-    
+
     if (t.type === 'http') {
       tools[safeName] = tool({
         description: t.description,
@@ -433,7 +432,7 @@ function buildTools() {
         execute: async ({ input }) => {
           try {
             let url = t.url.replace(/\{(\w+)\}/g, () => encodeURIComponent(input));
-            
+
             // Append query params
             if (t.queryParams && t.queryParams.length > 0) {
               const qs = new URLSearchParams(t.queryParams.map(q => [q.name, q.value.replace(/\{input\}/g, input)]));
@@ -442,8 +441,8 @@ function buildTools() {
 
             const headers = { 'Content-Type': t.body?.contentType ?? 'application/json' };
             for (const h of (t.headers ?? [])) {
-              headers[h.name] = h.isSensitive 
-                ? decryptSensitive(h.value, AGENT_PRIVATE_KEY) 
+              headers[h.name] = h.isSensitive
+                ? decryptSensitive(h.value, AGENT_PRIVATE_KEY)
                 : h.value.replace(/\{input\}/g, input);
             }
 
@@ -695,7 +694,7 @@ async function pollAndWork() {
     log(`working on task ${acceptedTaskHash.slice(0, 10)}…`);
     log(`LLM prompt: "${briefPlaintext.slice(0, 200)}${briefPlaintext.length > 200 ? '…' : ''}"`);
     const llmStartedAt = Date.now();
-    
+
     let text = '';
     let llmElapsed = '0.0';
     let toolCalls = [];
@@ -708,30 +707,30 @@ async function pollAndWork() {
         tools: buildTools(),
         maxSteps: 10,
       });
-      
+
       text = result.text;
       llmElapsed = ((Date.now() - llmStartedAt) / 1000).toFixed(1);
       toolCalls = result.toolCalls || [];
-      
+
       log(`LLM finished for ${acceptedTaskHash.slice(0, 10)}… in ${llmElapsed}s (${text.length} chars)`);
       log(`LLM finish reason: ${result.finishReason}`);
-      
+
       if (toolCalls.length > 0) {
         log(`LLM made ${toolCalls.length} tool call(s): ${toolCalls.map(tc => {
-            if (!tc) return 'null-tool-call';
-            const name = tc.toolName || 'unknown-tool';
-            const args = tc.args ? JSON.stringify(tc.args) : 'no-args';
-            const argsPreview = args.length > 50 ? args.slice(0, 50) + '…' : args;
-            return `${name}(${argsPreview})`;
+          if (!tc) return 'null-tool-call';
+          const name = tc.toolName || 'unknown-tool';
+          const args = tc.args ? JSON.stringify(tc.args) : 'no-args';
+          const argsPreview = args.length > 50 ? args.slice(0, 50) + '…' : args;
+          return `${name}(${argsPreview})`;
         }).join(', ')}`);
       }
 
       if (result.toolResults && result.toolResults.length > 0) {
         log(`LLM received ${result.toolResults.length} tool result(s).`);
         for (const tr of result.toolResults) {
-            if (tr.isError) {
-                log(`ERROR in tool ${tr.toolName}: ${JSON.stringify(tr.result)}`);
-            }
+          if (tr.isError) {
+            log(`ERROR in tool ${tr.toolName}: ${JSON.stringify(tr.result)}`);
+          }
         }
       }
 
@@ -743,7 +742,7 @@ async function pollAndWork() {
           hasToolResults: (result.toolResults || []).length > 0
         })}`);
       } else if (text.length === 0 && toolCalls.length > 0) {
-         log(`LLM finished with tool calls, but no text output yet. This is expected if more steps are needed.`);
+        log(`LLM finished with tool calls, but no text output yet. This is expected if more steps are needed.`);
       } else {
         log(`LLM response: "${text.slice(0, 200)}${text.length > 200 ? '…' : ''}"`);
       }
@@ -752,7 +751,7 @@ async function pollAndWork() {
       if (llmErr.stack) log(`LLM Stack: ${llmErr.stack.split('\n').slice(0, 3).join(' | ')}`);
       text = `Error during LLM execution: ${llmErr.message}`;
     }
-    
+
     // Ensure we don't submit a completely empty string which might be
     // misinterpreted as a bug or missing data in the UI.
     const finalOutput = text.trim() || `Task completed by agent ${AGENT_ID} (no text output generated by model).`;
