@@ -2,54 +2,52 @@ import { Link, useLocation } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useQuery } from '@tanstack/react-query';
 import { LogoMark } from './LogoMark';
+import { Icon } from './Icon';
 import { get } from '../../lib/api';
 import { useSocket } from '../../hooks/useSocket';
 import { isMainnet } from '../../config/constants';
 
-// Sidebar IA — pure A2A focus per the Track 3 brief. Human-facing nav items
-// (task_feed, worker_view, agent_market, validators, leaderboard) are removed;
-// their routes still exist as deep-links but aren't surfaced in nav. The four
-// visible sections cover the agent-to-agent lifecycle end to end:
-//   POST    → kick off an A2A task; review your posted ones
-//   AGENTS  → deploy and manage the agents that will execute
-//   A2A     → the agent-task board (browse / executions / register)
-//   ACCOUNT → earnings + settings
-const navGroups = [
+// Sidebar IA — agent-to-agent lifecycle, top to bottom. Modernized: sans
+// Title-Case labels, an icon per item, and the marketplace promoted to the
+// top as the primary destination. Routes for removed human-facing surfaces
+// still exist as deep-links; they're just not surfaced here.
+type NavItem = { to: string; label: string; icon: string; exact?: boolean };
+type NavGroup = { label: string; items: NavItem[] };
+
+const navGroups: NavGroup[] = [
   {
-    label: 'docs',
+    label: '',
     items: [
-      { to: '/how-it-works', label: 'how_it_works' },
+      { to: '/a2a', label: 'Marketplace', icon: 'briefcase', exact: true },
     ],
   },
   {
-    label: 'post',
+    label: 'Tasks',
     items: [
-      { to: '/tasks/new', label: 'post_task', exact: true },
-      // Tasks the connected wallet has posted — useful for seeing settlement
-      // status after the agent picks it up.
-      { to: '/tasks/mine', label: 'my_tasks', exact: true },
+      { to: '/tasks/new', label: 'Post a task', icon: 'compose', exact: true },
+      { to: '/tasks/mine', label: 'My tasks', icon: 'clock', exact: true },
     ],
   },
   {
-    label: 'agents',
+    label: 'Agents',
     items: [
-      // /agents/deploy is a chooser page; /agents/deploy/ui and /sdk are the
-      // actual flows. No `exact` so deploy_agent stays highlighted on all three.
-      { to: '/agents/deploy', label: 'deploy_agent' },
-      { to: '/agents/mine', label: 'my_agents', exact: true },
+      // /agents/deploy is the chooser; /ui and /sdk are children — no `exact`
+      // so "Create agent" stays active across all three.
+      { to: '/agents/deploy', label: 'Create agent', icon: 'user' },
+      { to: '/agents/mine', label: 'My agents', icon: 'list', exact: true },
     ],
   },
   {
-    label: 'a2a',
+    label: 'Account',
     items: [
-      { to: '/a2a', label: 'agent_board', exact: true },
+      { to: '/earnings', label: 'Earnings', icon: 'wallet', exact: true },
+      { to: '/settings', label: 'Settings', icon: 'settings', exact: true },
     ],
   },
   {
-    label: 'account',
+    label: 'Docs',
     items: [
-      { to: '/earnings', label: 'earnings' },
-      { to: '/settings', label: 'settings' },
+      { to: '/how-it-works', label: 'How it works', icon: 'shield', exact: true },
     ],
   },
 ];
@@ -66,6 +64,11 @@ export function Sidebar({ open, onClose }: SidebarProps) {
     queryFn: () => get<{ openTasks: number; activeAgents: number; activeValidators: number }>('/api/v1/stats'),
   });
   useSocket('platform', { 'stats:update': () => refetch() });
+
+  const isActive = (item: NavItem) =>
+    item.exact
+      ? location.pathname === item.to
+      : location.pathname === item.to || location.pathname.startsWith(item.to + '/');
 
   return (
     <>
@@ -87,11 +90,11 @@ export function Sidebar({ open, onClose }: SidebarProps) {
       <aside
         className={`w-[240px] h-screen fixed left-0 top-0 bg-surface border-r border-line flex flex-col z-40 transition-transform duration-200 ease-out md:translate-x-0 ${open ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}
       >
-        {/* Logo + close (mobile only) */}
-        <div className="flex items-center justify-between px-6 h-16 border-b border-line">
-          <Link to="/" className="flex items-center gap-3" onClick={onClose}>
-            <LogoMark size={26} blade="var(--bb-ink)" slit="var(--bb-surface)" />
-            <span className="text-sm font-mono font-bold text-ink uppercase tracking-wider">blindmarket</span>
+        {/* Brand */}
+        <div className="flex items-center justify-between px-5 h-16 border-b border-line">
+          <Link to="/" className="flex items-center gap-2.5" onClick={onClose}>
+            <LogoMark size={24} blade="var(--bb-ink)" slit="var(--bb-surface)" />
+            <span className="text-sm font-semibold text-ink tracking-tight">BlindMarket</span>
           </Link>
           <button
             onClick={onClose}
@@ -104,30 +107,26 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           </button>
         </div>
 
-        {/* Nav groups */}
+        {/* Nav */}
         <nav className="flex-1 overflow-y-auto py-4">
-          {navGroups.map((group) => (
-            <div key={group.label} className="mb-6">
-              {/* Section header — explicitly non-interactive. Slightly dimmer
-                  weight, with a short underline rule + select-none so it
-                  reads as a divider rather than a nav row. */}
-              <div className="px-6 mb-3 select-none cursor-default">
-                <span className="inline-block pb-1 border-b border-line text-[10px] font-mono font-semibold uppercase tracking-[0.2em] text-ink-3/80">
-                  {group.label}
-                </span>
-              </div>
+          {navGroups.map((group, gi) => (
+            <div key={group.label || `g${gi}`} className={group.label ? 'mb-1 mt-5 first:mt-0' : 'mb-1'}>
+              {group.label && (
+                <div className="px-5 mb-1.5 select-none cursor-default">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-3">
+                    {group.label}
+                  </span>
+                </div>
+              )}
               {group.items.map((item) => {
-                const active = item.exact
-                  ? location.pathname === item.to
-                  : item.to === '/'
-                    ? location.pathname === '/'
-                    : location.pathname === item.to || location.pathname.startsWith(item.to + '/');
+                const active = isActive(item);
                 return (
                   <Link
                     key={item.to}
                     to={item.to}
-                    className={`relative block px-6 py-2 text-[13px] font-mono transition-colors duration-150 ${active ? 'text-ink' : 'text-ink-2 hover:text-ink hover:bg-surface-2'
-                      }`}
+                    onClick={onClose}
+                    aria-current={active ? 'page' : undefined}
+                    className={`relative flex items-center gap-3 px-5 py-2 text-sm transition-colors duration-150 ${active ? 'text-ink font-medium' : 'text-ink-2 hover:text-ink hover:bg-surface-2'}`}
                   >
                     {active && (
                       <motion.span
@@ -136,10 +135,10 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                         transition={{ type: 'spring', stiffness: 380, damping: 32 }}
                       />
                     )}
-                    <span className="relative flex items-center">
-                      {active && <span className="text-cream mr-1">&#9656;</span>}
-                      {item.label}
+                    <span className={`relative shrink-0 ${active ? 'text-cream' : 'text-ink-3'}`}>
+                      <Icon name={item.icon} size={17} />
                     </span>
+                    <span className="relative">{item.label}</span>
                   </Link>
                 );
               })}
@@ -148,17 +147,17 @@ export function Sidebar({ open, onClose }: SidebarProps) {
         </nav>
 
         {/* Footer status */}
-        <div className="px-6 py-4 border-t border-line space-y-1">
-          <div className="text-[10px] font-mono text-ink-3">v0.4.2 {!isMainnet && '· testnet'}</div>
+        <div className="px-5 py-4 border-t border-line space-y-1.5">
           <div className="flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 bg-ok inline-block" />
-            <span className="text-[10px] font-mono text-ok">tee online</span>
+            <span className="text-[11px] text-ok">TEE online</span>
           </div>
           {stats && (
-            <div className="text-[10px] font-mono text-ink-3 space-y-0.5 pt-1">
-              <div>{stats.activeAgents} agents · {stats.openTasks} open tasks</div>
+            <div className="text-[11px] text-ink-3">
+              {stats.activeAgents} agents · {stats.openTasks} open tasks
             </div>
           )}
+          <div className="text-[10px] font-mono text-ink-3 pt-0.5">v0.4.2{!isMainnet && ' · testnet'}</div>
         </div>
       </aside>
     </>

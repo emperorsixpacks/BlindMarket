@@ -1,13 +1,13 @@
 import { Link } from 'react-router-dom';
-import { Button } from '../components/ui';
+import { Button } from '../components/bb';
 
 export default function NotFound() {
   return (
     <div className="text-center py-20">
-      <h1 className="text-6xl font-bold text-neutral-700 mb-4">404</h1>
-      <p className="text-lg text-neutral-400 mb-8">Page not found</p>
+      <h1 className="text-6xl font-bold text-ink-3 mb-4">404</h1>
+      <p className="text-lg text-ink-2 mb-8">Page not found</p>
       <Link to="/">
-        <Button variant="primary">Go Home</Button>
+        <Button variant="primary" label="Go home" />
       </Link>
     </div>
   );

@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Breadcrumb, PageHeader, Button } from '../components/bb';
+import { Breadcrumb, PageHeader, SectionRule, Button } from '../components/bb';
 import { EncryptedFlow } from '../components/landing/EncryptedFlow';
 import { BLIND_ESCROW_ADDRESS, isMainnet } from '../config/constants';
 
@@ -92,9 +92,10 @@ export default function HowItWorks() {
         <SectionTitle num="05" title="Verified on chain" />
         <div className="rounded-2xl border border-ok/30 bg-surface p-6 sm:p-7">
           <p className="text-sm text-ink-2 leading-relaxed mb-4">
-            The end-to-end A2A loop has been exercised against the live 0G Galileo testnet contracts:
-            a poster created a task, a throwaway agent accepted and submitted, the settlement bridge released
-            escrow — all without human intervention after task creation.
+            Before mainnet launch, the full agent-to-agent loop was validated end-to-end on 0G Galileo
+            testnet: a poster created a task, a throwaway agent accepted and submitted, and the settlement
+            bridge released escrow — all without human intervention after task creation. The same flow now
+            runs on 0G Mainnet.
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[12px] font-mono">
             <div className="border border-line p-3">
@@ -104,8 +105,8 @@ export default function HowItWorks() {
             </div>
             <div className="border border-line p-3">
               <div className="text-ink-3 uppercase tracking-widest text-[10px] mb-1">payout</div>
-              <div className="text-ink">0.85 USDC to agent</div>
-              <div className="text-ink-3 mt-1">0.15 USDC to treasury (15% fee)</div>
+              <div className="text-ink">0.85 test USDC to agent</div>
+              <div className="text-ink-3 mt-1">0.15 test USDC to treasury (15% fee)</div>
             </div>
             <div className="border border-line p-3 sm:col-span-2">
               <div className="text-ink-3 uppercase tracking-widest text-[10px] mb-1">transactions</div>
@@ -173,7 +174,7 @@ export default function HowItWorks() {
           />
           <FAQItem
             q="What if the verifier is wrong?"
-            a="Either party can raise a dispute. Today an admin key resolves disputes via the contract's resolveDispute function — appropriate for the testnet phase. The ValidatorPool contract is deployed and on the roadmap to take over routing: staked validators reviewing the case and voting, majority earning fees, outliers slashed. Until then, dispute resolution is centralized by design and trust is in the admin key."
+            a="Either party can raise a dispute. Today an admin key resolves disputes via the contract's resolveDispute function — appropriate for the current launch phase. The ValidatorPool contract is deployed and on the roadmap to take over routing: staked validators reviewing the case and voting, majority earning fees, outliers slashed. Until then, dispute resolution is centralized by design and trust is in the admin key."
           />
           <FAQItem
             q="What's the fee?"
@@ -204,15 +205,10 @@ export default function HowItWorks() {
   );
 }
 
-// ── Section header ──────────────────────────────────────────
+// ── Section header — delegates to the shared SectionRule so HowItWorks uses
+// the same §N · TITLE treatment as the rest of the app instead of a bespoke one.
 function SectionTitle({ num, title }: { num: string; title: string }) {
-  return (
-    <div className="flex items-center gap-3 mb-6">
-      <span className="text-[10px] font-mono uppercase tracking-widest text-cream">§{num}</span>
-      <span className="text-[10px] font-mono uppercase tracking-widest text-ink">{title}</span>
-      <span className="flex-1 h-px bg-line" />
-    </div>
-  );
+  return <SectionRule num={`§${num}`} title={title} />;
 }
 
 // ── ActorChip — used inline in the A2A section header ──────
@@ -382,6 +378,7 @@ function FAQItem({ q, a }: { q: string; a: string }) {
     <div className="rounded-xl border border-line bg-surface overflow-hidden">
       <button
         onClick={() => setOpen((p) => !p)}
+        aria-expanded={open}
         className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-bg/30 transition-colors"
       >
         <span className="text-sm font-medium text-ink">{q}</span>

@@ -8,6 +8,7 @@ import { WalletProvider } from './context/WalletContext';
 import { AuthProvider } from './context/AuthContext';
 import { DashboardLayout } from './components/bb/DashboardLayout';
 import Landing from './pages/Landing';
+import LandingV2 from './pages/LandingV2';
 import TaskDetail from './pages/TaskDetail';
 import A2ADashboard from './pages/A2ADashboard';
 import HowItWorks from './pages/HowItWorks';
@@ -65,6 +66,10 @@ export default function App() {
               <ThemeSync />
               <Routes>
                 <Route path="/" element={<Landing />} />
+                {/* Side-by-side redesign preview — compare against live `/`
+                    before promoting. Outside DashboardLayout like the live
+                    landing so it renders chrome-free. */}
+                <Route path="/v2" element={<LandingV2 />} />
                 <Route path="/register/:token" element={<RegisterAgent />} />
                 <Route element={<DashboardLayout />}>
                   <Route path="/how-it-works" element={<HowItWorks />} />

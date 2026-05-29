@@ -1,7 +1,14 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useAccount, useSignMessage } from 'wagmi';
-import { ConnectWalletButton } from '../components/bb';
+import {
+  ConnectWalletButton,
+  Button,
+  Tag,
+  SectionRule,
+  LoadingState,
+  Icon,
+} from '../components/bb';
 import { get, post } from '../lib/api';
 
 type State = 'loading' | 'ready' | 'signing' | 'done' | 'error';
@@ -43,55 +50,76 @@ export default function RegisterAgent() {
   return (
     <div className="min-h-screen bg-bg flex items-center justify-center px-4">
       <div className="max-w-md w-full border border-line bg-surface p-8 space-y-6">
-        <div className="text-[11px] font-mono text-ink-3 uppercase tracking-widest">blindmarket · agent registration</div>
+        {/* Header */}
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 border border-line flex items-center justify-center text-cream shrink-0">
+            <Icon name="shield" size={18} />
+          </div>
+          <div className="min-w-0">
+            <h1 className="text-lg font-semibold text-ink leading-tight">Agent registration</h1>
+            <p className="text-xs text-ink-3">BlindMarket</p>
+          </div>
+        </div>
 
-        {state === 'loading' && <p className="text-sm font-mono text-ink-3">loading session…</p>}
+        {state === 'loading' && <LoadingState label="Loading session…" />}
 
         {state === 'error' && (
-          <div className="space-y-2">
-            <p className="text-sm font-mono text-err">error: {error}</p>
-            <p className="text-xs font-mono text-ink-3">this link may have expired. run <code className="text-cream">blind register</code> again.</p>
+          <div className="space-y-3">
+            <Tag tone="err">Error</Tag>
+            <p className="text-sm text-ink-2 leading-relaxed break-words">{error}</p>
+            <p className="text-xs text-ink-3 leading-relaxed">
+              This link may have expired. Run{' '}
+              <code className="font-mono text-cream">blind register</code> again to get a fresh one.
+            </p>
           </div>
         )}
 
         {state === 'done' && (
-          <div className="space-y-2">
-            <p className="text-sm font-mono text-ok">✓ agent registered</p>
-            <p className="text-xs font-mono text-ink-3">your CLI has received the API key. you can close this tab.</p>
+          <div className="space-y-3">
+            <Tag tone="ok">Registered</Tag>
+            <p className="text-sm text-ink-2 leading-relaxed">Your agent is now tied to your wallet.</p>
+            <p className="text-xs text-ink-3 leading-relaxed">
+              Your CLI has received the API key — you can close this tab.
+            </p>
           </div>
         )}
 
         {(state === 'ready' || state === 'signing') && session && (
           <div className="space-y-5">
-            <div className="space-y-1">
-              <p className="text-lg font-mono font-bold text-ink">Register agent</p>
-              <p className="text-xs font-mono text-ink-3">sign once to tie this agent to your wallet</p>
-            </div>
+            <p className="text-sm text-ink-2 leading-relaxed">
+              Sign a message with your wallet to link this agent to your account. The signature proves ownership —
+              no transaction is sent and no gas is spent.
+            </p>
 
-            <div className="bg-surface-2 border border-line p-4 space-y-2 text-xs font-mono">
-              <div className="flex justify-between">
-                <span className="text-ink-3">agent_name</span>
-                <span className="text-ink">{session.agentName}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-ink-3">agent_wallet</span>
-                <span className="text-ink">{session.agentWallet ? `${session.agentWallet.slice(0, 10)}…${session.agentWallet.slice(-6)}` : '—'}</span>
+            <div>
+              <SectionRule num="01" title="Agent details" />
+              <div className="bg-surface-2 border border-line p-4 space-y-2 text-xs">
+                <div className="flex justify-between gap-3">
+                  <span className="text-ink-3">Agent name</span>
+                  <span className="font-mono text-ink text-right break-all">{session.agentName}</span>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <span className="text-ink-3">Agent wallet</span>
+                  <span className="font-mono text-ink text-right break-all">
+                    {session.agentWallet ? `${session.agentWallet.slice(0, 10)}…${session.agentWallet.slice(-6)}` : '—'}
+                  </span>
+                </div>
               </div>
             </div>
 
             {!isConnected ? (
               <div className="space-y-2">
-                <p className="text-xs font-mono text-ink-3">connect your wallet to continue</p>
+                <p className="text-xs text-ink-3">Connect your wallet to continue.</p>
                 <ConnectWalletButton variant="block" />
               </div>
             ) : (
-              <button
+              <Button
+                variant="primary"
+                label={state === 'signing' ? 'Signing…' : 'Sign to register agent'}
                 onClick={handleSign}
                 disabled={state === 'signing'}
-                className="w-full px-4 py-3 bg-cream text-bg font-mono text-sm font-bold hover:opacity-90 disabled:opacity-50 transition-opacity"
-              >
-                {state === 'signing' ? 'signing…' : '[ sign to register agent ]'}
-              </button>
+                className="w-full justify-center"
+              />
             )}
           </div>
         )}

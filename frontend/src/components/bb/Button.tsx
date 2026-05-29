@@ -7,7 +7,7 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 export function Button({ variant = 'outline', size = 'md', label, className = '', ...props }: ButtonProps) {
-  const sizeClass = size === 'sm' ? 'px-3 py-1.5 text-[10px]' : 'px-5 py-2.5 text-xs';
+  const sizeClass = size === 'sm' ? 'px-3 py-1.5 text-2xs' : 'px-5 py-2.5 text-xs';
 
   if (variant === 'primary') {
     return (

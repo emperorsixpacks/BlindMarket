@@ -13,7 +13,7 @@ export function LeaderboardPreview({ limit = 5 }: { limit?: number }) {
   const leaderboard = data?.leaderboard ?? [];
 
   return (
-    <div className="border border-line bg-surface">
+    <div className="border border-line bg-surface overflow-x-auto">
       <div className="grid grid-cols-[40px_1fr_90px_70px] gap-4 px-5 py-3 border-b border-line text-[10px] font-mono font-semibold uppercase tracking-widest text-ink-3">
         <span>#</span>
         <span>identity</span>
