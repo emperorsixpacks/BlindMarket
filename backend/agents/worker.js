@@ -496,6 +496,87 @@ function buildTools() {
     }
   }
 
+  // ── Messaging tools ──────────────────────────────────────────────────────
+
+  // Send a message to another agent or the task poster.
+  // Use when you need more info, want to negotiate, or delegate informally.
+  tools.send_message = tool({
+    description: [
+      'Send a message to another agent or the task poster.',
+      'Use this when you need more information about the task, want to clarify requirements,',
+      'or negotiate with the poster before/during execution.',
+      'The recipient will see the message in their inbox on BlindMarket.',
+    ].join(' '),
+    inputSchema: z.object({
+      to: z.string().describe('Recipient address. Use "poster" to message the task creator, or a specific 0x address for another agent.'),
+      taskId: z.string().optional().describe('Task ID this message is about (for task-specific conversations).'),
+      subject: z.string().optional().describe('Brief subject line (max 200 chars).'),
+      body: z.string().min(1).describe('Message body (max 5000 chars). Be specific and clear.'),
+    }),
+    execute: async (args) => {
+      try {
+        const res = await fetchWithTimeout(`${BACKEND_URL}/api/v1/messages/send`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${AGENT_PLATFORM_TOKEN}`,
+          },
+          body: JSON.stringify({
+            to: args.to,
+            taskId: args.taskId ?? acceptedTaskHash,
+            subject: args.subject,
+            body: args.body,
+          }),
+        });
+        const data = await res.json();
+        if (!data.success) return { error: data.error?.message || 'Failed to send message' };
+        return { sent: true, messageId: data.data.id, to: args.to };
+      } catch (e) {
+        return { error: `send_message failed: ${e.message}` };
+      }
+    },
+  });
+
+  // Read messages from your inbox. Check for replies from the poster or other agents.
+  tools.read_inbox = tool({
+    description: [
+      'Read messages from your inbox.',
+      'Check for replies from the task poster, messages from other agents,',
+      'or responses to delegation requests.',
+    ].join(' '),
+    inputSchema: z.object({
+      taskId: z.string().optional().describe('Filter messages for a specific task.'),
+      unreadOnly: z.boolean().optional().describe('If true, only return unread messages.'),
+    }),
+    execute: async (args) => {
+      try {
+        const params = new URLSearchParams();
+        if (args.taskId) params.set('taskId', args.taskId);
+        if (args.unreadOnly) params.set('unreadOnly', 'true');
+        const qs = params.toString();
+        const res = await fetchWithTimeout(`${BACKEND_URL}/api/v1/messages/inbox${qs ? `?${qs}` : ''}`, {
+          headers: { 'Authorization': `Bearer ${AGENT_PLATFORM_TOKEN}` },
+        });
+        const data = await res.json();
+        if (!data.success) return { error: data.error?.message || 'Failed to read inbox' };
+        return {
+          unread: data.data.unread,
+          messages: data.data.messages.map(m => ({
+            id: m.id,
+            from: m.from_address,
+            subject: m.subject,
+            body: m.body,
+            taskId: m.task_id,
+            createdAt: m.created_at,
+            read: !!m.read_at,
+          })),
+        };
+      } catch (e) {
+        return { error: `read_inbox failed: ${e.message}` };
+      }
+    },
+  });
+
   return tools;
 }
 

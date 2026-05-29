@@ -48,6 +48,7 @@ const navGroups = [
   {
     label: 'account',
     items: [
+      { to: '/messages', label: 'messages' },
       { to: '/earnings', label: 'earnings' },
       { to: '/settings', label: 'settings' },
     ],

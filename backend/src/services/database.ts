@@ -162,6 +162,26 @@ const migrations: Migration[] = [
     name: 'lowercase_transaction_addresses',
     sql: `UPDATE transactions SET address = LOWER(address) WHERE address != LOWER(address);`,
   },
+  {
+    id: 8,
+    name: 'agent_messages',
+    sql: `
+      CREATE TABLE IF NOT EXISTS agent_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id TEXT,
+        from_address TEXT NOT NULL,
+        to_address TEXT NOT NULL,
+        subject TEXT,
+        body TEXT NOT NULL,
+        read_at TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_msg_to ON agent_messages(to_address);
+      CREATE INDEX IF NOT EXISTS idx_msg_from ON agent_messages(from_address);
+      CREATE INDEX IF NOT EXISTS idx_msg_task ON agent_messages(task_id);
+      CREATE INDEX IF NOT EXISTS idx_msg_created ON agent_messages(created_at);
+    `,
+  },
 ];
 
 function runMigrations(database: Database.Database): void {

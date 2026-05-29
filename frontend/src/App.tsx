@@ -22,6 +22,7 @@ import MyTasks from './pages/MyTasks';
 import DeployAgentForm from './pages/DeployAgentForm';
 import DeployAgentSdk from './pages/DeployAgentSdk';
 import MyAgents from './pages/MyAgents';
+import Messages from './pages/Messages';
 import Metrics from './pages/Metrics';
 import { ThemeSync } from './components/ThemeSync';
 
@@ -79,6 +80,7 @@ export default function App() {
                   <Route path="/agents/deploy/sdk" element={<DeployAgentSdk />} />
                   <Route path="/agents/mine" element={<MyAgents />} />
                   <Route path="/agents/:id" element={<AgentDetail />} />
+                  <Route path="/messages" element={<Messages />} />
                   <Route path="/metrics" element={<Metrics />} />
 
                   {/* Pure-A2A pivot: H2H/H2A/A2H surfaces removed from the IA.
