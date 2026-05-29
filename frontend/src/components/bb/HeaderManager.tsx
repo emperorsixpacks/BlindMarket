@@ -26,7 +26,7 @@ export function HeaderManager({ headers, onChange }: HeaderManagerProps) {
             <input type="checkbox" checked={h.isSensitive} onChange={e => updateHeader(i, 'isSensitive', e.target.checked)} />
             Sensitive
           </label>
-          <button type="button" onClick={() => removeHeader(i)} className="text-red-400 hover:text-red-300">×</button>
+          <button type="button" aria-label={`Remove header ${h.name || i + 1}`} onClick={() => removeHeader(i)} className="text-red-400 hover:text-red-300">×</button>
         </div>
       ))}
       <button type="button" onClick={addHeader} className="px-4 py-2 border border-line text-xs font-mono text-ink-3 hover:bg-surface-2 hover:text-ink transition-colors">

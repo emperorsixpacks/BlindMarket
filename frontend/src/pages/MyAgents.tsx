@@ -1,7 +1,17 @@
 import { useAccount, useBalance } from 'wagmi';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { Breadcrumb, PageHeader, SectionRule, Tag, StatCard } from '../components/bb';
+import {
+  Breadcrumb,
+  PageHeader,
+  SectionRule,
+  StatCard,
+  StatusTag,
+  Button,
+  LoadingState,
+  EmptyState,
+  ErrorState,
+} from '../components/bb';
 import { truncateAddress } from '../lib/utils';
 import { API_BASE_URL } from '../config/constants';
 import { authedPost } from '../lib/api';
@@ -25,10 +35,10 @@ function GasChip({ walletAddress }: { walletAddress: string }) {
   if (ether >= LOW_GAS_THRESHOLD) return null;
   return (
     <span
-      title={`Low gas: ${ether.toFixed(4)} 0G — click to top up`}
-      className="inline-flex items-center gap-1 text-[10px] font-mono text-yellow-400"
+      title={`Low gas: ${ether.toFixed(4)} 0G — top up to keep this agent running`}
+      className="inline-flex items-center gap-1 text-[10px] font-mono text-warn"
     >
-      ⚠ low gas
+      ⚠ Low gas
     </span>
   );
 }
@@ -50,15 +60,13 @@ interface Agent {
   };
 }
 
-const STATUS_TONE: Record<string, 'ok' | 'warn' | 'err' | 'neutral'> = {
-  running: 'ok', idle: 'neutral', paused: 'warn', stopped: 'err', error: 'err',
-};
+type Act = 'start' | 'pause' | 'stop' | 'restart';
 
 export default function MyAgents() {
   const { address } = useAccount();
   const qc = useQueryClient();
 
-  const { data: agents = [], isLoading } = useQuery<Agent[]>({
+  const { data: agents = [], isLoading, isError, refetch } = useQuery<Agent[]>({
     queryKey: ['my-agents', address],
     queryFn: async () => {
       const res = await fetch(`${API_BASE_URL}/api/v1/agents?owner=${address}`);
@@ -68,16 +76,71 @@ export default function MyAgents() {
     enabled: !!address,
   });
 
-  // Use `post` from lib/api so non-2xx responses throw with the server's
+  // Use `authedPost` from lib/api so non-2xx responses throw with the server's
   // error message instead of being silently swallowed by `res.json()`.
   const action = useMutation({
-    mutationFn: ({ id, act }: { id: string; act: 'start' | 'pause' | 'stop' | 'restart' }) =>
+    mutationFn: ({ id, act }: { id: string; act: Act }) =>
       authedPost<Agent>(`/api/v1/agents/${id}/${act}`, {}),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['my-agents', address] }),
   });
 
   const totalEarned = agents.reduce((sum, a) => sum + parseFloat(a.totalEarned ?? '0'), 0);
-  const running = agents.filter(a => a.status === 'running').length;
+  const running = agents.filter((a) => a.status === 'running').length;
+  const tasksTotal = agents.reduce((s, a) => s + (a.tasksCompleted ?? 0), 0);
+
+  // Reputation decay → directional arrow + tone.
+  const decayArrow = (factor: number) =>
+    factor > 0.9 ? { glyph: '↑', cls: 'text-ok' } : factor > 0.5 ? { glyph: '→', cls: 'text-warn' } : { glyph: '↓', cls: 'text-err' };
+
+  // Context-aware action buttons for a single agent row. Small, clean, and
+  // self-contained so they read the same on the desktop table and mobile card.
+  function RowActions({ agent }: { agent: Agent }) {
+    const isActing = action.isPending && action.variables?.id === agent.id;
+    return (
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs">
+        {agent.status !== 'running' && (
+          <button
+            disabled={isActing}
+            onClick={() => action.mutate({ id: agent.id, act: 'start' })}
+            className="text-ok hover:underline disabled:opacity-40"
+          >
+            Start
+          </button>
+        )}
+        {agent.status === 'running' && (
+          <button
+            disabled={isActing}
+            onClick={() => action.mutate({ id: agent.id, act: 'pause' })}
+            className="text-warn hover:underline disabled:opacity-40"
+          >
+            Pause
+          </button>
+        )}
+        <button
+          disabled={isActing}
+          onClick={() => action.mutate({ id: agent.id, act: 'stop' })}
+          className="text-ink-3 hover:text-err hover:underline disabled:opacity-40"
+        >
+          Stop
+        </button>
+        {agent.status !== 'stopped' && (
+          <button
+            disabled={isActing}
+            onClick={() => action.mutate({ id: agent.id, act: 'restart' })}
+            className="text-ink-3 hover:text-ink hover:underline disabled:opacity-40"
+          >
+            Restart
+          </button>
+        )}
+        <Link to={`/agents/${agent.id}`} className="text-cream hover:underline">
+          Logs
+        </Link>
+      </div>
+    );
+  }
+
+  // Desktop grid template — keep in sync between header and rows.
+  const COLS = 'grid-cols-[1fr_150px_110px_110px_70px_100px_minmax(180px,_auto)]';
 
   return (
     <div>
@@ -86,93 +149,102 @@ export default function MyAgents() {
         title="My agents"
         description="Manage your deployed agents and track their earnings."
         right={
-          <Link to="/agents/deploy" className="px-4 py-2 border border-cream text-[11px] font-mono text-cream hover:bg-cream hover:text-bg transition-colors uppercase tracking-widest">
-            + deploy agent
+          <Link to="/agents/deploy">
+            <Button variant="primary" label="Deploy agent" />
           </Link>
         }
       />
 
       {/* Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-0 border border-line mb-8">
-        <StatCard label="agents" value={String(agents.length)} sub={`${running} running`} subColor={running > 0 ? 'ok' : undefined} />
+        <StatCard label="Agents" value={String(agents.length)} sub={`${running} running`} subColor={running > 0 ? 'ok' : undefined} />
         <div className="border-t sm:border-t-0 sm:border-l border-line">
-          <StatCard label="total earned" value={`${totalEarned.toLocaleString(undefined, { maximumFractionDigits: 2 })} 0G`} sub="Native 0G · all agents" subColor="ok" />
+          <StatCard
+            label="Total earned"
+            value={`${totalEarned.toLocaleString(undefined, { maximumFractionDigits: 2 })} 0G`}
+            sub="Native 0G · all agents"
+            subColor="ok"
+          />
         </div>
         <div className="border-t sm:border-t-0 sm:border-l border-line">
-          <StatCard label="tasks completed" value={String(agents.reduce((s, a) => s + (a.tasksCompleted ?? 0), 0))} sub="all time" />
+          <StatCard label="Tasks completed" value={String(tasksTotal)} sub="All time" />
         </div>
       </div>
 
-      {/* Agent list */}
+      {/* Agent list — custom responsive list matching the bb DataTable look
+          (header row, hairline dividers, hover). A generic DataTable can't host
+          the per-row action buttons cleanly, because it wraps each row in a
+          single <Link>; nested buttons inside an anchor are invalid and would
+          trigger navigation. So we mirror its visual style here instead. */}
       <div className="border border-line">
-        <SectionRule num="01" title="deployed agents" side={`${agents.length} total`} />
+        <SectionRule num="01" title="Deployed agents" side={`${agents.length} total`} className="px-5 pt-5" />
 
         {!address ? (
-          <div className="px-5 py-10 text-center text-xs font-mono text-ink-3">connect wallet to see your agents</div>
+          <EmptyState
+            icon="wallet"
+            title="Connect your wallet"
+            description="Connect a wallet to see the agents you've deployed."
+          />
         ) : isLoading ? (
-          <div className="px-5 py-10 text-center text-xs font-mono text-ink-3">loading…</div>
+          <LoadingState label="Loading agents…" />
+        ) : isError ? (
+          <ErrorState title="Couldn't load your agents" onRetry={() => refetch()} />
         ) : agents.length === 0 ? (
-          <div className="px-5 py-10 flex flex-col items-center gap-3">
-            <p className="text-xs font-mono text-ink-3">no agents deployed yet.</p>
-            <Link to="/agents/deploy" className="text-xs font-mono text-cream hover:underline">deploy your first agent →</Link>
-          </div>
+          <EmptyState
+            icon="user"
+            title="No agents deployed yet"
+            description="Deploy your first agent to start earning on tasks across the marketplace."
+            action={
+              <Link to="/agents/deploy">
+                <Button variant="outline" label="Create agent" size="sm" />
+              </Link>
+            }
+          />
         ) : (
           <>
-            {/* ── Mobile: card-per-agent (stacked, no scroll required) ─── */}
-            <div className="md:hidden">
-              {agents.map(agent => {
+            {/* Desktop: table */}
+            <div className="hidden md:block">
+              <div className={`grid ${COLS} gap-6 px-5 py-3 border-t border-line text-[11px] font-medium uppercase tracking-wider text-ink-3`}>
+                <span>Agent</span>
+                <span>Model</span>
+                <span>Reputation</span>
+                <span className="text-right">Earned</span>
+                <span className="text-right">Tasks</span>
+                <span>Status</span>
+                <span className="text-right">Actions</span>
+              </div>
+              {agents.map((agent) => {
                 const isActing = action.isPending && action.variables?.id === agent.id;
                 const failed = action.isError && action.variables?.id === agent.id;
+                const arrow = agent.reputation ? decayArrow(agent.reputation.decayFactor) : null;
                 return (
-                  <div key={agent.id} className="border-t border-line px-5 py-4 space-y-3">
-                    {/* Header row: name + status */}
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0 flex-1">
-                        <div className="text-sm font-mono text-ink flex items-center gap-2">
-                          <Link to={`/agents/${agent.id}`} className="hover:text-cream hover:underline">{agent.name}</Link>
+                  <div key={agent.id} className="border-t border-line hover:bg-surface-2 transition-colors">
+                    <div className={`grid ${COLS} gap-6 px-5 py-3.5 text-sm items-center`}>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <Link to={`/agents/${agent.id}`} className="text-ink hover:text-cream transition-colors truncate">
+                            {agent.name}
+                          </Link>
                           {agent.walletAddress && <GasChip walletAddress={agent.walletAddress} />}
                         </div>
-                        <div className="text-[11px] font-mono text-ink-3 mt-0.5">{agent.provider} / {agent.model}</div>
-                        <div className="text-[10px] font-mono text-ink-3 mt-0.5">{truncateAddress(agent.walletAddress)}</div>
+                        <div className="text-[11px] font-mono text-ink-3 mt-0.5 truncate">{truncateAddress(agent.walletAddress)}</div>
                       </div>
-                      <Tag tone={STATUS_TONE[agent.status] ?? 'neutral'}>{isActing ? `${action.variables?.act}…` : agent.status}</Tag>
-                    </div>
-                    {/* Metric row: reputation / earned / tasks */}
-                    <div className="grid grid-cols-3 gap-2 pt-2 border-t border-line/50">
-                      <div>
-                        <div className="text-[10px] font-mono uppercase tracking-widest text-ink-3">rep</div>
-                        <div className="flex items-center gap-1 mt-0.5">
-                          <span className="text-sm font-mono font-bold text-ink">{agent.reputation?.decayedScore ?? 0}</span>
-                          {agent.reputation && (
-                            <span className={`text-xs ${agent.reputation.decayFactor > 0.9 ? 'text-ok' : agent.reputation.decayFactor > 0.5 ? 'text-warn' : 'text-err'}`}>
-                              {agent.reputation.decayFactor > 0.9 ? '↑' : agent.reputation.decayFactor > 0.5 ? '→' : '↓'}
-                            </span>
-                          )}
-                        </div>
+                      <span className="text-ink-3 text-xs truncate">{agent.provider} / {agent.model}</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-mono font-bold text-ink">{agent.reputation?.decayedScore ?? 0}</span>
+                        {arrow && <span className={arrow.cls}>{arrow.glyph}</span>}
                       </div>
-                      <div>
-                        <div className="text-[10px] font-mono uppercase tracking-widest text-ink-3">earned</div>
-                        <div className="text-sm font-mono font-semibold text-ink mt-0.5">{parseFloat(agent.totalEarned ?? '0').toLocaleString(undefined, { maximumFractionDigits: 2 })} 0G</div>
+                      <span className="font-mono font-semibold text-ink text-right">
+                        {parseFloat(agent.totalEarned ?? '0').toLocaleString(undefined, { maximumFractionDigits: 2 })} 0G
+                      </span>
+                      <span className="font-mono text-ink-3 text-right">{agent.tasksCompleted ?? 0}</span>
+                      <span>{isActing ? <StatusTag status={action.variables?.act} /> : <StatusTag status={agent.status} />}</span>
+                      <div className="flex justify-end">
+                        <RowActions agent={agent} />
                       </div>
-                      <div>
-                        <div className="text-[10px] font-mono uppercase tracking-widest text-ink-3">tasks</div>
-                        <div className="text-sm font-mono text-ink mt-0.5">{agent.tasksCompleted ?? 0}</div>
-                      </div>
-                    </div>
-                    {/* Actions */}
-                    <div className="flex gap-4 pt-2 border-t border-line/50 text-[12px] font-mono">
-                      {agent.status !== 'running' && (
-                        <button disabled={isActing} onClick={() => action.mutate({ id: agent.id, act: 'start' })} className="text-green-500 hover:underline disabled:opacity-40">start</button>
-                      )}
-                      {agent.status === 'running' && (
-                        <button disabled={isActing} onClick={() => action.mutate({ id: agent.id, act: 'pause' })} className="text-yellow-500 hover:underline disabled:opacity-40">pause</button>
-                      )}
-                        <button disabled={isActing} onClick={() => action.mutate({ id: agent.id, act: 'stop' })} className="text-ink-3 hover:text-red-500 hover:underline disabled:opacity-40">stop</button>
-                        {agent.status !== 'stopped' && <button disabled={isActing} onClick={() => action.mutate({ id: agent.id, act: 'restart' })} className="text-ink-3 hover:text-blue-500 hover:underline disabled:opacity-40">restart</button>}
-                      <Link to={`/agents/${agent.id}`} className="text-cream hover:underline ml-auto">logs →</Link>
                     </div>
                     {failed && (
-                      <div className="text-[11px] font-mono text-red-400">
+                      <div className="px-5 pb-3 text-[11px] font-mono text-err">
                         {action.variables?.act} failed: {(action.error as Error).message}
                       </div>
                     )}
@@ -181,50 +253,56 @@ export default function MyAgents() {
               })}
             </div>
 
-            {/* ── md+: original table layout, unchanged ──────────────── */}
-            <div className="hidden md:block">
-              <div className="grid grid-cols-[1fr_140px_100px_100px_100px_80px_120px] gap-4 px-5 py-3 border-t border-line text-[11px] font-mono font-semibold uppercase tracking-widest text-ink-3">
-                <span>name · wallet</span><span>model</span><span>reputation</span><span>earned</span><span>tasks</span><span>status</span><span></span>
-              </div>
-              {agents.map(agent => {
+            {/* Mobile: card per agent */}
+            <div className="md:hidden divide-y divide-line border-t border-line">
+              {agents.map((agent) => {
                 const isActing = action.isPending && action.variables?.id === agent.id;
                 const failed = action.isError && action.variables?.id === agent.id;
+                const arrow = agent.reputation ? decayArrow(agent.reputation.decayFactor) : null;
                 return (
-                  <div key={agent.id} className="border-t border-line">
-                    <div className="grid grid-cols-[1fr_140px_100px_100px_100px_80px_120px] gap-4 px-5 py-4 text-[13px] font-mono items-center">
-                      <div>
-                        <div className="text-ink flex items-center gap-2">
-                          <Link to={`/agents/${agent.id}`} className="hover:text-cream hover:underline">{agent.name}</Link>
+                  <div key={agent.id} className="px-5 py-4 space-y-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <Link to={`/agents/${agent.id}`} className="text-sm text-ink hover:text-cream transition-colors truncate">
+                            {agent.name}
+                          </Link>
                           {agent.walletAddress && <GasChip walletAddress={agent.walletAddress} />}
                         </div>
-                        <div className="text-[11px] text-ink-3">{truncateAddress(agent.walletAddress)}</div>
+                        <div className="text-[11px] text-ink-3 mt-0.5">{agent.provider} / {agent.model}</div>
+                        <div className="text-[10px] font-mono text-ink-3 mt-0.5 truncate">{truncateAddress(agent.walletAddress)}</div>
                       </div>
-                      <span className="text-ink-3 text-xs">{agent.provider} / {agent.model}</span>
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-ink font-bold">{agent.reputation?.decayedScore ?? 0}</span>
-                        {agent.reputation && (
-                          <span className={agent.reputation.decayFactor > 0.9 ? 'text-ok' : agent.reputation.decayFactor > 0.5 ? 'text-warn' : 'text-err'}>
-                            {agent.reputation.decayFactor > 0.9 ? '↑' : agent.reputation.decayFactor > 0.5 ? '→' : '↓'}
-                          </span>
-                        )}
-                      </div>
-                      <span className="text-ink font-semibold">{parseFloat(agent.totalEarned ?? '0').toLocaleString(undefined, { maximumFractionDigits: 2 })} 0G</span>
-                      <span className="text-ink-3">{agent.tasksCompleted ?? 0}</span>
-                      <Tag tone={STATUS_TONE[agent.status] ?? 'neutral'}>{isActing ? `${action.variables?.act}…` : agent.status}</Tag>
-                      <div className="flex gap-2 text-[11px] font-mono">
-                        {agent.status !== 'running' && (
-                          <button disabled={isActing} onClick={() => action.mutate({ id: agent.id, act: 'start' })} className="text-green-400 hover:underline disabled:opacity-40">start</button>
-                        )}
-                        {agent.status === 'running' && (
-                          <button disabled={isActing} onClick={() => action.mutate({ id: agent.id, act: 'pause' })} className="text-yellow-400 hover:underline disabled:opacity-40">pause</button>
-                        )}
-                          <button disabled={isActing} onClick={() => action.mutate({ id: agent.id, act: 'stop' })} className="text-ink-3 hover:text-red-400 hover:underline disabled:opacity-40">stop</button>
-                          {agent.status !== 'stopped' && <button disabled={isActing} onClick={() => action.mutate({ id: agent.id, act: 'restart' })} className="text-ink-3 hover:text-blue-400 hover:underline disabled:opacity-40">restart</button>}
-                        <Link to={`/agents/${agent.id}`} className="text-cream hover:underline">logs</Link>
+                      <div className="shrink-0">
+                        {isActing ? <StatusTag status={action.variables?.act} /> : <StatusTag status={agent.status} />}
                       </div>
                     </div>
+
+                    <div className="grid grid-cols-3 gap-2 pt-2 border-t border-line">
+                      <div>
+                        <div className="text-[11px] uppercase tracking-wider text-ink-3">Reputation</div>
+                        <div className="flex items-center gap-1 mt-0.5">
+                          <span className="text-sm font-mono font-bold text-ink">{agent.reputation?.decayedScore ?? 0}</span>
+                          {arrow && <span className={`text-xs ${arrow.cls}`}>{arrow.glyph}</span>}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-[11px] uppercase tracking-wider text-ink-3">Earned</div>
+                        <div className="text-sm font-mono font-semibold text-ink mt-0.5">
+                          {parseFloat(agent.totalEarned ?? '0').toLocaleString(undefined, { maximumFractionDigits: 2 })} 0G
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-[11px] uppercase tracking-wider text-ink-3">Tasks</div>
+                        <div className="text-sm font-mono text-ink mt-0.5">{agent.tasksCompleted ?? 0}</div>
+                      </div>
+                    </div>
+
+                    <div className="pt-2 border-t border-line">
+                      <RowActions agent={agent} />
+                    </div>
+
                     {failed && (
-                      <div className="px-5 pb-3 text-[11px] font-mono text-red-400">
+                      <div className="text-[11px] font-mono text-err">
                         {action.variables?.act} failed: {(action.error as Error).message}
                       </div>
                     )}

@@ -104,7 +104,7 @@ export default function Metrics() {
             onClick={() => setWindowDays(n)}
             className={`px-3 py-1 border ${
               windowDays === n
-                ? 'border-ink bg-surface-2 text-ink'
+                ? 'border-cream bg-surface-2 text-ink'
                 : 'border-line text-ink-2 hover:bg-surface-2'
             }`}
           >

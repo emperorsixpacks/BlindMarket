@@ -1,9 +1,24 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { useAccount, useBalance, useWalletClient } from 'wagmi';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { BrowserProvider, parseEther } from 'ethers';
-import { Breadcrumb, PageHeader, SectionRule, Tag, StatCard } from '../components/bb';
+import {
+  Breadcrumb,
+  PageHeader,
+  SectionRule,
+  Tag,
+  StatCard,
+  Button,
+  FormField,
+  FormInput,
+  FormTextarea,
+  StatusTag,
+  LoadingState,
+  EmptyState,
+  ErrorState,
+  Icon,
+} from '../components/bb';
 import { truncateAddress } from '../lib/utils';
 import { get, patch, authedPost } from '../lib/api';
 import { API_BASE_URL } from '../config/constants';
@@ -15,10 +30,10 @@ import { AGENT_CAPABILITIES } from '../config/capabilities';
 const TOP_UP_AMOUNT = '0.005';
 
 // Below this the agent can't reliably pay for a submitEvidence + a USDC sweep
-// tx. UI surfaces a "Top Up Gas" call to action when balance is under this.
+// tx. UI surfaces a "Top up gas" call to action when balance is under this.
 const LOW_GAS_THRESHOLD = 0.005;
 
-interface AgentTool { 
+interface AgentTool {
   type: string; name: string; description: string; url?: string; endpointUrl?: string; method?: string; toolName?: string;
   headers?: { name: string; value: string; isSensitive: boolean }[];
 }
@@ -32,8 +47,20 @@ interface AgentDetails {
   decayedReputation?: { rawScore: number; decayedScore: number; tasksCompleted: number; disputes: number };
 }
 
-const STATUS_TONE: Record<string, 'ok' | 'warn' | 'err' | 'neutral'> = {
-  running: 'ok', idle: 'neutral', paused: 'warn', stopped: 'err', error: 'err',
+type Tab = 'logs' | 'tools' | 'tasks' | 'edit';
+
+const TAB_LABELS: Record<Tab, string> = {
+  logs: 'Logs',
+  tools: 'Tools',
+  tasks: 'Tasks',
+  edit: 'Edit',
+};
+
+const ACTION_LABELS: Record<'start' | 'pause' | 'stop' | 'restart', string> = {
+  start: 'Start',
+  pause: 'Pause',
+  stop: 'Stop',
+  restart: 'Restart',
 };
 
 export default function AgentDetail() {
@@ -44,8 +71,9 @@ export default function AgentDetail() {
 
   const [agent, setAgent] = useState<AgentDetails | null>(null);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
-  const [tab, setTab] = useState<'logs' | 'tools' | 'tasks' | 'edit'>('logs');
+  const [tab, setTab] = useState<Tab>('logs');
 
   // Edit state
   const [editInstructions, setEditInstructions] = useState('');
@@ -67,8 +95,10 @@ export default function AgentDetail() {
   const balanceEther = balance ? parseFloat(balance.formatted) : 0;
   const isLowGas = !!balance && balanceEther < LOW_GAS_THRESHOLD;
 
-  useEffect(() => {
+  const loadAgent = useCallback(() => {
     if (!id) return;
+    setLoading(true);
+    setFetchError(false);
     get<AgentDetails>(`/api/v1/agents/${id}`)
       .then(data => {
         setAgent(data);
@@ -76,9 +106,13 @@ export default function AgentDetail() {
         setEditModel(data.model ?? '');
         setEditCapabilities(data.capabilities ?? []);
       })
-      .catch(() => { /* not found / server error */ })
+      // A rejected fetch can't tell 404 from a transient 500/network drop, so
+      // surface a retryable error rather than masquerading as "not found".
+      .catch(() => setFetchError(true))
       .finally(() => setLoading(false));
   }, [id]);
+
+  useEffect(() => { loadAgent(); }, [loadAgent]);
 
   useEffect(() => {
     if (!id) return;
@@ -125,7 +159,7 @@ export default function AgentDetail() {
       await refetchBalance();
       setTopUpStatus('idle');
     } catch (err) {
-      setTopUpError((err as Error).message || 'top-up failed');
+      setTopUpError((err as Error).message || 'Top-up failed');
       setTopUpStatus('error');
     }
   }
@@ -157,15 +191,26 @@ export default function AgentDetail() {
         setAgent(fresh);
       } catch { /* non-blocking */ }
     } catch (err) {
-      setWithdrawError((err as Error).message || 'withdraw failed');
+      setWithdrawError((err as Error).message || 'Withdraw failed');
       setWithdrawStatus('error');
     }
   }
 
-  if (loading) return <div className="text-xs font-mono text-ink-3 py-20 text-center">loading…</div>;
-  if (!agent) return <div className="text-xs font-mono text-ink-3 py-20 text-center">agent not found</div>;
+  if (loading) return <LoadingState label="Loading agent…" />;
+  if (!agent) {
+    return (
+      <div className="border border-line">
+        {fetchError ? (
+          <ErrorState title="Couldn't load this agent" onRetry={() => loadAgent()} />
+        ) : (
+          <EmptyState icon="search" title="Agent not found" description="This agent does not exist or is no longer available." />
+        )}
+      </div>
+    );
+  }
 
   const isOwner = address?.toLowerCase() === agent.ownerAddress?.toLowerCase();
+  const tabs: Tab[] = ['logs', 'tools', 'tasks', ...(isOwner ? (['edit'] as Tab[]) : [])];
 
   return (
     <div>
@@ -174,68 +219,96 @@ export default function AgentDetail() {
         title={agent.name}
         description={`${agent.provider} · ${agent.model}`}
         right={
-          <div className="flex items-center gap-3">
-            <Tag tone={STATUS_TONE[agent.status] ?? 'neutral'}>{action.isPending ? `${action.variables}…` : agent.status}</Tag>
+          <div className="flex flex-col items-end gap-3">
+            <StatusTag status={action.isPending ? action.variables : agent.status} />
             {isOwner && (
-              <div className="flex gap-2 text-[11px] font-mono">
-                {agent.status !== 'running' && <button disabled={action.isPending} onClick={() => action.mutate('start')} className="px-3 py-1 border border-green-400 text-green-400 hover:bg-green-400 hover:text-bg transition-colors disabled:opacity-40">start</button>}
-                {agent.status === 'running' && <button disabled={action.isPending} onClick={() => action.mutate('pause')} className="px-3 py-1 border border-yellow-400 text-yellow-400 hover:bg-yellow-400 hover:text-bg transition-colors disabled:opacity-40">pause</button>}
-                <button disabled={action.isPending} onClick={() => action.mutate('stop')} className="px-3 py-1 border border-line text-ink-3 hover:border-red-400 hover:text-red-400 transition-colors disabled:opacity-40">stop</button>
-                {agent.status !== 'stopped' && <button disabled={action.isPending} onClick={() => action.mutate('restart')} className="px-3 py-1 border border-line text-ink-3 hover:border-blue-400 hover:text-blue-400 transition-colors disabled:opacity-40">restart</button>}
+              <div className="flex flex-wrap justify-end gap-2">
+                {agent.status !== 'running' && (
+                  <Button variant="outline" size="sm" disabled={action.isPending}
+                    onClick={() => action.mutate('start')} label="Start" />
+                )}
+                {agent.status === 'running' && (
+                  <Button variant="outline" size="sm" disabled={action.isPending}
+                    onClick={() => action.mutate('pause')} label="Pause" />
+                )}
+                <Button variant="ghost" size="sm" disabled={action.isPending}
+                  onClick={() => action.mutate('stop')} label="Stop" />
+                {agent.status !== 'stopped' && (
+                  <Button variant="ghost" size="sm" disabled={action.isPending}
+                    onClick={() => action.mutate('restart')} label="Restart" />
+                )}
               </div>
             )}
           </div>
         }
       />
       {action.isError && (
-        <div className="mb-4 px-3 py-2 border border-red-900/40 bg-red-900/10 text-[11px] font-mono text-red-400">
-          {action.variables} failed: {(action.error as Error).message}
+        <div className="mb-4 px-4 py-2.5 border border-err/40 bg-err/10 text-xs text-err">
+          {ACTION_LABELS[action.variables]} failed:{' '}
+          <span className="font-mono">{(action.error as Error).message}</span>
         </div>
       )}
 
       <div className="grid grid-cols-1 sm:grid-cols-4 gap-0 border border-line mb-2">
-        <StatCard label="tasks completed" value={String(agent.tasksCompleted ?? 0)} sub="all time" />
-        <div className="border-t sm:border-t-0 sm:border-l border-line"><StatCard label="earned" value={`${parseFloat(agent.totalEarned ?? '0').toLocaleString(undefined, { maximumFractionDigits: 4 })} 0G`} sub="Native 0G" subColor="ok" /></div>
-        <div className="border-t sm:border-t-0 sm:border-l border-line"><StatCard label="reputation" value={String(agent.decayedReputation?.decayedScore ?? agent.reputation?.score ?? 0)} sub={`${agent.reputation?.tasksCompleted ?? 0} tasks · ${agent.reputation?.disputes ?? 0} disputes`} subColor={agent.reputation?.disputes && agent.reputation.disputes > 0 ? 'warn' : undefined} /></div>
-        <div className="border-t sm:border-t-0 sm:border-l border-line"><StatCard label="wallet balance" value={balance ? parseFloat(balance.formatted).toFixed(4) : '—'} sub={isLowGas ? 'low gas — top up' : (balance?.symbol ?? '0G')} subColor={isLowGas ? 'warn' : undefined} /></div>
+        <StatCard label="Tasks completed" value={String(agent.tasksCompleted ?? 0)} sub="All time" />
+        <div className="border-t sm:border-t-0 sm:border-l border-line"><StatCard label="Earned" value={`${parseFloat(agent.totalEarned ?? '0').toLocaleString(undefined, { maximumFractionDigits: 4 })} 0G`} sub="Native 0G" subColor="ok" /></div>
+        <div className="border-t sm:border-t-0 sm:border-l border-line"><StatCard label="Reputation" value={String(agent.decayedReputation?.decayedScore ?? agent.reputation?.score ?? 0)} sub={`${agent.reputation?.tasksCompleted ?? 0} tasks · ${agent.reputation?.disputes ?? 0} disputes`} subColor={agent.reputation?.disputes && agent.reputation.disputes > 0 ? 'warn' : 'default'} /></div>
+        <div className="border-t sm:border-t-0 sm:border-l border-line"><StatCard label="Wallet balance" value={balance ? parseFloat(balance.formatted).toFixed(4) : '—'} sub={isLowGas ? 'Low gas — top up' : (balance?.symbol ?? '0G')} subColor={isLowGas ? 'warn' : 'default'} /></div>
       </div>
 
-      {/* Gas management — only relevant to the agent owner. Top Up sends native
-          0G to the agent wallet; Withdraw sweeps balance back to the owner. */}
+      {/* Gas management — only relevant to the agent owner. Top up sends native
+          0G to the agent wallet; Withdraw sweeps balance back to the owner.
+          Consolidated into one labelled panel with the low-gas warning. */}
       {isOwner && agent.walletAddress && (
-        <div className="border border-line border-t-0 mb-8 px-4 py-3 flex flex-wrap items-center gap-3 text-[11px] font-mono">
-          <span className="text-ink-3">gas:</span>
-          <button
-            onClick={handleTopUp}
-            disabled={topUpStatus === 'sending'}
-            className={`px-3 py-1.5 border transition-colors disabled:opacity-40 ${isLowGas
-              ? 'border-yellow-400 text-yellow-400 hover:bg-yellow-400 hover:text-bg'
-              : 'border-line text-ink-3 hover:border-cream hover:text-cream'
-              }`}>
-            {topUpStatus === 'sending' ? `sending ${TOP_UP_AMOUNT} 0G…` : `top up gas (+${TOP_UP_AMOUNT} 0G)`}
-          </button>
-          {topUpStatus === 'error' && <span className="text-red-400">{topUpError}</span>}
+        <div className="border border-line border-t-0 mb-8 px-5 py-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5 text-ink-2">
+              <Icon name="bolt" size={16} className={isLowGas ? 'text-warn' : 'text-ink-3'} />
+              <span className="text-[13px] font-medium">Gas management</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant={isLowGas ? 'primary' : 'outline'}
+                size="sm"
+                onClick={handleTopUp}
+                disabled={topUpStatus === 'sending'}
+                label={topUpStatus === 'sending' ? `Sending ${TOP_UP_AMOUNT} 0G…` : `Top up gas (+${TOP_UP_AMOUNT} 0G)`}
+              />
+              {/* Withdraw — single button for both native 0G and ERC20 tokens.
+                  The backend's /withdraw endpoint auto-detects; empty body sweeps
+                  native 0G (gas reserve kept). */}
+              {agent.status !== 'running' && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleWithdraw}
+                  disabled={withdrawStatus === 'sending' || balanceEther < 0.0015}
+                  label={withdrawStatus === 'sending' ? 'Withdrawing…' : 'Withdraw to owner'}
+                />
+              )}
+            </div>
+          </div>
 
-          {/* Withdraw — single button for both native 0G and ERC20 tokens.
-              The backend's /withdraw endpoint auto-detects; empty body sweeps
-              native 0G (gas reserve kept). */}
-          {agent.status !== 'running' && (
-            <button
-              onClick={handleWithdraw}
-              disabled={withdrawStatus === 'sending' || balanceEther < 0.0015}
-              className="px-3 py-1.5 border border-line text-ink-3 hover:border-red-400 hover:text-red-400 transition-colors disabled:opacity-40">
-              {withdrawStatus === 'sending' ? 'withdrawing…' : 'withdraw → owner'}
-            </button>
-          )}
-          {withdrawStatus === 'done' && withdrawInfo && (
-            <span className="text-green-400">
-              withdrew {parseFloat(withdrawInfo.amount).toFixed(4)} 0G · tx {withdrawInfo.txHash.slice(0, 10)}…
-            </span>
-          )}
-          {withdrawStatus === 'error' && <span className="text-red-400">{withdrawError}</span>}
-
-          {isLowGas && agent.status !== 'stopped' && (
-            <span className="text-yellow-400">⚠ agent will fail to submit evidence below {LOW_GAS_THRESHOLD} 0G</span>
+          {/* Status / warning line */}
+          {(topUpStatus === 'error' ||
+            withdrawStatus === 'done' ||
+            withdrawStatus === 'error' ||
+            (isLowGas && agent.status !== 'stopped')) && (
+            <div className="mt-3 space-y-1.5 text-xs">
+              {topUpStatus === 'error' && <div className="text-err">{topUpError}</div>}
+              {withdrawStatus === 'done' && withdrawInfo && (
+                <div className="text-ok">
+                  Withdrew <span className="font-mono">{parseFloat(withdrawInfo.amount).toFixed(4)} 0G</span> ·
+                  tx <span className="font-mono">{withdrawInfo.txHash.slice(0, 10)}…</span>
+                </div>
+              )}
+              {withdrawStatus === 'error' && <div className="text-err">{withdrawError}</div>}
+              {isLowGas && agent.status !== 'stopped' && (
+                <div className="text-warn">
+                  Agent will fail to submit evidence below <span className="font-mono">{LOW_GAS_THRESHOLD} 0G</span>.
+                </div>
+              )}
+            </div>
           )}
         </div>
       )}
@@ -243,34 +316,69 @@ export default function AgentDetail() {
       <div className="grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-6">
         {/* Identity */}
         <div className="border border-line p-5">
-          <SectionRule num="01" title="identity" />
-          <div className="mt-4 space-y-4 text-xs font-mono">
-            <div><div className="text-ink-3 mb-1">owner</div><div className="text-ink">{truncateAddress(agent.ownerAddress)}</div></div>
-            <div><div className="text-ink-3 mb-1">deployed</div><div className="text-ink">{new Date(agent.deployedAt).toLocaleString()}</div></div>
-            {agent.walletAddress && <div><div className="text-ink-3 mb-1">agent wallet</div><div className="text-ink break-all text-[11px]">{agent.walletAddress}</div></div>}
-            {agent.inftTokenId !== undefined && <div><div className="text-ink-3 mb-1">INFT token</div><div className="text-cream">#{agent.inftTokenId}</div></div>}
+          <SectionRule num="01" title="Identity" />
+          <div className="space-y-4 text-sm">
             <div>
-              <div className="text-ink-3 mb-1">reputation</div>
-              <div className="text-ink flex items-center gap-2">
-                {String(agent.decayedReputation?.decayedScore ?? agent.reputation?.score ?? 0)}
-                <span className="text-[10px] text-ink-3">
+              <div className="text-[13px] font-medium text-ink-2 mb-1">Owner</div>
+              <div className="font-mono text-ink-2">{truncateAddress(agent.ownerAddress)}</div>
+            </div>
+            <div>
+              <div className="text-[13px] font-medium text-ink-2 mb-1">Deployed</div>
+              <div className="font-mono text-ink-2">{new Date(agent.deployedAt).toLocaleString()}</div>
+            </div>
+            {agent.walletAddress && (
+              <div>
+                <div className="text-[13px] font-medium text-ink-2 mb-1">Agent wallet</div>
+                <div className="font-mono text-ink-2 break-all text-xs">{agent.walletAddress}</div>
+              </div>
+            )}
+            {agent.inftTokenId !== undefined && (
+              <div>
+                <div className="text-[13px] font-medium text-ink-2 mb-1">INFT token</div>
+                <div className="font-mono text-cream">#{agent.inftTokenId}</div>
+              </div>
+            )}
+            <div>
+              <div className="text-[13px] font-medium text-ink-2 mb-1">Reputation</div>
+              <div className="flex items-baseline gap-2">
+                <span className="font-mono text-ink-2">
+                  {String(agent.decayedReputation?.decayedScore ?? agent.reputation?.score ?? 0)}
+                </span>
+                <span className="font-mono text-[11px] text-ink-3">
                   ({agent.reputation?.tasksCompleted ?? 0} tasks · {agent.reputation?.disputes ?? 0} disputes)
                 </span>
               </div>
             </div>
-            {agent.publicKey && <div><div className="text-ink-3 mb-1">public key</div><div className="text-ink">{agent.publicKey.slice(0, 18)}…{agent.publicKey.slice(-6)}</div></div>}
+            {agent.publicKey && (
+              <div>
+                <div className="text-[13px] font-medium text-ink-2 mb-1">Public key</div>
+                <div className="font-mono text-ink-2 break-all text-xs">
+                  {agent.publicKey.slice(0, 18)}…{agent.publicKey.slice(-6)}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
         {/* Tabbed right panel */}
-        <div className="border border-line flex flex-col">
-          {/* Tabs — single-row scroll on narrow viewports so they never wrap into
-              a broken-looking two-line bar. snap-x keeps tap targets aligned. */}
-          <div className="flex border-b border-line overflow-x-auto snap-x scrollbar-thin">
-            {(['logs', 'tools', 'tasks', ...(isOwner ? ['edit'] : [])] as const).map(t => (
-              <button key={t} onClick={() => setTab(t as typeof tab)}
-                className={`flex-1 sm:flex-1 shrink-0 snap-start min-w-[88px] px-4 sm:px-5 py-3 text-[11px] font-mono uppercase tracking-widest border-r border-line transition-colors ${tab === t ? 'text-cream bg-surface-2' : 'text-ink-3 hover:text-ink hover:bg-surface-2'}`}>
-                {t}
+        <div className="border border-line flex flex-col min-w-0">
+          {/* Tabs — clean sans tab bar with a cream underline on the active tab,
+              matching the marketplace dashboard. Horizontal scroll on narrow
+              viewports so they never wrap into a broken two-line bar. */}
+          <div role="tablist" className="flex gap-6 border-b border-line px-5 overflow-x-auto scrollbar-thin">
+            {tabs.map(t => (
+              <button
+                key={t}
+                role="tab"
+                aria-selected={tab === t}
+                onClick={() => setTab(t)}
+                className={`pt-4 pb-3 -mb-px text-sm whitespace-nowrap border-b-2 transition-colors ${
+                  tab === t
+                    ? 'text-ink font-medium border-cream'
+                    : 'text-ink-3 border-transparent hover:text-ink-2'
+                }`}
+              >
+                {TAB_LABELS[t]}
               </button>
             ))}
           </div>
@@ -290,7 +398,7 @@ export default function AgentDetail() {
                 const tsMatch = clean.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\s+(.*)$/);
                 const isErr = clean.includes('[err]');
                 return (
-                  <div key={i} className={`px-3 py-1.5 text-xs font-mono flex gap-3 ${isErr ? 'text-red-400 bg-red-900/10' : 'text-ink-3 hover:bg-surface-2'}`}>
+                  <div key={i} className={`px-3 py-1.5 text-xs font-mono flex gap-3 ${isErr ? 'text-err bg-err/10' : 'text-ink-3 hover:bg-surface-2'}`}>
                     {tsMatch ? (
                       <>
                         {/* Local-time render of the UTC stamp so the time the
@@ -308,34 +416,48 @@ export default function AgentDetail() {
                   </div>
                 );
               }) : (
-                <div className="text-center py-16 text-xs font-mono text-ink-3">
-                  {agent.status === 'running' ? 'waiting for logs…' : 'start the agent to see logs'}
-                </div>
+                <EmptyState
+                  icon="list"
+                  title={agent.status === 'running' ? 'Waiting for logs' : 'No logs yet'}
+                  description={agent.status === 'running'
+                    ? 'Live output will stream here as the agent works.'
+                    : 'Start the agent to begin streaming its logs.'}
+                />
               )
             )}
 
             {tab === 'tools' && (
-              <div className="space-y-3">
-                {(agent.tools ?? []).length === 0 ? (
-                  <div className="text-xs font-mono text-ink-3 py-8 text-center">no tools configured</div>
-                ) : (agent.tools ?? []).map((t, i) => (
-                  <div key={i} className="border border-line p-4 text-xs font-mono">
-                    <div className="flex items-center gap-3 mb-2">
-                      <span className="text-cream">{t.name}</span>
-                      <span className="text-ink-3 border border-line px-2 py-0.5 text-[10px]">{t.type}</span>
-                    </div>
-                    <div className="text-ink-3">{t.description}</div>
-                    {(t.url || t.endpointUrl) && <div className="text-ink-3 mt-1 text-[11px]">{t.url ?? t.endpointUrl}</div>}
-                    {t.headers && t.headers.length > 0 && (
-                      <div className="mt-2 text-ink-3">
-                        {t.headers.map((h, j) => (
-                          <div key={j} className="text-[10px]">{h.name}: {h.isSensitive ? '********' : h.value}</div>
-                        ))}
+              (agent.tools ?? []).length === 0 ? (
+                <EmptyState
+                  icon="settings"
+                  title="No tools configured"
+                  description="This agent has no external tools or endpoints attached."
+                />
+              ) : (
+                <div className="space-y-3">
+                  {(agent.tools ?? []).map((t, i) => (
+                    <div key={i} className="border border-line p-4">
+                      <div className="flex items-center gap-3 mb-2">
+                        <span className="text-sm font-medium text-ink">{t.name}</span>
+                        <Tag tone="neutral">{t.type}</Tag>
                       </div>
-                    )}
-                  </div>
-                ))}
-              </div>
+                      {t.description && <div className="text-sm text-ink-3 leading-relaxed">{t.description}</div>}
+                      {(t.url || t.endpointUrl) && (
+                        <div className="mt-2 text-xs font-mono text-ink-3 break-all">{t.url ?? t.endpointUrl}</div>
+                      )}
+                      {t.headers && t.headers.length > 0 && (
+                        <div className="mt-2 space-y-0.5">
+                          {t.headers.map((h, j) => (
+                            <div key={j} className="text-[11px] font-mono text-ink-3 break-all">
+                              {h.name}: {h.isSensitive ? '********' : h.value}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )
             )}
 
             {tab === 'tasks' && (
@@ -343,47 +465,48 @@ export default function AgentDetail() {
             )}
 
             {tab === 'edit' && isOwner && (
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-[11px] font-mono uppercase tracking-widest text-ink-3 mb-2">instructions</label>
-                  <textarea rows={6} value={editInstructions} onChange={e => setEditInstructions(e.target.value)}
-                    className="w-full bg-surface-2 border border-line px-4 py-3 text-xs font-mono text-ink focus:outline-none focus:border-cream resize-none" />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-mono uppercase tracking-widest text-ink-3 mb-2">model</label>
-                  <input value={editModel} onChange={e => setEditModel(e.target.value)}
-                    className="w-full bg-surface-2 border border-line px-4 py-3 text-xs font-mono text-ink focus:outline-none focus:border-cream" />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-mono uppercase tracking-widest text-ink-3 mb-2">
-                    capabilities <span className="text-ink-3 normal-case tracking-normal">— what tasks this agent can accept</span>
-                  </label>
+              <div className="space-y-5">
+                <FormField label="Instructions">
+                  <FormTextarea rows={6} value={editInstructions} onChange={e => setEditInstructions(e.target.value)} />
+                </FormField>
+
+                <FormField label="Model">
+                  <FormInput className="font-mono" value={editModel} onChange={e => setEditModel(e.target.value)} />
+                </FormField>
+
+                <FormField
+                  label="Capabilities"
+                  required
+                  hint="What tasks this agent can accept. Changes take effect on the next agent restart (stop then start)."
+                >
                   <div className="flex flex-wrap gap-2">
                     {AGENT_CAPABILITIES.map(cap => (
                       <button key={cap} type="button"
                         onClick={() => setEditCapabilities(cs => cs.includes(cap) ? cs.filter(c => c !== cap) : [...cs, cap])}
-                        className={`px-3 py-1 text-[11px] font-mono border transition-colors ${editCapabilities.includes(cap)
-                          ? 'border-cream text-cream bg-cream/10'
-                          : 'border-line text-ink-3 hover:border-ink hover:text-ink'
+                        className={`px-2.5 py-1 text-xs border transition-colors ${editCapabilities.includes(cap)
+                          ? 'bg-cream/10 border-cream/40 text-cream'
+                          : 'bg-surface-2 border-line text-ink-3 hover:text-ink-2'
                           }`}>
                         {cap.replace(/_/g, ' ')}
                       </button>
                     ))}
                   </div>
                   {editCapabilities.length === 0 && (
-                    <div className="mt-2 text-[11px] font-mono text-red-400">
-                      ⚠ pick at least one — without capabilities the agent can't accept any task
+                    <div className="mt-2 text-xs text-err">
+                      Pick at least one — without capabilities the agent can't accept any task.
                     </div>
                   )}
-                  <div className="mt-2 text-[11px] font-mono text-ink-3">
-                    note: changes take effect on the next agent restart (stop → start)
-                  </div>
+                </FormField>
+
+                <div className="flex items-center gap-3 flex-wrap">
+                  <Button
+                    variant="primary"
+                    onClick={() => save.mutate()}
+                    disabled={save.isPending || editCapabilities.length === 0}
+                    label={save.isPending ? 'Saving…' : 'Save changes'}
+                  />
+                  {save.isError && <span className="text-xs text-err">Save failed</span>}
                 </div>
-                <button onClick={() => save.mutate()} disabled={save.isPending || editCapabilities.length === 0}
-                  className="px-6 py-3 border border-cream text-xs font-mono text-cream hover:bg-cream hover:text-bg disabled:opacity-40 transition-colors">
-                  {save.isPending ? 'saving…' : 'save changes →'}
-                </button>
-                {save.isError && <div className="text-xs font-mono text-red-400">save failed</div>}
               </div>
             )}
           </div>
@@ -399,18 +522,34 @@ function AgentTasks({ agentWallet }: { agentWallet?: string }) {
     state: { status: string; acceptedAt?: string; verificationResult?: { passed: boolean } };
   };
   const [executions, setExecutions] = useState<Execution[]>([]);
+  const [tasksError, setTasksError] = useState(false);
 
-  useEffect(() => {
+  const loadTasks = useCallback(() => {
     if (!agentWallet) return;
+    setTasksError(false);
     // Hits /a2a/executions filtered by agent wallet (not the owner EOA). The
     // old code queried /api/v1/tasks which only returns currently-open tasks,
     // so completed runs by this agent never appeared.
     get<{ executions?: Execution[] }>(`/api/v1/a2a/executions?address=${agentWallet}`)
       .then(data => setExecutions(data.executions ?? []))
-      .catch(() => { /* leave empty */ });
+      .catch(() => setTasksError(true));
   }, [agentWallet]);
 
-  if (executions.length === 0) return <div className="text-xs font-mono text-ink-3 py-8 text-center">no tasks yet</div>;
+  useEffect(() => { loadTasks(); }, [loadTasks]);
+
+  if (tasksError && executions.length === 0) {
+    return <ErrorState title="Couldn't load this agent's tasks" onRetry={() => loadTasks()} />;
+  }
+
+  if (executions.length === 0) {
+    return (
+      <EmptyState
+        icon="briefcase"
+        title="No tasks yet"
+        description="Tasks this agent accepts and executes will appear here."
+      />
+    );
+  }
 
   // Most-recent first by acceptedAt; falls back to insertion order when
   // timestamps are missing (older state rows pre-acceptedAt field).
@@ -423,12 +562,10 @@ function AgentTasks({ agentWallet }: { agentWallet?: string }) {
   return (
     <div className="space-y-2">
       {sorted.map(e => (
-        <div key={e.meta.taskId} className="flex items-center justify-between border border-line px-4 py-3 text-xs font-mono">
-          <span className="text-ink-3">{e.meta.taskId.slice(0, 10)}…</span>
-          <span className="text-ink">{(e.meta.requiredCapabilities ?? []).join(', ') || '—'}</span>
-          <span className={e.state.status === 'verified' ? 'text-ok' : e.state.status === 'failed' ? 'text-red-400' : 'text-ink-3'}>
-            {e.state.status}
-          </span>
+        <div key={e.meta.taskId} className="flex items-center justify-between gap-3 border border-line px-4 py-3 text-sm">
+          <span className="font-mono text-ink-3 shrink-0">{e.meta.taskId.slice(0, 10)}…</span>
+          <span className="text-ink-2 truncate flex-1 text-center">{(e.meta.requiredCapabilities ?? []).join(', ') || '—'}</span>
+          <span className="shrink-0"><StatusTag status={e.state.status} /></span>
         </div>
       ))}
     </div>

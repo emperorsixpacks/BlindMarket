@@ -27,6 +27,8 @@ export default {
       fontFamily: {
         sans: ["'IBM Plex Sans'", 'system-ui', '-apple-system', "'Segoe UI'", 'Roboto', 'sans-serif'],
         mono: ["'IBM Plex Mono'", 'ui-monospace', "'SF Mono'", 'Menlo', 'monospace'],
+        // Dot-matrix / LED display face — used for the landing hero headline.
+        display: ["'Doto'", "'IBM Plex Mono'", 'ui-monospace', 'monospace'],
       },
       /* Sharp corners — zero border-radius everywhere */
       borderRadius: {

@@ -4,25 +4,38 @@ import { config } from '../config.js';
 const { Pool } = pg;
 
 let pool: pg.Pool | null = null;
+// Cached so migrations run exactly once per process. Cleared on failure so a
+// transient error doesn't leave the schema permanently uninitialised.
+let migrationPromise: Promise<void> | null = null;
 
-export function getPool(): pg.Pool {
-  if (pool) return pool;
-
+export async function getPool(): Promise<pg.Pool> {
   if (!config.databaseUrl) {
     throw new Error('DATABASE_URL is not set — Neon PostgreSQL connection unavailable');
   }
 
-  let connectionString = config.databaseUrl;
-  if (connectionString) {
-    if (connectionString.includes('sslmode=')) {
-      connectionString = connectionString.replace(/sslmode=(require|prefer|verify-ca)/, 'sslmode=verify-full');
-    } else {
-      connectionString += (connectionString.includes('?') ? '&' : '?') + 'sslmode=verify-full';
-    }
+  if (!pool) {
+    // Neon requires SSL, but node-postgres can't verify Neon's cert chain
+    // without an explicitly configured CA — forcing sslmode=verify-full made
+    // every query fail. Connect over TLS without CA verification (the semantics
+    // of sslmode=require), which is the standard Neon + node-postgres setup.
+    pool = new Pool({
+      connectionString: config.databaseUrl,
+      ssl: { rejectUnauthorized: false },
+    });
   }
 
-  pool = new Pool({ connectionString });
-  runMigrations(pool);
+  // Ensure the schema exists before the first query. Previously migrations were
+  // fire-and-forget (not awaited), so a query could hit a not-yet-created table
+  // — and if that one-shot run failed, the schema stayed missing for the life
+  // of the process. Await it, and clear the cache on failure so it retries.
+  if (!migrationPromise) {
+    migrationPromise = runMigrations(pool).catch((err) => {
+      migrationPromise = null;
+      throw err;
+    });
+  }
+  await migrationPromise;
+
   return pool;
 }
 
@@ -30,6 +43,7 @@ export async function closePool(): Promise<void> {
   if (pool) {
     await pool.end().catch(() => {});
     pool = null;
+    migrationPromise = null;
   }
 }
 

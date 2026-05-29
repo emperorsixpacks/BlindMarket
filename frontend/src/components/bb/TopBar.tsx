@@ -8,10 +8,10 @@ interface TopBarProps {
 }
 
 export function TopBar({ onMenuClick }: TopBarProps = {}) {
-  const [currentTheme, setCurrentTheme] = useState('light');
+  const [currentTheme, setCurrentTheme] = useState('dark');
 
   useEffect(() => {
-    const savedTheme = localStorage.getItem('bb.theme') || 'light';
+    const savedTheme = localStorage.getItem('bb.theme') || 'dark';
     document.documentElement.setAttribute('data-theme', savedTheme);
     setCurrentTheme(savedTheme);
   }, []);
@@ -41,19 +41,20 @@ export function TopBar({ onMenuClick }: TopBarProps = {}) {
 
       {/* Post task — hidden on smallest screens to save space */}
       <Link to="/tasks/new" className="hidden sm:block">
-        <Button variant="outline" label="post_task" size="sm" />
+        <Button variant="outline" label="Post task" size="sm" />
       </Link>
 
       {/* Theme toggle — hidden on small screens */}
       <button
         onClick={toggleTheme}
-        className="hidden md:flex items-center border border-line text-[11px] font-mono"
+        aria-label="toggle theme"
+        className="hidden md:flex items-center border border-line text-[11px]"
       >
         <span className={`px-3 py-1.5 ${currentTheme === 'light' ? 'text-ink' : 'text-ink-3'}`}>
-          {currentTheme === 'light' ? '●' : '◌'} light
+          {currentTheme === 'light' ? '●' : '◌'} Light
         </span>
         <span className={`px-3 py-1.5 border-l border-line ${currentTheme === 'dark' ? 'text-ink' : 'text-ink-3'}`}>
-          {currentTheme === 'dark' ? '●' : '◌'} dark
+          {currentTheme === 'dark' ? '●' : '◌'} Dark
         </span>
       </button>
 

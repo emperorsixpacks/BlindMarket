@@ -44,112 +44,147 @@ export default function Settings() {
 
   const walletDisplay = address
     ? `${address.slice(0, 6)}…${address.slice(-4)}`
-    : 'not connected';
+    : 'Not connected';
 
   const reputationDisplay = reputation
     ? `${reputation.decayedScore.toFixed(1)} · ${reputation.tasksCompleted} tasks · ${reputation.disputes} disputes`
-    : 'no reputation yet';
+    : 'No reputation yet';
+
+  const notifications: { label: string; description: string; value: boolean; set: (v: boolean) => void }[] = [
+    { label: 'Payout received', description: 'When escrow settles a task in your favour.', value: notifyPayouts, set: setNotifyPayouts },
+    { label: 'Task assigned', description: 'When one of your agents is matched to a task.', value: notifyAssignments, set: setNotifyAssignments },
+    { label: 'Dispute opened', description: 'When a task you are involved in enters dispute.', value: notifyDisputes, set: setNotifyDisputes },
+  ];
 
   return (
     <div>
       <Breadcrumb items={['account', 'settings']} />
-      <PageHeader title="Settings" />
+      <PageHeader title="Settings" description="Manage your identity, network, and notification preferences." />
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-0 border border-line">
         {/* Left column */}
-        <div className="p-6 space-y-8">
+        <div className="p-6 space-y-10">
           {/* Identity */}
           <div className="space-y-5">
-            <SectionRule num="01" title="identity" />
+            <SectionRule num="01" title="Identity" />
 
-            <FormField label="wallet_address">
-              <div className="px-3 py-2.5 bg-surface-2 border border-line text-ink-3 text-sm font-mono flex items-center gap-2">
-                <span>{walletDisplay}</span>
-                {isConnected ? <Tag tone="ok">connected</Tag> : <Tag tone="warn">disconnected</Tag>}
+            <FormField label="Wallet address">
+              <div className="px-3 py-2.5 bg-surface-2 border border-line text-sm flex items-center gap-2 flex-wrap">
+                <span className="font-mono text-ink-2">{walletDisplay}</span>
+                {isConnected ? <Tag tone="ok">Connected</Tag> : <Tag tone="warn">Disconnected</Tag>}
               </div>
             </FormField>
 
-            <FormField label="reputation" hint="decayed on-chain + off-chain score">
-              <div className="px-3 py-2.5 bg-surface-2 border border-line text-sm font-mono text-ink-3">
-                {address ? reputationDisplay : 'connect wallet to view reputation'}
+            <FormField label="Reputation" hint="Decayed on-chain + off-chain score">
+              <div className="px-3 py-2.5 bg-surface-2 border border-line text-sm font-mono text-ink-2">
+                {address ? reputationDisplay : 'Connect wallet to view reputation'}
               </div>
             </FormField>
 
-            <FormField label="social_oauth" hint="coming soon — link accounts for optional identity verification">
-              <div className="flex gap-2">
-                <Button variant="outline" label="github (soon)" size="sm" disabled />
-                <Button variant="outline" label="twitter (soon)" size="sm" disabled />
-                <Button variant="outline" label="google (soon)" size="sm" disabled />
+            <FormField label="Social verification" hint="Coming soon — link accounts for optional identity verification.">
+              <div className="flex gap-2 flex-wrap">
+                <Button variant="outline" label="GitHub (soon)" size="sm" disabled />
+                <Button variant="outline" label="Twitter (soon)" size="sm" disabled />
+                <Button variant="outline" label="Google (soon)" size="sm" disabled />
               </div>
             </FormField>
           </div>
 
           {/* Network */}
           <div className="space-y-5">
-            <SectionRule num="02" title="network" />
+            <SectionRule num="02" title="Network" />
 
-            <FormField label="supported_chain" hint={`BlindMarket runs on 0G ${isMainnet ? 'Mainnet' : 'Galileo'} (${isMainnet ? 16661 : 16602})`}>
-              <div className="px-3 py-2.5 bg-surface-2 border border-line text-sm font-mono flex items-center gap-2">
-                <Tag tone={isCorrectChain ? 'ok' : 'warn'}>0g_{isMainnet ? 'mainnet' : 'galileo'} · {OG_CHAIN_ID}</Tag>
+            <FormField
+              label="Supported chain"
+              hint={`BlindMarket runs on 0G ${isMainnet ? 'Mainnet' : 'Galileo'} (chain ID ${isMainnet ? 16661 : 16602}).`}
+            >
+              <div className="px-3 py-2.5 bg-surface-2 border border-line text-sm flex items-center gap-2 flex-wrap">
+                <Tag tone={isCorrectChain ? 'ok' : 'warn'}>
+                  0G {isMainnet ? 'Mainnet' : 'Galileo'} · <span className="font-mono">{OG_CHAIN_ID}</span>
+                </Tag>
                 {chainId != null && chainId !== OG_CHAIN_ID && (
                   <>
-                    <span className="text-ink-3">currently on chain {chainId}</span>
+                    <span className="text-ink-3">
+                      Currently on chain <span className="font-mono">{chainId}</span>
+                    </span>
                     <button
                       onClick={switchChain}
-                      className="ml-auto text-[11px] underline underline-offset-2 text-amber-200 hover:text-amber-100"
+                      className="ml-auto text-xs underline underline-offset-2 text-cream hover:text-ink transition-colors"
                     >
-                      switch
+                      Switch network
                     </button>
                   </>
                 )}
-                {isCorrectChain && <span className="text-ok">● active</span>}
+                {isCorrectChain && <span className="ml-auto text-xs text-ok">Active</span>}
               </div>
             </FormField>
           </div>
 
           {/* Notifications */}
           <div className="space-y-5">
-            <SectionRule num="03" title="notifications · saved to this browser" />
+            <SectionRule num="03" title="Notifications" side="Saved to this browser" />
 
-            {[
-              { label: 'payout_received', value: notifyPayouts, set: setNotifyPayouts },
-              { label: 'task_assigned', value: notifyAssignments, set: setNotifyAssignments },
-              { label: 'dispute_opened', value: notifyDisputes, set: setNotifyDisputes },
-            ].map((toggle) => (
-              <div key={toggle.label} className="flex items-center justify-between py-2 border-b border-line last:border-b-0">
-                <span className="text-xs font-mono text-ink">{toggle.label}</span>
-                <button
-                  onClick={() => toggle.set(!toggle.value)}
-                  className={`w-10 h-5 border transition-colors flex items-center ${
-                    toggle.value ? 'bg-cream/20 border-cream/40' : 'bg-surface-2 border-line'
-                  }`}
+            <div className="border border-line">
+              {notifications.map((toggle, i) => (
+                <div
+                  key={toggle.label}
+                  className={`flex items-center justify-between gap-4 px-4 py-3.5 ${i > 0 ? 'border-t border-line' : ''}`}
                 >
-                  <div
-                    className={`w-3 h-3 transition-all ${
-                      toggle.value ? 'bg-cream ml-5' : 'bg-ink-3 ml-1'
+                  <div className="min-w-0">
+                    <div className="text-sm text-ink">{toggle.label}</div>
+                    <div className="text-xs text-ink-3 mt-0.5 leading-relaxed">{toggle.description}</div>
+                  </div>
+                  <button
+                    role="switch"
+                    aria-checked={toggle.value}
+                    aria-label={toggle.label}
+                    onClick={() => toggle.set(!toggle.value)}
+                    className={`shrink-0 w-10 h-5 border transition-colors flex items-center ${
+                      toggle.value ? 'bg-cream/20 border-cream/40' : 'bg-surface-2 border-line'
                     }`}
-                  />
-                </button>
-              </div>
-            ))}
+                  >
+                    <div
+                      className={`w-3 h-3 transition-all ${toggle.value ? 'bg-cream ml-5' : 'bg-ink-3 ml-1'}`}
+                    />
+                  </button>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
 
         {/* Right column */}
-        <div className="border-l border-line p-6 space-y-6">
+        <div className="border-t lg:border-t-0 lg:border-l border-line p-6 space-y-8">
           {/* Session state */}
           <div className="space-y-4">
-            <SectionRule num="I" title="session state" />
+            <SectionRule num="04" title="Session" />
 
             <div className="space-y-2">
               {[
-                { label: 'wallet', value: isConnected ? '● connected' : '○ disconnected', color: isConnected ? 'text-ok' : 'text-ink-3' },
-                { label: 'chain_id', value: chainId != null ? String(chainId) : '—', color: isCorrectChain ? 'text-ok' : 'text-warn' },
-                { label: 'rpc', value: OG_RPC_URL.replace(/^https?:\/\//, ''), color: 'text-ink-3' },
+                {
+                  label: 'Wallet',
+                  value: isConnected ? 'Connected' : 'Disconnected',
+                  mono: false,
+                  color: isConnected ? 'text-ok' : 'text-ink-3',
+                },
+                {
+                  label: 'Chain ID',
+                  value: chainId != null ? String(chainId) : '—',
+                  mono: true,
+                  color: isCorrectChain ? 'text-ok' : 'text-warn',
+                },
+                {
+                  label: 'RPC',
+                  value: OG_RPC_URL.replace(/^https?:\/\//, ''),
+                  mono: true,
+                  color: 'text-ink-3',
+                },
               ].map((item) => (
-                <div key={item.label} className="flex items-center justify-between py-1.5">
-                  <span className="text-[11px] font-mono text-ink-3">{item.label}</span>
-                  <span className={`text-[11px] font-mono ${item.color}`}>{item.value}</span>
+                <div key={item.label} className="flex items-center justify-between gap-3 py-1.5">
+                  <span className="text-xs text-ink-3">{item.label}</span>
+                  <span className={`text-xs ${item.mono ? 'font-mono' : ''} ${item.color} truncate`}>
+                    {item.value}
+                  </span>
                 </div>
               ))}
             </div>
@@ -157,19 +192,19 @@ export default function Settings() {
 
           {/* Privacy explainer */}
           <div className="space-y-3">
-            <div className="text-[11px] font-mono text-ink-3">▸ privacy</div>
-            <div className="bg-surface-2 border border-line p-4 space-y-2">
-              <p className="text-[11px] font-mono text-ink-3 leading-relaxed">
-                ● ecies keys are generated in-browser and never transmitted.
+            <SectionRule num="05" title="Privacy" />
+            <div className="bg-surface-2 border border-line p-4 space-y-2.5">
+              <p className="text-xs text-ink-3 leading-relaxed">
+                ECIES keys are generated in-browser and never transmitted.
               </p>
-              <p className="text-[11px] font-mono text-ink-3 leading-relaxed">
-                ● aes-256-gcm keys are ephemeral — one per task.
+              <p className="text-xs text-ink-3 leading-relaxed">
+                AES-256-GCM keys are ephemeral — one per task.
               </p>
-              <p className="text-[11px] font-mono text-ink-3 leading-relaxed">
-                ● private keys exist only in browser memory. closing the tab destroys them.
+              <p className="text-xs text-ink-3 leading-relaxed">
+                Private keys exist only in browser memory. Closing the tab destroys them.
               </p>
-              <p className="text-[11px] font-mono text-ink-3 leading-relaxed">
-                ● the platform never sees plaintext instructions or evidence.
+              <p className="text-xs text-ink-3 leading-relaxed">
+                The platform never sees plaintext instructions or evidence.
               </p>
             </div>
           </div>

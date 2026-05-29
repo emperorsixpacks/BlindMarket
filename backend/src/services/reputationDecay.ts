@@ -27,7 +27,7 @@ function computeDecayFactor(daysSinceLastTask: number | null): number {
 }
 
 export async function getDecayedReputation(address: string): Promise<DecayedReputation> {
-  const db = getPool();
+  const db = await getPool();
   const { rows } = await db.query(
     'SELECT * FROM reputation_history WHERE address = $1',
     [address],
@@ -74,7 +74,7 @@ export async function getDecayedReputation(address: string): Promise<DecayedRepu
 }
 
 export async function recordTaskCompletion(address: string, taskId: string, scoreDelta: number): Promise<void> {
-  const db = getPool();
+  const db = await getPool();
   const now = new Date().toISOString();
 
   const { rows } = await db.query('SELECT * FROM reputation_history WHERE address = $1', [address]);
@@ -98,7 +98,7 @@ export async function recordTaskCompletion(address: string, taskId: string, scor
 }
 
 export async function recordDispute(address: string, taskId: string): Promise<void> {
-  const db = getPool();
+  const db = await getPool();
 
   const { rows } = await db.query('SELECT * FROM reputation_history WHERE address = $1', [address]);
 
@@ -118,7 +118,7 @@ export async function recordDispute(address: string, taskId: string): Promise<vo
 }
 
 export async function getLeaderboard(limit: number = 20): Promise<DecayedReputation[]> {
-  const db = getPool();
+  const db = await getPool();
   const { rows } = await db.query(
     'SELECT * FROM reputation_history ORDER BY raw_score DESC LIMIT $1',
     [limit],
@@ -145,7 +145,7 @@ export async function getLeaderboard(limit: number = 20): Promise<DecayedReputat
 }
 
 export async function getReputationHistory(address: string, limit: number = 100): Promise<ReputationEvent[]> {
-  const db = getPool();
+  const db = await getPool();
   const { rows } = await db.query(
     'SELECT * FROM reputation_events WHERE address = $1 ORDER BY created_at DESC LIMIT $2',
     [address, limit],

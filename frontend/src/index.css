@@ -82,6 +82,19 @@ html[data-theme="dark"] {
     outline: none !important;
     box-shadow: none !important;
   }
+
+  /* Keyboard-only focus ring for interactive elements (inputs already show a
+     cream border on focus). :focus-visible keeps mouse/touch focus clean while
+     making keyboard navigation trackable app-wide. */
+  a:focus-visible,
+  button:focus-visible,
+  [role="button"]:focus-visible,
+  [role="tab"]:focus-visible,
+  [role="switch"]:focus-visible,
+  [tabindex]:focus-visible {
+    outline: 2px solid var(--bb-cream);
+    outline-offset: 2px;
+  }
 }
 
 @layer components {

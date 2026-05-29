@@ -1,15 +1,18 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  Breadcrumb,
   PageHeader,
   SectionRule,
-  Panel,
   Button,
   Tag,
+  StatusTag,
   FormField,
   FormInput,
-  Prompt,
+  DataTable,
+  LoadingState,
+  EmptyState,
+  ErrorState,
+  type Column,
 } from '../components/bb';
 import {
   useAgentProfile,
@@ -22,19 +25,22 @@ import { useAccount } from 'wagmi';
 import { getOrCreateExecutorIdentity } from '../lib/executorIdentity';
 import { AGENT_CAPABILITIES as ALL_CAPABILITIES } from '../config/capabilities';
 
-const statusTone: Record<string, 'neutral' | 'info' | 'ok' | 'err' | 'warn'> = {
-  open: 'neutral',
-  accepted: 'info',
-  submitted: 'info',
-  verified: 'ok',
-  failed: 'err',
-  cancelled: 'warn',
+type Tab = 'browse' | 'executions' | 'register';
+
+const TABS: { id: Tab; label: string }[] = [
+  { id: 'browse', label: 'Browse tasks' },
+  { id: 'executions', label: 'My executions' },
+  { id: 'register', label: 'Register executor' },
+];
+
+type BrowseRow = {
+  meta: { taskId: string; requiredCapabilities: string[]; verificationMode: string; targetExecutorType: string };
+  state: { status: string };
+  onChain?: { taskId?: string };
 };
 
-type Tab = 'register' | 'browse_tasks' | 'my_executions';
-
 export default function A2ADashboard() {
-  const [activeTab, setActiveTab] = useState<Tab>('browse_tasks');
+  const [activeTab, setActiveTab] = useState<Tab>('browse');
   const [displayName, setDisplayName] = useState('');
   const [selectedCaps, setSelectedCaps] = useState<string[]>([]);
   const [agentCardUrl, setAgentCardUrl] = useState('');
@@ -45,83 +51,162 @@ export default function A2ADashboard() {
   const { isAuthenticated } = useAuth();
   const { address } = useAccount();
   const { data: profile } = useAgentProfile();
-  const { data: browse, isLoading: browseLoading } = useBrowseAgentTasks({
-    enabled: activeTab === 'browse_tasks',
-  });
-  const { data: execs, isLoading: execsLoading } = useMyExecutions({
-    enabled: activeTab === 'my_executions',
-  });
+  const { data: browse, isLoading: browseLoading, isError: browseError, refetch: refetchBrowse } = useBrowseAgentTasks({ enabled: activeTab === 'browse' });
+  const { data: execs, isLoading: execsLoading, isError: execsError, refetch: refetchExecs } = useMyExecutions({ enabled: activeTab === 'executions' });
   const registerMutation = useRegisterAgent();
 
-  const toggleCap = (cap: string) => {
-    setSelectedCaps((prev) =>
-      prev.includes(cap) ? prev.filter((c) => c !== cap) : [...prev, cap],
-    );
-  };
+  const toggleCap = (cap: string) =>
+    setSelectedCaps((prev) => (prev.includes(cap) ? prev.filter((c) => c !== cap) : [...prev, cap]));
+
+  const taskId = (e: { meta: { taskId: string }; onChain?: { taskId?: string } }) => e.onChain?.taskId || e.meta.taskId;
+  const taskLabel = (e: { meta: { taskId: string }; onChain?: { taskId?: string } }) =>
+    e.onChain?.taskId ? `#${e.onChain.taskId}` : `${e.meta.taskId.slice(0, 10)}…`;
+
+  const browseColumns: Column<BrowseRow>[] = [
+    { key: 'id', header: 'Task', width: '110px', primary: true, cell: (r) => <span className="font-mono text-ink-2">{taskLabel(r)}</span> },
+    { key: 'caps', header: 'Required caps', width: '1fr', cell: (r) => <span className="text-ink-2">{r.meta.requiredCapabilities.join(', ') || '—'}</span> },
+    { key: 'verify', header: 'Verification', width: '130px', cell: (r) => <Tag tone="neutral">{r.meta.verificationMode}</Tag> },
+    { key: 'target', header: 'Target', width: '110px', cell: (r) => <span className="text-ink-3">{r.meta.targetExecutorType}</span> },
+    { key: 'status', header: 'Status', width: '110px', trailing: true, cell: (r) => <StatusTag status={r.state.status} /> },
+  ];
 
   const agentCardPreview = `{
   "name": "${displayName || '<agent_name>'}",
   "capabilities": [${selectedCaps.map((c) => `"${c}"`).join(', ')}],
   "agent_card_url": "${agentCardUrl || '<url>'}",
   "mcp_endpoint": "${mcpEndpoint || '<url>'}",
-  "rate": "${rate || '0'} USDC/task"
+  "rate": "${rate || '0'} 0G/task"
 }`;
 
   return (
     <div>
-      <Breadcrumb items={['marketplace', 'a2a']} />
       <PageHeader
-        title="Agent-to-Agent"
-        description="Browse encrypted agent-targeted tasks · accept and execute · track your past runs. Auto-verify + bridge settlement, no human in the loop."
+        title="Marketplace"
+        description="Browse open agent tasks, accept and execute, and track your runs. Auto-verified and settled on-chain — no human in the loop."
       />
 
-      <div className="flex gap-6 border-b border-line mb-8">
-        {(['browse_tasks', 'my_executions', 'register'] as const).map((tab) => {
-          return (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`pb-2.5 text-xs font-mono font-semibold tracking-widest transition-colors border-b -mb-px flex items-center gap-1.5 ${
-                activeTab === tab
-                  ? 'text-cream border-cream'
-                  : 'text-ink-3 border-transparent hover:text-ink-2'
-              }`}
-            >
-              {activeTab === tab ? '▸ ' : ''}{tab}
-            </button>
-          );
-        })}
+      {/* Tabs */}
+      <div role="tablist" className="flex gap-6 border-b border-line mb-8">
+        {TABS.map((tab) => (
+          <button
+            key={tab.id}
+            role="tab"
+            aria-selected={activeTab === tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`pb-3 -mb-px text-sm border-b-2 transition-colors ${
+              activeTab === tab.id
+                ? 'text-ink font-medium border-cream'
+                : 'text-ink-3 border-transparent hover:text-ink-2'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
+
+      {activeTab === 'browse' && (
+        <DataTable<BrowseRow>
+          columns={browseColumns}
+          rows={browse?.tasks as BrowseRow[] | undefined}
+          rowKey={(r) => r.meta.taskId}
+          rowHref={(r) => `/tasks/${taskId(r)}`}
+          loading={browseLoading}
+          loadingLabel="Loading tasks…"
+          error={browseError}
+          onRetry={() => refetchBrowse()}
+          empty={{
+            icon: 'briefcase',
+            title: 'No open tasks right now',
+            description: 'Agent-targeted tasks will appear here as they’re posted.',
+            action: (
+              <Link to="/tasks/new">
+                <Button variant="outline" label="Post a task" size="sm" />
+              </Link>
+            ),
+          }}
+        />
+      )}
+
+      {activeTab === 'executions' && (
+        <div className="border border-line overflow-x-auto">
+          {execsLoading ? (
+            <LoadingState label="Loading executions…" />
+          ) : execsError ? (
+            <ErrorState title="Couldn't load executions" onRetry={() => refetchExecs()} />
+          ) : !execs?.executions || execs.executions.length === 0 ? (
+            <EmptyState
+              icon="list"
+              title={isAuthenticated ? 'No executions yet' : 'Connect your wallet'}
+              description={
+                isAuthenticated
+                  ? 'Register as an executor and accept a task to see your runs here.'
+                  : 'Connect a wallet to see the tasks your agents have executed.'
+              }
+            />
+          ) : (
+            <>
+              <div className="hidden md:grid grid-cols-[90px_1fr_110px_1fr_80px_70px] gap-4 px-5 py-3 border-b border-line text-[11px] font-medium uppercase tracking-wider text-ink-3">
+                <span>Task</span><span>Accepted</span><span>Status</span><span>Submitted</span><span>Verified</span><span>Result</span>
+              </div>
+              {execs.executions.map((e) => {
+                const hasResult = !!e.state.resultData;
+                const onChainId = (e as any).onChain?.taskId;
+                const idStr = onChainId || e.meta.taskId;
+                return (
+                  <details key={e.meta.taskId} className="border-b border-line last:border-b-0 group">
+                    <summary
+                      className={`grid grid-cols-[1fr_auto] md:grid-cols-[90px_1fr_110px_1fr_80px_70px] gap-3 md:gap-4 px-5 py-3.5 text-sm list-none items-center ${hasResult ? 'cursor-pointer hover:bg-surface-2' : 'cursor-default'} transition-colors`}
+                    >
+                      <Link to={`/tasks/${idStr}`} className="font-mono text-ink-2 hover:text-cream transition-colors truncate">
+                        {onChainId ? `#${onChainId}` : `${e.meta.taskId.slice(0, 10)}…`}
+                      </Link>
+                      <span className="hidden md:block text-ink-3 truncate">{e.state.acceptedAt ? new Date(e.state.acceptedAt).toLocaleString() : '—'}</span>
+                      <span className="justify-self-end md:justify-self-auto"><StatusTag status={e.state.status} /></span>
+                      <span className="hidden md:block text-ink-3 truncate">{e.state.submittedAt ? new Date(e.state.submittedAt).toLocaleString() : '—'}</span>
+                      <span className="hidden md:block text-ink-3">{e.state.verificationResult?.passed ? '✓' : '—'}</span>
+                      <span className={`hidden md:block text-[11px] uppercase tracking-wider ${hasResult ? 'text-cream group-open:text-ink' : 'text-ink-3/50'}`}>
+                        {hasResult ? <>view <span className="group-open:rotate-90 inline-block transition-transform">▸</span></> : '—'}
+                      </span>
+                    </summary>
+                    {hasResult && (
+                      <div className="px-5 pb-4">
+                        <pre className="max-h-80 overflow-auto bg-surface-2 border border-line p-4 text-[11px] font-mono text-ink leading-relaxed whitespace-pre-wrap break-words">
+                          {JSON.stringify(e.state.resultData, null, 2)}
+                        </pre>
+                      </div>
+                    )}
+                  </details>
+                );
+              })}
+            </>
+          )}
+        </div>
+      )}
 
       {activeTab === 'register' && (
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-0 border border-line">
           <div className="p-6 space-y-5">
-            <div className="border border-line bg-surface-2 px-4 py-3 text-[11px] font-mono text-ink-3 leading-relaxed">
-              <span className="text-cream">heads up:</span> if you deployed an
-              agent via <Link to="/agents/deploy" className="text-ink-2 underline hover:text-cream">deploy_agent</Link>,
-              it auto-registers on startup — you don't need this form. This is
-              for registering an externally-operated executor (a bot running on
-              your own infra, not ours).
+            <div className="border border-line bg-surface-2 px-4 py-3 text-xs text-ink-3 leading-relaxed">
+              <span className="text-cream font-medium">Heads up:</span> if you deployed an agent via{' '}
+              <Link to="/agents/deploy" className="text-ink-2 underline hover:text-cream">Create agent</Link>, it
+              auto-registers on startup — you don’t need this form. This is for registering an externally-operated
+              executor (a bot running on your own infrastructure, not ours).
             </div>
 
-            <SectionRule num="01" title="register executor" />
+            <SectionRule num="01" title="Register executor" />
 
-            <FormField label="display_name" required>
-              <FormInput
-                placeholder="my_agent_executor"
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-              />
+            <FormField label="Display name" required>
+              <FormInput placeholder="my-agent-executor" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
             </FormField>
 
-            <FormField label="capabilities" required hint={`${selectedCaps.length} selected`}>
+            <FormField label="Capabilities" required hint={`${selectedCaps.length} selected`}>
               <div className="flex flex-wrap gap-1.5">
                 {ALL_CAPABILITIES.map((cap) => (
                   <button
                     key={cap}
                     type="button"
                     onClick={() => toggleCap(cap)}
-                    className={`px-2.5 py-1 text-[11px] font-mono border transition-colors ${
+                    className={`px-2.5 py-1 text-xs border transition-colors ${
                       selectedCaps.includes(cap)
                         ? 'bg-cream/10 border-cream/40 text-cream'
                         : 'bg-surface-2 border-line text-ink-3 hover:text-ink-2'
@@ -133,45 +218,30 @@ export default function A2ADashboard() {
               </div>
             </FormField>
 
-            <FormField label="agent_card_url" hint="public agent card json endpoint">
-              <FormInput
-                placeholder="https://..."
-                value={agentCardUrl}
-                onChange={(e) => setAgentCardUrl(e.target.value)}
-              />
+            <FormField label="Agent card URL" hint="Public agent card JSON endpoint">
+              <FormInput className="font-mono" placeholder="https://…" value={agentCardUrl} onChange={(e) => setAgentCardUrl(e.target.value)} />
             </FormField>
 
-            <FormField label="mcp_endpoint" hint="model context protocol server url">
-              <FormInput
-                placeholder="https://..."
-                value={mcpEndpoint}
-                onChange={(e) => setMcpEndpoint(e.target.value)}
-              />
+            <FormField label="MCP endpoint" hint="Model Context Protocol server URL">
+              <FormInput className="font-mono" placeholder="https://…" value={mcpEndpoint} onChange={(e) => setMcpEndpoint(e.target.value)} />
             </FormField>
 
-            <FormField label="rate" hint="usdc per task">
-              <FormInput
-                placeholder="50"
-                value={rate}
-                onChange={(e) => setRate(e.target.value)}
-              />
+            <FormField label="Rate" hint="0G per task">
+              <FormInput className="font-mono" placeholder="50" value={rate} onChange={(e) => setRate(e.target.value)} />
             </FormField>
 
-            <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-3 flex-wrap pt-1">
               <Button
                 variant="primary"
-                label={registerMutation.isPending ? 'registering…' : profile?.agent ? 're-register_executor' : 'register_executor'}
+                label={registerMutation.isPending ? 'Registering…' : profile?.agent ? 'Re-register executor' : 'Register executor'}
                 disabled={!displayName.trim() || selectedCaps.length === 0 || !isAuthenticated || registerMutation.isPending}
                 onClick={async () => {
                   setRegisterError(null);
                   if (!address) {
-                    setRegisterError('connect a wallet before registering');
+                    setRegisterError('Connect a wallet before registering');
                     return;
                   }
                   try {
-                    // Backend requires a pubkey so posters can wrap encrypted
-                    // briefs to this executor. Derive a stable local identity
-                    // (persisted, reused on re-register) and send its pubkey.
                     const { publicKey } = getOrCreateExecutorIdentity(address);
                     await registerMutation.mutateAsync({
                       displayName,
@@ -181,204 +251,38 @@ export default function A2ADashboard() {
                       ...(mcpEndpoint ? { mcpEndpointUrl: mcpEndpoint } : {}),
                     });
                   } catch (err) {
-                    setRegisterError((err as Error).message || 'registration failed');
+                    setRegisterError((err as Error).message || 'Registration failed');
                   }
                 }}
               />
-              {!isAuthenticated && (
-                <span className="text-[11px] font-mono text-ink-3">connect wallet to register</span>
-              )}
-              {profile?.agent && (
-                <span className="text-[11px] font-mono text-ok">
-                  ✓ registered as {profile.agent.displayName}
-                </span>
-              )}
-              {registerError && (
-                <span className="text-[11px] font-mono text-err break-all">{registerError}</span>
-              )}
+              {!isAuthenticated && <span className="text-xs text-ink-3">Connect wallet to register</span>}
+              {profile?.agent && <span className="text-xs text-ok">✓ Registered as {profile.agent.displayName}</span>}
+              {registerError && <span className="text-xs text-err break-all">{registerError}</span>}
             </div>
           </div>
 
-          <div className="border-l border-line p-6 space-y-6">
-            <SectionRule num="I" title="agent card preview" />
+          <div className="border-t lg:border-t-0 lg:border-l border-line p-6 space-y-6">
+            <SectionRule num="A" title="Agent card preview" />
             <pre className="bg-surface-2 border border-line p-4 text-xs font-mono text-ink-3 leading-relaxed overflow-x-auto">
               {agentCardPreview}
             </pre>
 
-            <SectionRule num="II" title="your registration" />
+            <SectionRule num="B" title="Your registration" />
             {profile?.agent ? (
-              <div className="text-[11px] font-mono text-ink-3 space-y-1">
-                <div>name: <span className="text-ink">{profile.agent.displayName}</span></div>
-                <div>caps: <span className="text-ink">{profile.agent.capabilities.length}</span></div>
-                <div>rep: <span className="text-ink">{profile.agent.reputation.toFixed(1)}</span></div>
-                <div>tasks: <span className="text-ink">{profile.agent.tasksCompleted}</span></div>
+              <div className="text-sm text-ink-3 space-y-1.5">
+                <div>Name: <span className="text-ink">{profile.agent.displayName}</span></div>
+                <div>Capabilities: <span className="text-ink font-mono">{profile.agent.capabilities.length}</span></div>
+                <div>Reputation: <span className="text-ink font-mono">{profile.agent.reputation.toFixed(1)}</span></div>
+                <div>Tasks: <span className="text-ink font-mono">{profile.agent.tasksCompleted}</span></div>
               </div>
             ) : (
-              <p className="text-[11px] font-mono text-ink-3">
-                {isAuthenticated ? 'no registration yet. fill the form to register.' : 'connect wallet to view your registration.'}
+              <p className="text-sm text-ink-3">
+                {isAuthenticated ? 'No registration yet. Fill the form to register.' : 'Connect wallet to view your registration.'}
               </p>
             )}
           </div>
         </div>
       )}
-
-      {activeTab === 'browse_tasks' && (
-        <div className="border border-line">
-          {browseLoading && (
-            <div className="px-5 py-8 text-center text-xs font-mono text-ink-3">loading…</div>
-          )}
-          {!browseLoading && (!browse?.tasks || browse.tasks.length === 0) && (
-            <div className="px-5 py-8 text-center text-xs font-mono text-ink-3">
-              no agent-targeted tasks available.
-            </div>
-          )}
-
-          <div className="md:hidden">
-            {browse?.tasks?.map((entry) => {
-              const onChainId = (entry as any).onChain?.taskId;
-              return (
-                <Link key={entry.meta.taskId} to={`/tasks/${onChainId || entry.meta.taskId}`} className="block border-b border-line last:border-b-0 px-5 py-4 space-y-2 hover:bg-surface-2 transition-colors">
-                  <div className="flex items-start justify-between gap-3">
-                    <span className="text-[11px] font-mono text-ink-3 truncate">
-                      {onChainId ? `#${onChainId}` : `${entry.meta.taskId.slice(0, 14)}…`}
-                    </span>
-                    <Tag tone={statusTone[entry.state.status] ?? 'neutral'}>{entry.state.status}</Tag>
-                  </div>
-                  <div>
-                    <div className="text-[10px] font-mono uppercase tracking-widest text-ink-3 mb-1">required caps</div>
-                    <div className="text-[13px] font-mono text-ink">{entry.meta.requiredCapabilities.join(', ') || '—'}</div>
-                  </div>
-                  <div className="flex gap-2 pt-1">
-                    <Tag tone="neutral">{entry.meta.verificationMode}</Tag>
-                    <Tag tone="info">{entry.meta.targetExecutorType}</Tag>
-                  </div>
-                </Link>
-              );
-            })}
-          </div>
-
-          <div className="hidden md:block">
-            <div className="grid grid-cols-[120px_1fr_120px_120px_90px] gap-6 px-5 py-3 border-b border-line text-[11px] font-mono font-semibold uppercase tracking-widest text-ink-3">
-              <span>id</span><span>required caps</span><span>verification</span><span>target</span><span>status</span>
-            </div>
-            {browse?.tasks?.map((entry) => {
-              const onChainId = (entry as any).onChain?.taskId;
-              return (
-                <Link key={entry.meta.taskId} to={`/tasks/${onChainId || entry.meta.taskId}`} className="grid grid-cols-[120px_1fr_120px_120px_90px] gap-6 px-5 py-4 border-b border-line last:border-b-0 text-[13px] font-mono hover:bg-surface-2 transition-colors group">
-                  <span className="text-ink-3 group-hover:text-cream transition-colors">
-                    {onChainId ? `#${onChainId}` : `${entry.meta.taskId.slice(0, 10)}…`}
-                  </span>
-                  <span className="text-ink truncate">{entry.meta.requiredCapabilities.join(', ') || '—'}</span>
-                  <Tag tone="neutral">{entry.meta.verificationMode}</Tag>
-                  <Tag tone="info">{entry.meta.targetExecutorType}</Tag>
-                  <Tag tone={statusTone[entry.state.status] ?? 'neutral'}>{entry.state.status}</Tag>
-                </Link>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {activeTab === 'my_executions' && (
-        <Panel>
-          {execsLoading ? (
-            <div className="py-12 flex flex-col items-center justify-center gap-4">
-              <Prompt command="tail -f executions.log" blink />
-              <p className="text-ink-3 text-xs font-mono">loading…</p>
-            </div>
-          ) : !execs?.executions || execs.executions.length === 0 ? (
-            <div className="py-12 flex flex-col items-center justify-center gap-4">
-              <Prompt command="tail -f executions.log" blink />
-              <p className="text-ink-3 text-xs font-mono">
-                {isAuthenticated
-                  ? 'no executions yet. register as an executor and accept a task.'
-                  : 'connect wallet to see your executions.'}
-              </p>
-              <Tag tone="neutral">waiting for events</Tag>
-            </div>
-          ) : (
-            <div className="border border-line">
-              <div className="md:hidden">
-                {execs.executions.map((e) => {
-                  const hasResult = !!e.state.resultData;
-                  const onChainId = (e as any).onChain?.taskId;
-                  return (
-                    <div key={e.meta.taskId} className="border-b border-line last:border-b-0 px-5 py-4 space-y-2">
-                      <div className="flex items-start justify-between gap-3">
-                        <Link to={`/tasks/${onChainId || e.meta.taskId}`} className="text-[11px] font-mono text-cream hover:underline truncate">
-                          {onChainId ? `#${onChainId}` : `${e.meta.taskId.slice(0, 14)}…`}
-                        </Link>
-                        <Tag tone={statusTone[e.state.status] ?? 'neutral'}>{e.state.status}</Tag>
-                      </div>
-                      <div className="grid grid-cols-2 gap-3 pt-1 text-[11px] font-mono">
-                        <div>
-                          <div className="text-ink-3 uppercase tracking-widest text-[10px]">accepted</div>
-                          <div className="text-ink-2 mt-0.5">{e.state.acceptedAt ? new Date(e.state.acceptedAt).toLocaleString() : '—'}</div>
-                        </div>
-                        <div>
-                          <div className="text-ink-3 uppercase tracking-widest text-[10px]">submitted</div>
-                          <div className="text-ink-2 mt-0.5">{e.state.submittedAt ? new Date(e.state.submittedAt).toLocaleString() : '—'}</div>
-                        </div>
-                      </div>
-                      <div className="text-[11px] font-mono">
-                        <span className="text-ink-3">verified: </span>
-                        <span className={e.state.verificationResult?.passed ? 'text-ok' : 'text-ink-3'}>{e.state.verificationResult?.passed ? '✓' : '—'}</span>
-                      </div>
-                      {hasResult && (
-                        <details className="pt-2 border-t border-line/50 group">
-                          <summary className="flex items-center justify-between cursor-pointer text-[11px] font-mono uppercase tracking-widest text-ink-3 hover:text-cream transition-colors list-none">
-                            <span>view result</span>
-                            <span className="group-open:rotate-90 transition-transform">▸</span>
-                          </summary>
-                          <pre className="mt-2 max-h-64 overflow-auto bg-surface-2 border border-line p-3 text-[11px] font-mono text-ink leading-relaxed whitespace-pre-wrap break-words">
-                            {JSON.stringify(e.state.resultData, null, 2)}
-                          </pre>
-                        </details>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-
-              <div className="hidden md:block">
-                <div className="grid grid-cols-[80px_1fr_100px_120px_90px_70px] gap-4 px-5 py-3 border-b border-line text-[11px] font-mono font-semibold uppercase tracking-widest text-ink-3">
-                  <span>task</span><span>accepted</span><span>status</span><span>submitted</span><span>verified</span><span>result</span>
-                </div>
-                {execs.executions.map((e) => {
-                  const hasResult = !!e.state.resultData;
-                  const onChainId = (e as any).onChain?.taskId;
-                  return (
-                    <details key={e.meta.taskId} className="border-b border-line last:border-b-0 group">
-                      <summary className={`grid grid-cols-[80px_1fr_100px_120px_90px_70px] gap-4 px-5 py-3 text-[12px] font-mono list-none ${hasResult ? 'cursor-pointer hover:bg-surface-2' : 'cursor-default'} transition-colors`}>
-                        <Link to={`/tasks/${onChainId || e.meta.taskId}`} className="text-cream hover:underline truncate">
-                          {onChainId ? `#${onChainId}` : `${e.meta.taskId.slice(0, 10)}…`}
-                        </Link>
-                        <span className="text-ink-3">{e.state.acceptedAt ? new Date(e.state.acceptedAt).toLocaleString() : '—'}</span>
-                        <Tag tone={statusTone[e.state.status] ?? 'neutral'}>{e.state.status}</Tag>
-                        <span className="text-ink-3">{e.state.submittedAt ? new Date(e.state.submittedAt).toLocaleString() : '—'}</span>
-                        <span className="text-ink-3">{e.state.verificationResult?.passed ? '✓' : '—'}</span>
-                        <span className={`uppercase tracking-widest text-[10px] ${hasResult ? 'text-cream group-open:text-ink' : 'text-ink-3/50'}`}>
-                          {hasResult ? (
-                            <>view <span className="group-open:rotate-90 inline-block transition-transform">▸</span></>
-                          ) : '—'}
-                        </span>
-                      </summary>
-                      {hasResult && (
-                        <div className="px-5 pb-4 -mt-1">
-                          <pre className="max-h-80 overflow-auto bg-surface-2 border border-line p-4 text-[11px] font-mono text-ink leading-relaxed whitespace-pre-wrap break-words">
-                            {JSON.stringify(e.state.resultData, null, 2)}
-                          </pre>
-                        </div>
-                      )}
-                    </details>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </Panel>
-      )}
-
     </div>
   );
 }

@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { motion, useInView, useReducedMotion } from 'framer-motion';
 import { get } from '../../lib/api';
-import { isMainnet } from '../../config/constants';
 
 /**
  * Live platform-stats block for the landing page.
@@ -168,7 +167,7 @@ export function LandingStats() {
   ];
 
   return (
-    <section ref={containerRef} className="border-y border-line bg-surface/40">
+    <section ref={containerRef} className="border-y border-line">
       <div className="max-w-6xl mx-auto px-6 py-12 sm:py-16">
         <motion.div
           initial={{ opacity: 0, y: reduceMotion ? 0 : 12 }}
@@ -185,7 +184,7 @@ export function LandingStats() {
               animate={reduceMotion ? {} : { opacity: [1, 0.3, 1] }}
               transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }}
             />
-            Live · {isMainnet ? '0G Mainnet' : '0G Testnet'}
+            Live · Updated in real time
           </div>
         </motion.div>
 

@@ -22,7 +22,7 @@ export function QueryParamManager({ params, onChange }: QueryParamManagerProps) 
         <div key={i} className="flex gap-2 items-center">
           <FormInput placeholder="Param name" value={p.name} onChange={e => updateParam(i, 'name', e.target.value)} />
           <FormInput placeholder="Value" value={p.value} onChange={e => updateParam(i, 'value', e.target.value)} />
-          <button type="button" onClick={() => removeParam(i)} className="text-red-400 hover:text-red-300">×</button>
+          <button type="button" aria-label={`Remove parameter ${p.name || i + 1}`} onClick={() => removeParam(i)} className="text-red-400 hover:text-red-300">×</button>
         </div>
       ))}
       <button type="button" onClick={addParam} className="px-4 py-2 border border-line text-xs font-mono text-ink-3 hover:bg-surface-2 hover:text-ink transition-colors">

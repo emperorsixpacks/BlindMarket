@@ -142,7 +142,7 @@ function LiveCard() {
           <div>escrow_contract <span className="text-ok">●</span></div>
         </div>
       </div>
-      <div className="text-sm font-semibold text-ink mt-3">Built for the 0G APAC Hackathon.</div>
+      <div className="text-sm font-semibold text-ink mt-3">Running on 0G Mainnet.</div>
     </Card>
   );
 }

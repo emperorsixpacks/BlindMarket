@@ -3,7 +3,18 @@ import { useNavigate } from 'react-router-dom';
 import { useAccount, useWalletClient } from 'wagmi';
 import { getIdentityToken, getAccessToken } from '@privy-io/react-auth';
 import { BrowserProvider, parseUnits, formatUnits } from 'ethers';
-import { Breadcrumb, PageHeader, SectionRule } from '../components/bb';
+import {
+  Breadcrumb,
+  PageHeader,
+  SectionRule,
+  FormField,
+  FormInput,
+  FormTextarea,
+  Button,
+  Tag,
+  StatusTag,
+  Icon,
+} from '../components/bb';
 import { aesEncrypt, eciesEncrypt, generateAesKey, sha256, toBase64, toBytes } from '../lib/crypto';
 import { stashAesKey } from '../lib/keyStash';
 import { signAndSendTx } from '../lib/txSigner';
@@ -292,137 +303,158 @@ export default function PostTask() {
 
   const busy = status === 'encrypting' || status === 'approving' || status === 'signing';
 
+  const submitLabel =
+    status === 'encrypting' ? 'Encrypting…'
+      : status === 'approving' ? 'Approving…'
+        : status === 'signing' ? 'Sign in wallet…'
+          : 'Encrypt and post task';
+
   return (
     <div>
       <Breadcrumb items={['tasks', 'post']} />
       <PageHeader
-        title="Post a task for agent execution"
-        description="Encrypt your instructions, lock payment in escrow. An autonomous agent accepts, completes, and auto-verifies — settlement happens on chain without you signing again."
+        title="Post a task"
+        description="Encrypt your instructions and lock payment in escrow. An autonomous agent accepts, completes, and auto-verifies — settlement happens on chain without you signing again."
       />
 
       {status === 'done' ? (
-        <div className="border border-line p-6 sm:p-8 space-y-5">
-          <div className="text-center space-y-2">
-            <div className="text-xs font-mono text-green-400 uppercase tracking-widest">✓ task posted</div>
-            {taskId && <div className="text-xs font-mono text-ink-3">task #{taskId}</div>}
-            <div className="text-xs font-mono text-ink-3">instructions encrypted · payment locked in escrow</div>
+        <div className="border border-line">
+          <div className="p-6 sm:p-8 border-b border-line flex flex-col items-center text-center gap-3">
+            <div className="w-11 h-11 border border-ok/50 bg-ok/5 flex items-center justify-center text-ok">
+              <Icon name="check" size={20} />
+            </div>
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-center gap-2 flex-wrap">
+                <span className="text-lg font-semibold text-ink">Task posted</span>
+                <StatusTag status="posted" />
+              </div>
+              {taskId && (
+                <div className="text-sm text-ink-3">
+                  Task ID <span className="font-mono text-ink-2">#{taskId}</span>
+                </div>
+              )}
+              <div className="text-sm text-ink-3">Instructions encrypted, payment locked in escrow.</div>
+            </div>
           </div>
 
-          {initialWrapCount > 0 ? (
-            // Case A — at least one matching agent was wrapped at post-time, so
-            // the brief can be decrypted without any further action from the
-            // poster. No need to keep a tab alive.
-            <div className="border border-ok/40 bg-ok/5 px-4 py-3 space-y-2">
-              <div className="text-[11px] font-mono uppercase tracking-widest text-ok">ready for pickup</div>
-              <div className="text-[12px] font-mono text-ink-2 leading-relaxed">
-                Encrypted brief wrapped to <span className="text-ink font-semibold">{initialWrapCount}</span>{' '}
-                matching agent{initialWrapCount === 1 ? '' : 's'}. A worker can accept this any time.
-              </div>
-              <div className="text-[11px] font-mono text-ink-3 leading-relaxed">
-                You can close this tab — the task will be picked up whether you're here or not.
-              </div>
-            </div>
-          ) : (
-            // Case B — no matching executors at post-time. The AES key lives
-            // only in this browser; wraps to future bidders are issued by
-            // useBidWatcher() running on /tasks/mine. Make the obligation
-            // explicit so users don't post tasks and walk away expecting them
-            // to be picked up unattended.
-            <div className="border border-warn/50 bg-warn/5 px-4 py-4 space-y-3">
-              <div className="flex items-center gap-2">
-                <span className="text-warn text-base">⚠</span>
-                <span className="text-[11px] font-mono uppercase tracking-widest text-warn">
-                  awaiting first bidder
-                </span>
-              </div>
-              <div className="text-[12px] font-mono text-ink-2 leading-relaxed">
-                No agent with matching capabilities is registered yet. Your task is encrypted and posted,
-                but when an agent bids we need <span className="text-ink font-semibold">your browser</span>{' '}
-                to ship the encryption key — the platform can't see it.
-              </div>
-              <div className="text-[12px] font-mono text-ink-2 leading-relaxed space-y-1">
-                <div className="flex gap-2">
-                  <span className="text-cream shrink-0">▸</span>
-                  <span>
-                    <span className="text-ink font-semibold">Keep My Tasks open in a background tab.</span>{' '}
-                    It auto-wraps as bids arrive (every 8s). You can do anything else in your browser.
-                  </span>
+          <div className="p-6 sm:p-8 space-y-6">
+            {initialWrapCount > 0 ? (
+              // Case A — at least one matching agent was wrapped at post-time, so
+              // the brief can be decrypted without any further action from the
+              // poster. No need to keep a tab alive.
+              <div className="border border-ok/40 bg-ok/5 p-4 sm:p-5 space-y-3">
+                <div className="flex items-center gap-2 text-ok">
+                  <Icon name="check" size={16} />
+                  <span className="text-sm font-semibold">Ready for pickup</span>
                 </div>
-                <div className="flex gap-2">
-                  <span className="text-cream shrink-0">▸</span>
-                  <span>
-                    Or just come back later. One visit to My Tasks unblocks every pending bid in a few seconds.
-                  </span>
+                <p className="text-sm text-ink-2 leading-relaxed">
+                  Encrypted brief wrapped to{' '}
+                  <span className="font-mono text-ink font-semibold">{initialWrapCount}</span>{' '}
+                  matching agent{initialWrapCount === 1 ? '' : 's'}. A worker can accept this any time.
+                </p>
+                <p className="text-sm text-ink-3 leading-relaxed">
+                  You can close this tab — the task will be picked up whether you're here or not.
+                </p>
+              </div>
+            ) : (
+              // Case B — no matching executors at post-time. The AES key lives
+              // only in this browser; wraps to future bidders are issued by
+              // useBidWatcher() running on /tasks/mine. Make the obligation
+              // explicit so users don't post tasks and walk away expecting them
+              // to be picked up unattended.
+              <div className="border border-warn/50 bg-warn/5 p-4 sm:p-5 space-y-4">
+                <div className="flex items-center gap-2 text-warn">
+                  <Icon name="clock" size={16} />
+                  <span className="text-sm font-semibold">Awaiting first bidder</span>
+                </div>
+                <p className="text-sm text-ink-2 leading-relaxed">
+                  No agent with matching capabilities is registered yet. Your task is encrypted
+                  and posted, but when an agent bids we need{' '}
+                  <span className="text-ink font-semibold">your browser</span> to ship the
+                  encryption key — the platform can't see it.
+                </p>
+                <ul className="text-sm text-ink-2 leading-relaxed space-y-2">
+                  <li className="flex gap-2">
+                    <Icon name="arrow" size={14} className="text-cream shrink-0 mt-1" />
+                    <span>
+                      <span className="text-ink font-semibold">Keep My Tasks open in a background tab.</span>{' '}
+                      It auto-wraps as bids arrive (every 8s). You can do anything else in your browser.
+                    </span>
+                  </li>
+                  <li className="flex gap-2">
+                    <Icon name="arrow" size={14} className="text-cream shrink-0 mt-1" />
+                    <span>
+                      Or just come back later. One visit to My Tasks unblocks every pending bid
+                      in a few seconds.
+                    </span>
+                  </li>
+                </ul>
+                <div className="flex gap-2.5 pt-1 border-t border-warn/20 mt-1">
+                  <Icon name="lock" size={16} className="text-err shrink-0 mt-3" />
+                  <p className="text-sm text-err leading-relaxed pt-2.5">
+                    The encryption key for this task lives only in this browser until an agent is
+                    wrapped. If you clear this browser's data (or switch devices) before then, the
+                    key is lost and the task becomes permanently undecryptable — by anyone. Get a
+                    matching agent registered, or revisit My Tasks, before clearing anything.
+                  </p>
                 </div>
               </div>
-              <div className="text-[11px] font-mono text-err leading-relaxed pt-1 border-t border-warn/20">
-                ⚠ The encryption key for this task lives only in this browser until an
-                agent is wrapped. If you clear this browser's data (or switch devices)
-                before then, the key is lost and the task becomes permanently
-                undecryptable — by anyone. Get a matching agent registered, or revisit
-                My Tasks, before clearing anything.
-              </div>
-            </div>
-          )}
-
-          <div className="flex flex-col sm:flex-row gap-2 sm:justify-center pt-1">
-            <button
-              onClick={() => navigate('/tasks/mine')}
-              className="px-4 py-2 border border-cream text-xs font-mono text-cream hover:bg-cream hover:text-bg transition-colors uppercase tracking-widest"
-            >
-              {initialWrapCount > 0 ? 'view my tasks →' : 'open my tasks ↗'}
-            </button>
-            {initialWrapCount === 0 && (
-              // Power-user shortcut: opens /tasks/mine in a new tab so the user
-              // can leave it running as a background watcher while keeping this
-              // tab around to post more tasks.
-              <button
-                onClick={() => window.open('/tasks/mine', '_blank', 'noopener')}
-                className="px-4 py-2 border border-line text-xs font-mono text-ink-3 hover:border-ink-2 hover:text-ink transition-colors uppercase tracking-widest"
-              >
-                open in new tab
-              </button>
             )}
+
+            <div className="flex flex-col sm:flex-row gap-2 sm:justify-center pt-1">
+              <Button
+                variant="primary"
+                label={initialWrapCount > 0 ? 'View my tasks' : 'Open my tasks'}
+                onClick={() => navigate('/tasks/mine')}
+              />
+              {initialWrapCount === 0 && (
+                // Power-user shortcut: opens /tasks/mine in a new tab so the user
+                // can leave it running as a background watcher while keeping this
+                // tab around to post more tasks.
+                <Button
+                  variant="outline"
+                  label="Open in new tab"
+                  onClick={() => window.open('/tasks/mine', '_blank', 'noopener')}
+                />
+              )}
+            </div>
           </div>
         </div>
       ) : (
         <form onSubmit={handleSubmit} className="border border-line">
           <div className="p-6 border-b border-line">
-            <SectionRule num="01" title="task details" />
-            <div className="mt-4 space-y-4">
-              <div>
-                <label className="block text-[11px] font-mono uppercase tracking-widest text-ink-3 mb-2">
-                  instructions <span className="text-cream">*</span>
-                </label>
-                <textarea
+            <SectionRule num="01" title="Task details" />
+            <div className="space-y-5">
+              <FormField
+                label="Instructions"
+                required
+                hint="This will be encrypted — only the assigned agent can read it."
+              >
+                <FormTextarea
                   required
                   rows={5}
                   value={form.instructions}
                   onChange={e => setForm(f => ({ ...f, instructions: e.target.value }))}
-                  placeholder="Describe exactly what needs to be done. This will be encrypted — only the assigned agent can read it."
-                  className="w-full bg-surface-2 border border-line px-4 py-3 text-xs font-mono text-ink placeholder-ink-3 focus:outline-none focus:border-cream resize-none"
+                  placeholder="Describe exactly what needs to be done."
                 />
-              </div>
+              </FormField>
 
               {/* Stack category + location on phones — at 2-col on a 439px
-                  viewport the placeholder ("describe it — or pi…") gets
-                  clipped. Side-by-side returns at sm. */}
+                  viewport the placeholder gets clipped. Side-by-side returns at sm. */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-[11px] font-mono uppercase tracking-widest text-ink-3 mb-2">category</label>
-                  <input
+                <FormField label="Category" required>
+                  <FormInput
                     type="text"
                     required
                     maxLength={64}
                     value={form.category}
                     onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
-                    placeholder="describe it — or pick a suggestion below"
-                    className="w-full bg-surface-2 border border-line px-4 py-3 text-xs font-mono text-ink placeholder-ink-3 focus:outline-none focus:border-cream"
+                    placeholder="Describe it, or pick a suggestion below"
                   />
                   {/* Auto-fill grid keeps suggestion chips on a regular column
                       rhythm instead of the ragged wrap a plain flex produces.
-                      Each cell is ≥90px and stretches to fill, so a row of
-                      chips like "research" + "transcription" sit at equal width. */}
+                      Each cell is ≥90px and stretches to fill. Category tokens
+                      are data values, so they stay font-mono. */}
                   <div className="mt-2 grid grid-cols-[repeat(auto-fill,minmax(90px,1fr))] gap-1.5">
                     {CATEGORY_SUGGESTIONS.map(c => {
                       const active = form.category === c;
@@ -441,26 +473,25 @@ export default function PostTask() {
                       );
                     })}
                   </div>
-                </div>
-                <div>
-                  <label className="block text-[11px] font-mono uppercase tracking-widest text-ink-3 mb-2">location zone</label>
-                  <input
+                </FormField>
+                <FormField label="Location zone" hint="Where the work applies, if it matters.">
+                  <FormInput
                     type="text"
                     value={form.locationZone}
                     onChange={e => setForm(f => ({ ...f, locationZone: e.target.value }))}
                     placeholder="global, US-NY, EU, etc."
-                    className="w-full bg-surface-2 border border-line px-4 py-3 text-xs font-mono text-ink placeholder-ink-3 focus:outline-none focus:border-cream"
                   />
-                </div>
+                </FormField>
               </div>
 
-              <div>
-                <label className="block text-[11px] font-mono uppercase tracking-widest text-ink-3 mb-2">
-                  required capabilities <span className="text-cream">*</span>
-                  <span className="ml-2 normal-case tracking-normal text-ink-3/70">
-                    ({requiredCaps.length} selected — at least one required)
-                  </span>
-                </label>
+              <FormField
+                label="Required capabilities"
+                required
+                hint="Pick every skill your task needs. An executor agent matches if it has any one."
+              >
+                <div className="mb-2 text-xs text-ink-3">
+                  <span className="font-mono text-ink-2">{requiredCaps.length}</span> selected — at least one required
+                </div>
                 <div className="flex flex-wrap gap-1.5">
                   {AGENT_CAPABILITIES.map((cap) => {
                     const active = requiredCaps.includes(cap);
@@ -469,7 +500,7 @@ export default function PostTask() {
                         key={cap}
                         type="button"
                         onClick={() => toggleCap(cap)}
-                        className={`px-2.5 py-1 text-[11px] font-mono border transition-colors ${active
+                        className={`px-2.5 py-1 text-xs border transition-colors ${active
                           ? 'bg-cream/10 border-cream/40 text-cream'
                           : 'bg-surface-2 border-line text-ink-3 hover:text-ink-2'
                           }`}
@@ -479,91 +510,96 @@ export default function PostTask() {
                     );
                   })}
                 </div>
-                <div className="mt-1 text-[11px] font-mono text-ink-3">
-                  pick every skill your task needs. an executor agent matches if it has any one.
-                </div>
-              </div>
+              </FormField>
 
               {/* A2A-only flow — explicit info banner replaces the old
                   executor + verification pickers. Every task posted here
                   targets an agent and auto-verifies on submission. */}
-              <div className="border border-line bg-surface-2 px-4 py-3 text-[11px] font-mono text-ink-3 leading-relaxed">
-                <span className="text-cream">a2a · auto-verify:</span> tasks
-                posted here are visible to autonomous agents at <code className="text-ink-2">/a2a</code>.
-                Submissions are checked against built-in criteria (min length, required fields)
-                and escrow releases automatically — no further input from you.
+              <div className="border border-line bg-surface-2 px-4 py-3 flex gap-2.5">
+                <Icon name="shield" size={16} className="text-cream shrink-0 mt-0.5" />
+                <p className="text-xs text-ink-3 leading-relaxed">
+                  <span className="text-ink-2 font-medium">Auto-verified:</span> tasks posted here are
+                  visible to autonomous agents at <span className="font-mono text-ink-2">/a2a</span>.
+                  Submissions are checked against built-in criteria (minimum length, required fields)
+                  and escrow releases automatically — no further input from you.
+                </p>
               </div>
             </div>
           </div>
 
           <div className="p-6 border-b border-line">
-            <SectionRule num="02" title="payment" />
-            <div className="mt-4 grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-[11px] font-mono uppercase tracking-widest text-ink-3 mb-2">
-                  bounty (0G) <span className="text-cream">*</span>
-                </label>
-                <input
+            <SectionRule num="02" title="Payment" />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <FormField
+                label="Bounty (0G)"
+                required
+                hint="85% to worker, 15% protocol fee."
+              >
+                <FormInput
+                  className="font-mono"
                   type="number"
                   min="0.0001"
                   step="0.0001"
                   required
                   value={form.amount}
                   onChange={e => setForm(f => ({ ...f, amount: e.target.value }))}
-                  className="w-full bg-surface-2 border border-line px-4 py-3 text-xs font-mono text-ink focus:outline-none focus:border-cream" />
-                <div className="mt-1 text-[11px] font-mono text-ink-3">
-                  85% to worker · 15% protocol fee
-                  {form.amount && !isNaN(parseFloat(form.amount)) && (() => {
-                    const amountinWei = parseUnits(form.amount, 18);
-                    const tokenSymbol = '0G';
-                    return (
-                      <span className="block text-cream mt-0.5">
-                        {formatUnits(amountinWei, 18)} {tokenSymbol}
-                      </span>
-                    );
-                  })()}
-                </div>
-              </div>
-              <div>
-                <label className="block text-[11px] font-mono uppercase tracking-widest text-ink-3 mb-2">deadline</label>
-                <input
+                />
+                {form.amount && !isNaN(parseFloat(form.amount)) && (() => {
+                  const amountinWei = parseUnits(form.amount, 18);
+                  return (
+                    <div className="mt-1.5">
+                      <Tag tone="neutral" className="font-mono">
+                        {formatUnits(amountinWei, 18)} 0G
+                      </Tag>
+                    </div>
+                  );
+                })()}
+              </FormField>
+              <FormField
+                label="Deadline"
+                required
+                hint={(() => {
+                  const ms = new Date(form.deadlineAt).getTime();
+                  if (Number.isNaN(ms)) return 'Pick a date and time. Minimum 1 hour, maximum 90 days.';
+                  const secs = Math.floor((ms - Date.now()) / 1000);
+                  // Live human-readable hint — recomputed each render so the
+                  // user sees the offset shrink in real time if they're slow.
+                  return durationHint(secs);
+                })()}
+              >
+                <FormInput
+                  className="font-mono"
                   type="datetime-local"
                   min={MIN_DEADLINE_AT}
                   max={MAX_DEADLINE_AT}
                   required
                   value={form.deadlineAt}
                   onChange={e => setForm(f => ({ ...f, deadlineAt: e.target.value }))}
-                  className="w-full bg-surface-2 border border-line px-4 py-3 text-xs font-mono text-ink focus:outline-none focus:border-cream"
                 />
-                {/* Live human-readable hint — recomputed each render so the
-                    user sees the offset shrink in real time if they're slow. */}
-                <div className="mt-1 text-[11px] font-mono text-ink-3">
-                  {(() => {
-                    const ms = new Date(form.deadlineAt).getTime();
-                    if (Number.isNaN(ms)) return 'pick a date and time · min 1 hour · max 90 days';
-                    const secs = Math.floor((ms - Date.now()) / 1000);
-                    return durationHint(secs);
-                  })()}
-                </div>
-              </div>
+              </FormField>
             </div>
           </div>
 
           <div className="p-6">
             {!address ? (
-              <div className="text-xs font-mono text-ink-3">connect wallet to post a task</div>
+              <div className="flex items-center gap-2 text-sm text-ink-3">
+                <Icon name="wallet" size={16} className="text-ink-3" />
+                Connect a wallet to post a task.
+              </div>
             ) : (
-              <button
+              <Button
+                variant="primary"
                 type="submit"
+                label={submitLabel}
                 disabled={busy || requiredCaps.length === 0}
-                title={requiredCaps.length === 0 ? 'select at least one required capability above' : undefined}
-                className="px-6 py-3 border border-cream text-xs font-mono text-cream hover:bg-cream hover:text-bg disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              >
-                {status === 'encrypting' ? 'encrypting…' : status === 'approving' ? 'approving…' : status === 'signing' ? 'sign in wallet…' : 'encrypt + post task →'}
-              </button>
+                title={requiredCaps.length === 0 ? 'Select at least one required capability above' : undefined}
+              />
             )}
             {status === 'error' && (
-              <div className="mt-3 text-xs font-mono text-red-400">{error}</div>
+              <div className="mt-3 flex items-start gap-2 text-sm text-err">
+                <Icon name="shield" size={16} className="shrink-0 mt-0.5" />
+                <span className="break-words">{error}</span>
+              </div>
             )}
           </div>
         </form>

@@ -2,7 +2,19 @@ import { useState } from 'react';
 import { useAccount } from 'wagmi';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { Breadcrumb, PageHeader, SectionRule, Tag, StatCard } from '../components/bb';
+import {
+  Breadcrumb,
+  PageHeader,
+  SectionRule,
+  StatCard,
+  StatusTag,
+  Tag,
+  Button,
+  Icon,
+  LoadingState,
+  EmptyState,
+  ErrorState,
+} from '../components/bb';
 import { useSocket } from '../hooks/useSocket';
 import { useBidWatcher } from '../hooks/useBidWatcher';
 import { authedGet } from '../lib/api';
@@ -51,11 +63,10 @@ interface PostedTask {
   };
 }
 
+// On-chain status enum → status string. StatusTag derives the chip colour
+// semantically from this string, so we no longer hand-map status → tone.
 const STATUS_LABELS: Record<number, string> = {
   0: 'open', 1: 'assigned', 2: 'submitted', 3: 'verified', 4: 'completed', 5: 'cancelled', 6: 'disputed',
-};
-const STATUS_TONE: Record<number, 'ok' | 'warn' | 'err' | 'neutral'> = {
-  0: 'neutral', 1: 'warn', 2: 'warn', 3: 'ok', 4: 'ok', 5: 'err', 6: 'err',
 };
 
 // Marketplace token is Native 0G — 18 decimals.
@@ -81,10 +92,12 @@ function shortId(t: PostedTask): string {
 
 // On-chain ZERO worker = "no one assigned yet". A non-zero, non-poster
 // worker address means an executor has been assigned via marketplaceAssign.
-function workerLabel(t: PostedTask): string {
+// Returns the short address (mono) when assigned, or null when unassigned so
+// the card can show a plain "No worker yet" hint in sans.
+function workerAddress(t: PostedTask): string | null {
   const w = t.onChain?.worker;
-  if (!w || /^0x0+$/.test(w)) return 'no worker yet';
-  return `worker · ${w.slice(0, 6)}…${w.slice(-4)}`;
+  if (!w || /^0x0+$/.test(w)) return null;
+  return `${w.slice(0, 6)}…${w.slice(-4)}`;
 }
 
 export default function MyTasks() {
@@ -99,7 +112,7 @@ export default function MyTasks() {
   // settled — the on-chain registry's getOpenTasks filters out non-open
   // entries. authedGet flows the JWT (Privy identity) for the server-side
   // posterAddress check.
-  const { data: tasks = [], isLoading } = useQuery<PostedTask[]>({
+  const { data: tasks = [], isLoading, isError, refetch } = useQuery<PostedTask[]>({
     queryKey: ['my-tasks-posted', address],
     queryFn: async () => {
       const data = await authedGet<{ tasks: PostedTask[]; total: number }>('/api/v1/a2a/tasks/posted');
@@ -162,6 +175,19 @@ export default function MyTasks() {
     .filter(t => effectiveStatus(t) === 4)
     .reduce((s, t) => s + (t.onChain ? Number(BigInt(t.onChain.reward)) / 1e18 : 0), 0);
 
+  const FILTERS: { id: 'all' | 'open' | 'active' | 'completed'; label: string }[] = [
+    { id: 'all', label: 'All' },
+    { id: 'open', label: 'Open' },
+    { id: 'active', label: 'Active' },
+    { id: 'completed', label: 'Completed' },
+  ];
+  const SORTS: { id: 'newest' | 'oldest' | 'highest-reward' | 'lowest-reward'; label: string }[] = [
+    { id: 'newest', label: 'Newest' },
+    { id: 'oldest', label: 'Oldest' },
+    { id: 'highest-reward', label: 'Highest reward' },
+    { id: 'lowest-reward', label: 'Lowest reward' },
+  ];
+
   return (
     <div>
       <Breadcrumb items={['tasks', 'mine']} />
@@ -169,64 +195,86 @@ export default function MyTasks() {
         title="My tasks"
         description="Tasks you've posted — track status, assignments, completions, and inspect results."
         right={
-          <Link to="/tasks/new" className="px-4 py-2 border border-cream text-[11px] font-mono text-cream hover:bg-cream hover:text-bg transition-colors uppercase tracking-widest">
-            + post task
+          <Link to="/tasks/new">
+            <Button variant="primary" label="Post a task" />
           </Link>
         }
       />
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-0 border border-line mb-8">
-        <StatCard label="open" value={String(openCount)} sub="awaiting worker" />
-        <div className="border-l border-line"><StatCard label="active" value={String(activeCount)} sub="in progress" subColor="warn" /></div>
-        <div className="border-t border-l-0 sm:border-t-0 sm:border-l border-line"><StatCard label="completed" value={String(completedCount)} sub="all time" subColor="ok" /></div>
-        <div className="border-t border-l border-line sm:border-t-0"><StatCard label="total spent" value={`${totalSpent.toLocaleString(undefined, { maximumFractionDigits: 2 })} 0G`} sub="Native 0G paid out" /></div>
+        <StatCard label="Open" value={String(openCount)} sub="Awaiting worker" />
+        <div className="border-l border-line"><StatCard label="Active" value={String(activeCount)} sub="In progress" subColor="warn" /></div>
+        <div className="border-t border-l-0 sm:border-t-0 sm:border-l border-line"><StatCard label="Completed" value={String(completedCount)} sub="All time" subColor="ok" /></div>
+        <div className="border-t border-l border-line sm:border-t-0"><StatCard label="Total spent" value={`${totalSpent.toLocaleString(undefined, { maximumFractionDigits: 2 })} 0G`} sub="Native 0G paid out" /></div>
       </div>
 
       <div className="border border-line">
-        <div className="flex items-center justify-between bg-surface-1 pr-4">
-          <SectionRule num="01" title="posted tasks" side={`${filteredTasks.length} shown / ${tasks.length} total`} />
-          <div className="flex gap-2">
-            {(['all', 'open', 'active', 'completed'] as const).map(f => (
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between bg-surface-2 px-4 pt-4 lg:pt-0">
+          <SectionRule num="01" title="Posted tasks" side={`${filteredTasks.length} shown / ${tasks.length} total`} className="mb-0 flex-1 lg:py-4" />
+          <div className="flex flex-wrap gap-2 pb-4 lg:pb-0">
+            {FILTERS.map(f => (
               <button
-                key={f}
-                onClick={() => setFilter(f)}
-                className={`text-[10px] font-mono uppercase tracking-widest px-2 py-1 border transition-colors ${
-                  filter === f ? 'bg-cream text-bg border-cream' : 'text-ink-3 border-line hover:border-cream/50'
+                key={f.id}
+                onClick={() => setFilter(f.id)}
+                className={`text-[11px] px-2.5 py-1 border transition-colors ${
+                  filter === f.id ? 'bg-cream text-bg border-cream' : 'text-ink-3 border-line hover:border-cream/50'
                 }`}
               >
-                {f}
+                {f.label}
               </button>
             ))}
-            <div className="h-6 w-px bg-line mx-2" />
-            {(['newest', 'oldest', 'highest-reward', 'lowest-reward'] as const).map(s => (
+            <div className="hidden sm:block h-6 w-px bg-line mx-1" />
+            {SORTS.map(s => (
               <button
-                key={s}
-                onClick={() => setSort(s)}
-                className={`text-[10px] font-mono uppercase tracking-widest px-2 py-1 border transition-colors ${
-                  sort === s ? 'bg-cream text-bg border-cream' : 'text-ink-3 border-line hover:border-cream/50'
+                key={s.id}
+                onClick={() => setSort(s.id)}
+                className={`text-[11px] px-2.5 py-1 border transition-colors ${
+                  sort === s.id ? 'bg-cream text-bg border-cream' : 'text-ink-3 border-line hover:border-cream/50'
                 }`}
               >
-                {s.replace('-', ' ')}
+                {s.label}
               </button>
             ))}
           </div>
         </div>
 
         {!address ? (
-          <div className="px-5 py-10 text-center text-xs font-mono text-ink-3">connect wallet to see your tasks</div>
+          <EmptyState
+            icon="wallet"
+            title="Connect your wallet"
+            description="Connect a wallet to see the tasks you've posted."
+          />
         ) : isLoading ? (
-          <div className="px-5 py-10 text-center text-xs font-mono text-ink-3">loading…</div>
+          <LoadingState label="Loading your tasks…" />
+        ) : isError ? (
+          <ErrorState title="Couldn't load your tasks" onRetry={() => refetch()} />
         ) : filteredTasks.length === 0 ? (
-          <div className="px-5 py-10 flex flex-col items-center gap-3">
-            <p className="text-xs font-mono text-ink-3">no {filter !== 'all' ? filter : ''} tasks found.</p>
-            {filter === 'all' && <Link to="/tasks/new" className="text-xs font-mono text-cream hover:underline">post your first task →</Link>}
-          </div>
+          <EmptyState
+            icon="briefcase"
+            title={filter === 'all' ? 'No tasks posted yet' : `No ${filter} tasks`}
+            description={
+              filter === 'all'
+                ? 'Post a task and it will show up here so you can track its status, assignment, and result.'
+                : 'Try a different filter, or post a new task.'
+            }
+            action={
+              <Link to="/tasks/new">
+                <Button variant="outline" label="Post a task" size="sm" />
+              </Link>
+            }
+          />
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-px bg-line border-t border-line">
             {filteredTasks.map(t => {
               const status = effectiveStatus(t);
+              const statusLabel = STATUS_LABELS[status] ?? 'open';
               const isDone = status === 3 || status === 4 || status === 6;
               const hasResult = !!t.state.resultData;
+              const reasons = t.state.verificationResult;
+              const failedReasons =
+                reasons?.passed === false && reasons.reasons && reasons.reasons.length > 0
+                  ? reasons.reasons
+                  : null;
               // "Key at risk": an open, encrypted task whose AES key has not
               // been wrapped to any executor server-side AND isn't sealed to
               // key-custody. The only copy is then in a browser's localStorage —
@@ -240,45 +288,45 @@ export default function MyTasks() {
               const keyHere = keyAtRisk && !!getAesKey(t.meta.taskId);
               const taskId = t.onChain?.taskId || t.meta.taskId;
               const taskUrl = `/tasks/${taskId}`;
+              const worker = workerAddress(t);
               const cardClass = `bg-bg p-5 flex flex-col gap-3 min-h-[200px] group hover:bg-surface-2 transition-colors cursor-pointer`;
               const cardContent = (
                 <>
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[11px] font-mono text-ink-3">{shortId(t)}</span>
-                    <Tag tone={STATUS_TONE[status] ?? 'neutral'}>{STATUS_LABELS[status] ?? 'unknown'}</Tag>
+                    <StatusTag status={statusLabel} />
                   </div>
                   <div className="flex-1">
                     <div className="text-sm font-mono text-ink break-all">{t.meta.taskId.slice(0, 18)}…</div>
-                    <div className="text-[11px] font-mono text-ink-3 mt-0.5">
+                    <div className="text-[11px] text-ink-3 mt-1 capitalize">
                       {t.meta.verificationMode} verify · {t.meta.targetExecutorType}
                     </div>
                     {t.meta.requiredCapabilities && t.meta.requiredCapabilities.length > 0 && (
                       <div className="flex gap-1 mt-2 flex-wrap">
                         {t.meta.requiredCapabilities.slice(0, 4).map(c => (
-                          <span key={c} className="text-[10px] font-mono text-ink-3 border border-line px-1.5 py-0.5">
-                            {c.replace(/_/g, ' ')}
-                          </span>
+                          <Tag key={c} tone="neutral">{c.replace(/_/g, ' ')}</Tag>
                         ))}
                       </div>
                     )}
-                    {t.state.verificationResult?.passed === false && t.state.verificationResult.reasons && t.state.verificationResult.reasons.length > 0 && (
-                      <div className="mt-2 text-[10px] font-mono text-err leading-relaxed">
-                        failed: {t.state.verificationResult.reasons.join(' · ')}
+                    {failedReasons && (
+                      <div className="mt-2 text-[11px] text-err leading-relaxed">
+                        Failed: {failedReasons.join(' · ')}
                       </div>
                     )}
                     {keyAtRisk && (
                       <div
-                        className={`mt-2 border px-2 py-1.5 text-[10px] font-mono leading-relaxed ${
-                          keyHere ? 'border-warn/50 bg-warn/5 text-warn' : 'border-err/50 bg-err/5 text-err'
+                        className={`mt-2 flex items-center gap-1.5 border-l-2 pl-2 py-0.5 text-[11px] leading-snug ${
+                          keyHere ? 'border-warn text-warn' : 'border-err text-err'
                         }`}
                         onClick={(e) => e.preventDefault()}
                         title={keyHere
                           ? 'The encryption key for this task is only in this browser. Register a matching agent and keep this page open so the key gets wrapped to it. Clearing this browser before then loses the key permanently.'
                           : 'The encryption key is not on the server and not in this browser. Recover it from the device you posted from, or repost — it cannot be decrypted from here.'}
                       >
-                        ⚠ key at risk — {keyHere
-                          ? 'only copy is in this browser'
-                          : 'not on server or this browser'}
+                        <Icon name="lock" size={12} className="shrink-0" />
+                        <span>
+                          Key at risk — {keyHere ? 'only copy is in this browser' : 'not on server or this browser'}
+                        </span>
                       </div>
                     )}
                   </div>
@@ -287,16 +335,20 @@ export default function MyTasks() {
                       <div className="text-lg font-mono font-semibold text-cream leading-none">
                         {formatReward(t.onChain?.reward)}
                       </div>
-                      <div className="text-[10px] font-mono text-ink-3 mt-1.5 uppercase tracking-widest">
-                        {workerLabel(t)}
+                      <div className="text-[11px] text-ink-3 mt-1.5">
+                        {worker ? (
+                          <>Worker <span className="font-mono">{worker}</span></>
+                        ) : (
+                          'No worker yet'
+                        )}
                       </div>
                     </div>
-                    <span className="text-[11px] font-mono text-ink-3 group-hover:text-cream transition-colors">view →</span>
+                    <span className="text-[11px] text-ink-3 group-hover:text-cream transition-colors">View →</span>
                   </div>
                   {(hasResult || isDone) && (
                     <details className="mt-1 border-t border-line pt-3 group/details" onClick={e => e.preventDefault()}>
-                      <summary className="flex items-center justify-between cursor-pointer text-[11px] font-mono uppercase tracking-widest text-ink-3 hover:text-cream transition-colors list-none">
-                        <span>view result</span>
+                      <summary className="flex items-center justify-between cursor-pointer text-[11px] text-ink-3 hover:text-cream transition-colors list-none">
+                        <span>View result</span>
                         <span className="group-open/details:rotate-90 transition-transform">▸</span>
                       </summary>
                       {hasResult ? (
@@ -304,8 +356,8 @@ export default function MyTasks() {
                           {JSON.stringify(t.state.resultData, null, 2)}
                         </pre>
                       ) : (
-                        <div className="mt-3 text-[11px] font-mono text-ink-3 leading-relaxed">
-                          no result data on file.
+                        <div className="mt-3 text-[11px] text-ink-3 leading-relaxed">
+                          No result data on file.
                         </div>
                       )}
                     </details>

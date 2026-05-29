@@ -3,7 +3,17 @@ import { useNavigate } from 'react-router-dom';
 import { useAccount, useWalletClient, useBalance } from 'wagmi';
 import { recoverPublicKey, hashMessage } from 'viem';
 import { BrowserProvider, parseEther, formatEther } from 'ethers';
-import { Breadcrumb, PageHeader, SectionRule } from '../components/bb';
+import {
+  Breadcrumb,
+  PageHeader,
+  SectionRule,
+  Button,
+  Tag,
+  Icon,
+  FormField,
+  FormInput,
+  FormTextarea,
+} from '../components/bb';
 import { HeaderManager } from '../components/bb/HeaderManager';
 import { QueryParamManager } from '../components/bb/QueryParamManager';
 import { get, post } from '../lib/api';
@@ -27,6 +37,15 @@ const MIN_OWNER_BALANCE = '0.06';
 type Provider = 'openai' | 'anthropic' | 'groq' | 'gemini';
 type ProviderModels = Record<Provider, string[]>;
 
+/** snake_case capability id → human label ("web_research" → "Web research"). */
+function capLabel(cap: string): string {
+  const t = cap.replace(/_/g, ' ');
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+
+const selectClass =
+  'w-full px-3 py-2.5 bg-surface-2 border border-line text-ink text-sm focus:border-cream';
+
 export default function DeployAgentForm() {
   const { address } = useAccount();
   const { data: walletClient } = useWalletClient();
@@ -49,11 +68,12 @@ export default function DeployAgentForm() {
 
   const [tools, setTools] = useState<Tool[]>([]);
   const [capabilities, setCapabilities] = useState<string[]>([]);
-  const [newTool, setNewTool] = useState<Tool>({ 
-    type: 'http', name: '', description: '', url: '', method: 'POST', 
-    headers: [], queryParams: [], body: { contentType: 'application/json', payload: '' } 
+  const [newTool, setNewTool] = useState<Tool>({
+    type: 'http', name: '', description: '', url: '', method: 'POST',
+    headers: [], queryParams: [], body: { contentType: 'application/json', payload: '' }
   });
   const [showToolForm, setShowToolForm] = useState(false);
+  const [toolError, setToolError] = useState('');
 
   const [status, setStatus] = useState<'idle' | 'deploying' | 'funding' | 'done' | 'error'>('idle');
   const [error, setError] = useState('');
@@ -82,14 +102,18 @@ export default function DeployAgentForm() {
   }
 
   function addTool() {
-    if (!newTool.name || !newTool.url) return;
+    setToolError('');
+    if (!newTool.name || !newTool.url) {
+      setToolError('Tool name and URL are required.');
+      return;
+    }
     if (newTool.body.contentType === 'application/json') {
       const payload = newTool.body.payload.trim();
       if (!payload.startsWith('{') || !payload.endsWith('}')) {
-        alert('JSON payload must be enclosed in {}');
+        setToolError('JSON payload must be enclosed in { }.');
         return;
       }
-      try { JSON.parse(payload); } catch { alert('Invalid JSON payload'); return; }
+      try { JSON.parse(payload); } catch { setToolError('Invalid JSON payload.'); return; }
     }
     setTools(t => [...t, newTool]);
     setNewTool({ type: 'http', name: '', description: '', url: '', method: 'POST', headers: [], queryParams: [], body: { contentType: 'application/json', payload: '{}' } });
@@ -115,12 +139,12 @@ export default function DeployAgentForm() {
         capabilities,
         tools: tools.map(t => t.type === 'mcp'
           ? { type: 'mcp', name: t.name, description: t.description, endpointUrl: t.url, toolName: t.toolName ?? t.name }
-          : { 
-              type: 'http', 
-              name: t.name, 
-              description: t.description, 
-              url: t.url, 
-              method: t.method ?? 'POST', 
+          : {
+              type: 'http',
+              name: t.name,
+              description: t.description,
+              url: t.url,
+              method: t.method ?? 'POST',
               headers: t.headers,
               queryParams: t.queryParams,
               body: t.body
@@ -159,35 +183,46 @@ export default function DeployAgentForm() {
   if (status === 'done') {
     return (
       <div>
-        <Breadcrumb items={['marketplace', 'agents', 'deploy', 'ui']} />
-        <div className="border border-line p-10 text-center space-y-4 mt-8">
-          <div className="text-xs font-mono text-green-400 uppercase tracking-widest">✓ agent deployed</div>
-          <div className="text-xs font-mono text-ink-3">agent id: {agentId}</div>
-          <div className="text-xs font-mono text-ink-3">on-chain wallet minted · INFT identity created</div>
+        <Breadcrumb items={['marketplace', 'agents', 'create', 'no-code']} />
+        <div className="border border-line p-10 text-center space-y-5 mt-8">
+          <div className="flex items-center justify-center gap-2 text-ok">
+            <Icon name="check" size={18} />
+            <span className="text-sm font-semibold">Agent deployed</span>
+          </div>
+          <div className="space-y-1.5">
+            <div className="text-xs text-ink-3">
+              Agent ID <span className="font-mono text-ink-2">{agentId}</span>
+            </div>
+            <div className="text-xs text-ink-3">On-chain wallet minted · INFT identity created</div>
+          </div>
+
           {fundingSkipped ? (
-            <div className="mx-auto max-w-md border border-yellow-600/40 bg-yellow-900/10 px-4 py-3 text-[11px] font-mono text-yellow-400 text-left space-y-1">
-              <div className="font-semibold">⚠ agent is unfunded</div>
-              <div className="text-ink-3">
-                this agent's wallet has 0 0G and can't submit evidence on-chain. open the
-                agent's page and click "top up gas" to send {DEPLOY_FUND_AMOUNT} 0G from
-                your wallet.
+            <div className="mx-auto max-w-md border border-warn/40 bg-warn/5 px-4 py-3 text-left text-[13px] text-ink-2 leading-relaxed space-y-1.5">
+              <div className="flex items-center gap-2 font-semibold text-warn">
+                <Icon name="bolt" size={15} />
+                <span>Agent is unfunded</span>
               </div>
+              <p>
+                This agent's wallet has <span className="font-mono">0 0G</span> and can't submit
+                evidence on-chain. Open the agent's page and click "Top up gas" to send{' '}
+                <span className="font-mono">{DEPLOY_FUND_AMOUNT} 0G</span> from your wallet.
+              </p>
             </div>
           ) : (
-            <div className="text-xs font-mono text-green-400">
-              ✓ funded with {DEPLOY_FUND_AMOUNT} 0G for gas
+            <div className="flex items-center justify-center gap-2 text-[13px] text-ok">
+              <Icon name="check" size={15} />
+              <span>Funded with <span className="font-mono">{DEPLOY_FUND_AMOUNT} 0G</span> for gas</span>
             </div>
           )}
-          <div className="flex justify-center gap-4 mt-6">
-            <button onClick={() => navigate(`/agents/${agentId}`)} className="px-4 py-2 border border-cream text-xs font-mono text-cream hover:bg-cream hover:text-bg transition-colors">
-              view agent →
-            </button>
-            <button onClick={() => navigate('/agents/mine')} className="px-4 py-2 border border-line text-xs font-mono text-ink-3 hover:bg-surface-2">
-              my agents
-            </button>
-            <button onClick={() => { setStatus('idle'); setAgentId(''); setFundingSkipped(false); }} className="px-4 py-2 border border-line text-xs font-mono text-ink-3 hover:bg-surface-2">
-              deploy another
-            </button>
+
+          <div className="flex justify-center gap-3 flex-wrap pt-1">
+            <Button variant="primary" label="View agent →" onClick={() => navigate(`/agents/${agentId}`)} />
+            <Button variant="outline" label="My agents" onClick={() => navigate('/agents/mine')} />
+            <Button
+              variant="ghost"
+              label="Deploy another"
+              onClick={() => { setStatus('idle'); setAgentId(''); setFundingSkipped(false); }}
+            />
           </div>
         </div>
       </div>
@@ -196,210 +231,283 @@ export default function DeployAgentForm() {
 
   return (
     <div>
-      <Breadcrumb items={['marketplace', 'agents', 'deploy', 'ui']} />
-      <PageHeader title="Deploy agent" description="Configure your agent — it will autonomously pick up and complete tasks." />
+      <Breadcrumb items={['marketplace', 'agents', 'create', 'no-code']} />
+      <PageHeader title="Create agent" description="Configure your agent — it will autonomously pick up and complete tasks." />
 
       <form onSubmit={handleSubmit} className="border border-line">
+        {/* 01 — Identity */}
         <div className="p-6 border-b border-line">
-          <SectionRule num="01" title="identity" />
-          <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="min-w-0">
-              <label className="block text-[11px] font-mono uppercase tracking-widest text-ink-3 mb-2">agent name <span className="text-cream">*</span></label>
-              <input required value={form.name} onChange={e => set('name', e.target.value)}
+          <SectionRule num="01" title="Identity" />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+            <FormField label="Agent name" required className="min-w-0">
+              <FormInput
+                required
+                value={form.name}
+                onChange={e => set('name', e.target.value)}
                 placeholder="research-agent"
-                className="w-full bg-surface-2 border border-line px-4 py-3 text-xs font-mono text-ink placeholder-ink-3 focus:outline-none focus:border-cream" />
-            </div>
-            <div className="min-w-0">
-              <label className="block text-[11px] font-mono uppercase tracking-widest text-ink-3 mb-2">owner wallet</label>
-              <div className="bg-surface-2 border border-line px-4 py-3 text-xs font-mono text-ink-3 truncate">{address ?? 'connect wallet'}</div>
-            </div>
+              />
+            </FormField>
+            <FormField label="Owner wallet" className="min-w-0">
+              <div className="w-full px-3 py-2.5 bg-surface-2 border border-line text-ink-3 text-sm font-mono truncate">
+                {address ?? 'Connect wallet'}
+              </div>
+            </FormField>
           </div>
-          <div className="mt-4">
-            <label className="block text-[11px] font-mono uppercase tracking-widest text-ink-3 mb-2">instructions <span className="text-cream">*</span></label>
-            <textarea required rows={4} value={form.instructions} onChange={e => set('instructions', e.target.value)}
+          <FormField label="Instructions" required className="mt-5">
+            <FormTextarea
+              required
+              rows={4}
+              value={form.instructions}
+              onChange={e => set('instructions', e.target.value)}
               placeholder="Describe what this agent does, how it should behave, and what tasks it should pick up."
-              className="w-full bg-surface-2 border border-line px-4 py-3 text-xs font-mono text-ink placeholder-ink-3 focus:outline-none focus:border-cream resize-none" />
-          </div>
+            />
+          </FormField>
         </div>
 
+        {/* 02 — Model */}
         <div className="p-6 border-b border-line">
-          <SectionRule num="02" title="model" />
-          <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-[11px] font-mono uppercase tracking-widest text-ink-3 mb-2">provider</label>
-              <select value={form.provider} onChange={e => set('provider', e.target.value)}
-                className="w-full bg-surface-2 border border-line px-4 py-3 text-xs font-mono text-ink focus:outline-none focus:border-cream">
+          <SectionRule num="02" title="Model" />
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+            <FormField label="Provider">
+              <select value={form.provider} onChange={e => set('provider', e.target.value)} className={selectClass}>
                 {Object.keys(providers).map(p => <option key={p} value={p}>{p}</option>)}
               </select>
-            </div>
-            <div>
-              <label className="block text-[11px] font-mono uppercase tracking-widest text-ink-3 mb-2">model</label>
-              <select value={form.model} onChange={e => set('model', e.target.value)}
-                className="w-full bg-surface-2 border border-line px-4 py-3 text-xs font-mono text-ink focus:outline-none focus:border-cream">
+            </FormField>
+            <FormField label="Model">
+              <select value={form.model} onChange={e => set('model', e.target.value)} className={`${selectClass} font-mono`}>
                 {(providers[form.provider] ?? []).map(m => <option key={m} value={m}>{m}</option>)}
               </select>
-            </div>
-            <div>
-              <label className="block text-[11px] font-mono uppercase tracking-widest text-ink-3 mb-2">api key <span className="text-cream">*</span></label>
-              <input required type="password" value={form.apiKey} onChange={e => set('apiKey', e.target.value)}
+            </FormField>
+            <FormField label="API key" required>
+              <FormInput
+                required
+                type="password"
+                className="font-mono"
+                value={form.apiKey}
+                onChange={e => set('apiKey', e.target.value)}
                 placeholder="sk-..."
-                className="w-full bg-surface-2 border border-line px-4 py-3 text-xs font-mono text-ink placeholder-ink-3 focus:outline-none focus:border-cream" />
+              />
+            </FormField>
+          </div>
+        </div>
+
+        {/* 03 — Capabilities */}
+        <div className="p-6 border-b border-line">
+          <SectionRule num="03" title="Capabilities" side="Required" />
+          <FormField label="What tasks can this agent do?" required hint={`${capabilities.length} selected`}>
+            <div className="flex flex-wrap gap-1.5">
+              {AGENT_CAPABILITIES.map(cap => (
+                <button
+                  key={cap}
+                  type="button"
+                  onClick={() => setCapabilities(cs => cs.includes(cap) ? cs.filter(c => c !== cap) : [...cs, cap])}
+                  className={`px-2.5 py-1 text-xs border transition-colors ${capabilities.includes(cap)
+                    ? 'bg-cream/10 border-cream/40 text-cream'
+                    : 'bg-surface-2 border-line text-ink-3 hover:text-ink-2'
+                    }`}
+                >
+                  {capLabel(cap)}
+                </button>
+              ))}
             </div>
-          </div>
+          </FormField>
         </div>
 
+        {/* 04 — Tools & MCP servers */}
         <div className="p-6 border-b border-line">
-          <SectionRule num="03" title="capabilities" side="required — what tasks can this agent do?" />
-          <div className="mt-4 flex flex-wrap gap-2">
-            {AGENT_CAPABILITIES.map(cap => (
-              <button key={cap} type="button"
-                onClick={() => setCapabilities(cs => cs.includes(cap) ? cs.filter(c => c !== cap) : [...cs, cap])}
-                className={`px-3 py-1 text-[11px] font-mono border transition-colors ${capabilities.includes(cap)
-                  ? 'border-cream text-cream bg-cream/10'
-                  : 'border-line text-ink-3 hover:border-ink hover:text-ink'
-                  }`}>
-                {cap.replace(/_/g, ' ')}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="p-6 border-b border-line">
-          <SectionRule num="04" title="tools & mcp servers" side="optional" />
-          <div className="mt-4 space-y-2">
+          <SectionRule num="04" title="Tools & MCP servers" side="Optional" />
+          <div className="space-y-2">
             {tools.map((t, i) => (
-              <div key={i} className="flex items-center justify-between border border-line px-4 py-3 text-xs font-mono">
-                <span className="text-cream">{t.name}</span>
-                <span className="text-ink-3">{t.type} · {t.url}</span>
-                <button type="button" onClick={() => setTools(ts => ts.filter((_, j) => j !== i))} className="text-ink-3 hover:text-red-400">remove</button>
+              <div key={i} className="flex items-center justify-between gap-3 border border-line px-4 py-3 text-sm">
+                <span className="text-ink font-medium truncate">{t.name}</span>
+                <span className="text-ink-3 font-mono text-xs truncate flex-1 text-right" title={t.url}>
+                  <Tag tone="neutral" className="mr-2">{t.type === 'mcp' ? 'MCP' : 'HTTP'}</Tag>
+                  {t.url}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setTools(ts => ts.filter((_, j) => j !== i))}
+                  className="text-ink-3 hover:text-err transition-colors shrink-0"
+                >
+                  Remove
+                </button>
               </div>
             ))}
 
             {showToolForm ? (
-              <div className="border border-line p-4 space-y-3">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[11px] font-mono uppercase tracking-widest text-ink-3 mb-1">type</label>
-                    <select value={newTool.type} onChange={e => setNewTool(t => ({ ...t, type: e.target.value as 'http' | 'mcp' }))}
-                      className="w-full bg-surface-2 border border-line px-3 py-2 text-xs font-mono text-ink focus:outline-none focus:border-cream">
+              <div className="border border-line p-4 space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <FormField label="Type">
+                    <select
+                      value={newTool.type}
+                      onChange={e => setNewTool(t => ({ ...t, type: e.target.value as 'http' | 'mcp' }))}
+                      className={selectClass}
+                    >
                       <option value="http">HTTP</option>
                       <option value="mcp">MCP</option>
                     </select>
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-mono uppercase tracking-widest text-ink-3 mb-1">name</label>
-                    <input value={newTool.name} onChange={e => setNewTool(t => ({ ...t, name: e.target.value }))}
-                      placeholder="web-search" className="w-full bg-surface-2 border border-line px-3 py-2 text-xs font-mono text-ink placeholder-ink-3 focus:outline-none focus:border-cream" />
-                  </div>
+                  </FormField>
+                  <FormField label="Name">
+                    <FormInput
+                      value={newTool.name}
+                      onChange={e => setNewTool(t => ({ ...t, name: e.target.value }))}
+                      placeholder="web-search"
+                    />
+                  </FormField>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-[1fr_120px] gap-3">
-                  <div>
-                    <label className="block text-[11px] font-mono uppercase tracking-widest text-ink-3 mb-1">url / endpoint</label>
-                    <input value={newTool.url} onChange={e => setNewTool(t => ({ ...t, url: e.target.value }))}
-                      placeholder="https://..." className="w-full bg-surface-2 border border-line px-3 py-2 text-xs font-mono text-ink placeholder-ink-3 focus:outline-none focus:border-cream" />
-                  </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-[1fr_140px] gap-4">
+                  <FormField label="URL / endpoint">
+                    <FormInput
+                      className="font-mono"
+                      value={newTool.url}
+                      onChange={e => setNewTool(t => ({ ...t, url: e.target.value }))}
+                      placeholder="https://..."
+                    />
+                  </FormField>
                   {newTool.type === 'http' && (
-                    <div>
-                      <label className="block text-[11px] font-mono uppercase tracking-widest text-ink-3 mb-1">method</label>
-                      <select value={newTool.method ?? 'POST'} onChange={e => setNewTool(t => ({ ...t, method: e.target.value as Tool['method'] }))}
-                        className="w-full bg-surface-2 border border-line px-3 py-2 text-xs font-mono text-ink focus:outline-none focus:border-cream">
+                    <FormField label="Method">
+                      <select
+                        value={newTool.method ?? 'POST'}
+                        onChange={e => setNewTool(t => ({ ...t, method: e.target.value as Tool['method'] }))}
+                        className={`${selectClass} font-mono`}
+                      >
                         {['GET', 'POST', 'PUT', 'DELETE'].map(m => <option key={m} value={m}>{m}</option>)}
                       </select>
-                    </div>
+                    </FormField>
                   )}
                 </div>
-                <div>
-                  <label className="block text-[11px] font-mono uppercase tracking-widest text-ink-3 mb-1">description</label>
-                  <textarea rows={3} value={newTool.description} onChange={e => setNewTool(t => ({ ...t, description: e.target.value }))}
-                    placeholder="What this tool does" className="w-full bg-surface-2 border border-line px-3 py-2 text-xs font-mono text-ink placeholder-ink-3 focus:outline-none focus:border-cream resize-none" />
-                </div>
+
+                <FormField label="Description">
+                  <FormTextarea
+                    rows={3}
+                    value={newTool.description}
+                    onChange={e => setNewTool(t => ({ ...t, description: e.target.value }))}
+                    placeholder="What this tool does"
+                  />
+                </FormField>
+
                 {newTool.type === 'http' && (
                   <div className="space-y-4">
-                    <div className="space-y-1">
-                      <label className="block text-[11px] font-mono uppercase tracking-widest text-ink-3">query parameters</label>
+                    <FormField label="Query parameters">
                       <QueryParamManager params={newTool.queryParams} onChange={(p) => setNewTool(t => ({ ...t, queryParams: p }))} />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="block text-[11px] font-mono uppercase tracking-widest text-ink-3">headers</label>
+                    </FormField>
+                    <FormField label="Headers">
                       <HeaderManager headers={newTool.headers} onChange={(h) => setNewTool(t => ({ ...t, headers: h }))} />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="block text-[11px] font-mono uppercase tracking-widest text-ink-3">body payload</label>
-                      <select value={newTool.body.contentType} onChange={e => {
-                        const contentType = e.target.value as 'application/json' | 'application/x-www-form-urlencoded';
-                        setNewTool(t => ({ 
-                          ...t, 
-                          body: { 
-                            contentType, 
-                            payload: contentType === 'application/json' ? '{}' : '' 
-                          } 
-                        }));
-                      }}
-                        className="w-full bg-surface-2 border border-line px-3 py-2 text-xs font-mono text-ink">
+                    </FormField>
+                    <FormField label="Body payload">
+                      <select
+                        value={newTool.body.contentType}
+                        onChange={e => {
+                          const contentType = e.target.value as 'application/json' | 'application/x-www-form-urlencoded';
+                          setNewTool(t => ({
+                            ...t,
+                            body: {
+                              contentType,
+                              payload: contentType === 'application/json' ? '{}' : ''
+                            }
+                          }));
+                        }}
+                        className={selectClass}
+                      >
                         <option value="application/json">JSON</option>
-                        <option value="application/x-www-form-urlencoded">Form URL Encoded</option>
+                        <option value="application/x-www-form-urlencoded">Form URL encoded</option>
                       </select>
-                      
+
                       {newTool.body.contentType === 'application/json' ? (
-                        <textarea rows={3} value={newTool.body.payload} onChange={e => setNewTool(t => ({ ...t, body: { ...t.body, payload: e.target.value } }))}
-                          placeholder='{"key": "value"}' className="w-full bg-surface-2 border border-line px-3 py-2 text-xs font-mono text-ink placeholder-ink-3 focus:outline-none focus:border-cream resize-none" />
+                        <FormTextarea
+                          rows={3}
+                          className="font-mono mt-2"
+                          value={newTool.body.payload}
+                          onChange={e => setNewTool(t => ({ ...t, body: { ...t.body, payload: e.target.value } }))}
+                          placeholder='{"key": "value"}'
+                        />
                       ) : (
-                        <QueryParamManager params={newTool.body.payload ? JSON.parse(newTool.body.payload) : []} 
-                          onChange={(p) => setNewTool(t => ({ ...t, body: { ...t.body, payload: JSON.stringify(p) } }))} />
+                        <QueryParamManager
+                          params={newTool.body.payload ? JSON.parse(newTool.body.payload) : []}
+                          onChange={(p) => setNewTool(t => ({ ...t, body: { ...t.body, payload: JSON.stringify(p) } }))}
+                        />
                       )}
-                    </div>
+                    </FormField>
                   </div>
                 )}
-                <div className="flex gap-2 mt-4">
-                  <button type="button" onClick={addTool} className="px-4 py-2 border border-cream text-xs font-mono text-cream hover:bg-cream hover:text-bg transition-colors">add tool</button>
-                  <button type="button" onClick={() => setShowToolForm(false)} className="px-4 py-2 border border-line text-xs font-mono text-ink-3 hover:bg-surface-2">cancel</button>
+
+                {toolError && <p className="text-xs text-err">{toolError}</p>}
+
+                <div className="flex gap-3 pt-1">
+                  <Button type="button" variant="primary" label="Add tool" onClick={addTool} />
+                  <Button type="button" variant="ghost" label="Cancel" onClick={() => { setShowToolForm(false); setToolError(''); }} />
                 </div>
               </div>
             ) : (
-              <button type="button" onClick={() => setShowToolForm(true)}
-                className="px-4 py-2 border border-line text-xs font-mono text-ink-3 hover:bg-surface-2 hover:text-ink transition-colors">
-                + add tool or mcp server
-              </button>
+              <Button
+                type="button"
+                variant="outline"
+                label="+ Add tool or MCP server"
+                onClick={() => { setShowToolForm(true); setToolError(''); }}
+              />
             )}
           </div>
         </div>
 
+        {/* Deploy */}
         <div className="p-6">
           {!address ? (
-            <div className="text-xs font-mono text-ink-3">connect wallet to deploy an agent</div>
+            <p className="text-sm text-ink-3">Connect a wallet to deploy an agent.</p>
           ) : (
             <>
-              <div className="mb-4 border border-line bg-surface-2 px-4 py-3 text-[11px] font-mono text-ink-3 space-y-1">
-                <div className="text-ink uppercase tracking-widest">deployment uses 2 signatures</div>
-                <div>1. sign a message — no gas, derives owner pubkey for encryption</div>
-                <div>2. send {DEPLOY_FUND_AMOUNT} 0G to the new agent wallet — pays for its gas</div>
-                <div className="text-ink-3/70">your wallet balance: {ownerBalance ? `${parseFloat(formatEther(ownerBalance.value)).toFixed(4)} 0G` : '…'}</div>
+              <div className="mb-4 border border-line bg-surface-2 px-4 py-3.5 space-y-2">
+                <div className="flex items-center gap-2 text-sm font-semibold text-ink">
+                  <Icon name="bolt" size={15} className="text-cream" />
+                  <span>Deployment uses 2 signatures</span>
+                </div>
+                <ol className="text-[13px] text-ink-2 leading-relaxed space-y-1 list-decimal list-inside">
+                  <li>Sign a message — no gas, derives your owner public key for encryption.</li>
+                  <li>Send <span className="font-mono">{DEPLOY_FUND_AMOUNT} 0G</span> to the new agent wallet — pays for its gas.</li>
+                </ol>
+                <div className="text-[13px] text-ink-3 pt-0.5">
+                  Your wallet balance:{' '}
+                  <span className="font-mono text-ink-2">
+                    {ownerBalance ? `${ownerBalanceEther.toFixed(4)} 0G` : '…'}
+                  </span>
+                </div>
               </div>
 
               {!hasEnoughForDeploy && ownerBalance && (
-                <div className="mb-4 border border-err/40 bg-err/5 px-4 py-3 text-[11px] font-mono text-err space-y-1">
-                  <div className="font-semibold">⚠ not enough 0G to fund the agent</div>
-                  <div className="text-ink-3">
-                    you need at least {MIN_OWNER_BALANCE} 0G (fund amount + gas for the
-                    transfer). top up your wallet at{' '}
+                <div className="mb-4 border border-err/40 bg-err/5 px-4 py-3.5 text-[13px] text-ink-2 leading-relaxed space-y-1.5">
+                  <div className="flex items-center gap-2 font-semibold text-err">
+                    <Icon name="bolt" size={15} />
+                    <span>Not enough 0G to fund the agent</span>
+                  </div>
+                  <p>
+                    You need at least <span className="font-mono">{MIN_OWNER_BALANCE} 0G</span> (fund
+                    amount plus gas for the transfer). Top up your wallet at{' '}
                     <a href="https://faucet.0g.ai" target="_blank" rel="noreferrer" className="text-cream underline">faucet.0g.ai</a>
                     {' '}then refresh.
-                  </div>
+                  </p>
                 </div>
               )}
 
               <div className="flex items-center gap-3 flex-wrap">
-                <button type="submit" disabled={status === 'deploying' || status === 'funding' || capabilities.length === 0 || !hasEnoughForDeploy}
-                  className="px-6 py-3 border border-cream text-xs font-mono text-cream hover:bg-cream hover:text-bg disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
-                  {status === 'deploying' ? 'deploying…' : status === 'funding' ? `funding agent with ${DEPLOY_FUND_AMOUNT} 0G…` : 'deploy + fund agent →'}
-                </button>
+                <Button
+                  type="submit"
+                  variant="primary"
+                  disabled={status === 'deploying' || status === 'funding' || capabilities.length === 0 || !hasEnoughForDeploy}
+                  label={
+                    status === 'deploying'
+                      ? 'Deploying…'
+                      : status === 'funding'
+                        ? `Funding agent with ${DEPLOY_FUND_AMOUNT} 0G…`
+                        : 'Deploy + fund agent →'
+                  }
+                />
                 {capabilities.length === 0 && (
-                  <span className="text-[11px] font-mono text-ink-3">pick at least one capability above to continue</span>
+                  <span className="text-[13px] text-ink-3">Pick at least one capability above to continue.</span>
                 )}
               </div>
             </>
           )}
-          {status === 'error' && <div className="mt-3 text-xs font-mono text-red-400">{error}</div>}
+          {status === 'error' && <p className="mt-3 text-sm text-err break-words">{error}</p>}
         </div>
       </form>
     </div>

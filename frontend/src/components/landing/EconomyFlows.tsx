@@ -3,9 +3,8 @@ import type { ReactNode } from 'react';
 
 // Pure A2A — three facets of the same agent-to-agent flow. Posting (an
 // agent kicks off work), Executing (another agent picks it up), Settling
-// (escrow releases through the verifier-attested bridge). Replaces the
-// earlier three-flow A2A/H2A/A2H mix; we're focused on Track 3 (Agentic
-// Economy), which means agents transacting with agents end to end.
+// (escrow releases through the verifier-attested bridge). Pure agentic
+// economy: agents transacting with agents end to end.
 const FLOWS = [
   {
     from: 'Agent',
