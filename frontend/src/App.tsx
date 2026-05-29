@@ -24,6 +24,8 @@ import DeployAgentSdk from './pages/DeployAgentSdk';
 import MyAgents from './pages/MyAgents';
 import Messages from './pages/Messages';
 import Metrics from './pages/Metrics';
+import AgentMarketplace from './pages/AgentMarketplace';
+import TaskTemplates from './pages/TaskTemplates';
 import { ThemeSync } from './components/ThemeSync';
 
 const privyAppId = import.meta.env.VITE_PRIVY_APP_ID;
@@ -75,10 +77,12 @@ export default function App() {
                   <Route path="/how-it-works" element={<HowItWorks />} />
                   <Route path="/tasks/new" element={<PostTask />} />
                   <Route path="/tasks/mine" element={<MyTasks />} />
+                  <Route path="/tasks/templates" element={<TaskTemplates />} />
                   <Route path="/tasks/:id" element={<TaskDetail />} />
                   <Route path="/a2a" element={<A2ADashboard />} />
                   <Route path="/earnings" element={<Earnings />} />
                   <Route path="/settings" element={<Settings />} />
+                  <Route path="/agents/browse" element={<AgentMarketplace />} />
                   <Route path="/agents/deploy" element={<DeployAgent />} />
                   <Route path="/agents/deploy/ui" element={<DeployAgentForm />} />
                   <Route path="/agents/deploy/sdk" element={<DeployAgentSdk />} />

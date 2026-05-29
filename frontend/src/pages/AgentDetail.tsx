@@ -23,6 +23,15 @@ import { truncateAddress } from '../lib/utils';
 import { get, patch, authedPost } from '../lib/api';
 import { API_BASE_URL } from '../config/constants';
 import { AGENT_CAPABILITIES } from '../config/capabilities';
+import {
+  getAgentReviews,
+  submitReview,
+  getAgentBadges,
+  getWebhooks,
+  registerWebhook as apiRegisterWebhook,
+  deleteWebhook,
+} from '../services/marketplace';
+import type { AgentReview, AgentReviewStats, AgentBadge, AgentWebhook } from '../services/marketplace';
 
 // Top-up amount when the agent runs low on gas. Same default as the deploy
 // funding step — round trip + LLM call + submitEvidence costs ~0.0004 0G, so
@@ -47,12 +56,14 @@ interface AgentDetails {
   decayedReputation?: { rawScore: number; decayedScore: number; tasksCompleted: number; disputes: number };
 }
 
-type Tab = 'logs' | 'tools' | 'tasks' | 'edit';
+type Tab = 'logs' | 'tools' | 'tasks' | 'reviews' | 'webhooks' | 'edit';
 
 const TAB_LABELS: Record<Tab, string> = {
   logs: 'Logs',
   tools: 'Tools',
   tasks: 'Tasks',
+  reviews: 'Reviews',
+  webhooks: 'Webhooks',
   edit: 'Edit',
 };
 
@@ -79,6 +90,17 @@ export default function AgentDetail() {
   const [editInstructions, setEditInstructions] = useState('');
   const [editModel, setEditModel] = useState('');
   const [editCapabilities, setEditCapabilities] = useState<string[]>([]);
+
+  // Reviews state
+  const [reviews, setReviews] = useState<AgentReview[]>([]);
+  const [reviewStats, setReviewStats] = useState<AgentReviewStats | null>(null);
+  const [reviewRating, setReviewRating] = useState(5);
+  const [reviewText, setReviewText] = useState('');
+  const [reviewSubmitting, setReviewSubmitting] = useState(false);
+  const [reviewSubmitError, setReviewSubmitError] = useState('');
+
+  // Badges state
+  const [badges, setBadges] = useState<AgentBadge[]>([]);
 
   // Gas-management UI state — separate from the agent's start/pause/stop
   // actions so the buttons can show their own progress without interfering.
@@ -113,6 +135,21 @@ export default function AgentDetail() {
   }, [id]);
 
   useEffect(() => { loadAgent(); }, [loadAgent]);
+
+  useEffect(() => {
+    if (!agent?.walletAddress) return;
+    getAgentBadges(agent.walletAddress).then(setBadges).catch(() => {});
+  }, [agent?.walletAddress]);
+
+  useEffect(() => {
+    if (!agent?.walletAddress) return;
+    getAgentReviews(agent.walletAddress, 20)
+      .then((result) => {
+        setReviews(result.reviews);
+        setReviewStats(result.stats);
+      })
+      .catch(() => {});
+  }, [agent?.walletAddress]);
 
   useEffect(() => {
     if (!id) return;
@@ -210,7 +247,7 @@ export default function AgentDetail() {
   }
 
   const isOwner = address?.toLowerCase() === agent.ownerAddress?.toLowerCase();
-  const tabs: Tab[] = ['logs', 'tools', 'tasks', ...(isOwner ? (['edit'] as Tab[]) : [])];
+  const tabs: Tab[] = ['logs', 'tools', 'tasks', 'reviews', ...(isOwner ? (['webhooks', 'edit'] as Tab[]) : [])];
 
   return (
     <div>
@@ -349,6 +386,16 @@ export default function AgentDetail() {
                 </span>
               </div>
             </div>
+            {badges.length > 0 && (
+              <div>
+                <div className="text-[13px] font-medium text-ink-2 mb-1">Badges</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {badges.map((b) => (
+                    <Tag key={b.capability} tone="ok">{b.capability.replace(/_/g, ' ')}</Tag>
+                  ))}
+                </div>
+              </div>
+            )}
             {agent.publicKey && (
               <div>
                 <div className="text-[13px] font-medium text-ink-2 mb-1">Public key</div>
@@ -464,6 +511,105 @@ export default function AgentDetail() {
               <AgentTasks agentWallet={agent.walletAddress} />
             )}
 
+            {tab === 'reviews' && (
+              <div className="space-y-5">
+                {/* Stats summary */}
+                {reviewStats && reviewStats.totalReviews > 0 && (
+                  <div className="flex items-center gap-4 text-sm">
+                    <span className="text-ink font-bold font-mono text-lg">{reviewStats.avgRating.toFixed(1)}</span>
+                    <span className="text-ink-3">avg · {reviewStats.totalReviews} reviews</span>
+                    <div className="flex gap-1">
+                      {[5, 4, 3, 2, 1].map((star) => (
+                        <div key={star} className="flex items-center gap-1 text-xs text-ink-3">
+                          <span className="text-ink-2">{'★'.repeat(star)}{'☆'.repeat(5 - star)}</span>
+                          <span className="font-mono w-4 text-right">{reviewStats.distribution[star] ?? 0}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Review list */}
+                {reviews.length === 0 ? (
+                  <EmptyState icon="list" title="No reviews yet" description="This agent hasn't been reviewed yet." />
+                ) : (
+                  <div className="space-y-3">
+                    {reviews.map((r) => (
+                      <div key={r.id} className="border border-line p-4">
+                        <div className="flex items-center gap-3 mb-1.5">
+                          <span className="text-ink font-mono text-sm">
+                            {'★'.repeat(r.rating)}{'☆'.repeat(5 - r.rating)}
+                          </span>
+                          <span className="text-[11px] text-ink-3 font-mono">{truncateAddress(r.reviewer_address)}</span>
+                          <span className="text-[11px] text-ink-3">{new Date(r.created_at).toLocaleDateString()}</span>
+                        </div>
+                        {r.review && <p className="text-sm text-ink-2 leading-relaxed">{r.review}</p>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Submit review form */}
+                <div className="border border-line p-5">
+                  <div className="text-sm font-medium text-ink mb-3">Leave a review</div>
+                  <div className="flex items-center gap-1 mb-3">
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <button
+                        key={star}
+                        type="button"
+                        onClick={() => setReviewRating(star)}
+                        className={`text-lg transition-colors ${star <= reviewRating ? 'text-cream' : 'text-ink-3'}`}
+                      >
+                        ★
+                      </button>
+                    ))}
+                    <span className="text-xs text-ink-3 ml-2">{reviewRating}/5</span>
+                  </div>
+                  <FormTextarea
+                    rows={3}
+                    placeholder="Share your experience with this agent…"
+                    value={reviewText}
+                    onChange={(e) => setReviewText(e.target.value)}
+                  />
+                  <div className="flex items-center gap-3 mt-3">
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      label={reviewSubmitting ? 'Submitting…' : 'Submit review'}
+                      disabled={reviewSubmitting}
+                      onClick={async () => {
+                        if (!agent?.walletAddress) return;
+                        setReviewSubmitting(true);
+                        setReviewSubmitError('');
+                        try {
+                          await submitReview({
+                            taskId: '',
+                            agentAddress: agent.walletAddress,
+                            rating: reviewRating,
+                            review: reviewText.trim() || undefined,
+                          });
+                          setReviewText('');
+                          setReviewRating(5);
+                          const result = await getAgentReviews(agent.walletAddress, 20);
+                          setReviews(result.reviews);
+                          setReviewStats(result.stats);
+                        } catch (err) {
+                          setReviewSubmitError((err as Error).message);
+                        } finally {
+                          setReviewSubmitting(false);
+                        }
+                      }}
+                    />
+                    {reviewSubmitError && <span className="text-xs text-err">{reviewSubmitError}</span>}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {tab === 'webhooks' && isOwner && (
+              <WebhookTab agentId={id!} />
+            )}
+
             {tab === 'edit' && isOwner && (
               <div className="space-y-5">
                 <FormField label="Instructions">
@@ -527,9 +673,6 @@ function AgentTasks({ agentWallet }: { agentWallet?: string }) {
   const loadTasks = useCallback(() => {
     if (!agentWallet) return;
     setTasksError(false);
-    // Hits /a2a/executions filtered by agent wallet (not the owner EOA). The
-    // old code queried /api/v1/tasks which only returns currently-open tasks,
-    // so completed runs by this agent never appeared.
     get<{ executions?: Execution[] }>(`/api/v1/a2a/executions?address=${agentWallet}`)
       .then(data => setExecutions(data.executions ?? []))
       .catch(() => setTasksError(true));
@@ -551,8 +694,6 @@ function AgentTasks({ agentWallet }: { agentWallet?: string }) {
     );
   }
 
-  // Most-recent first by acceptedAt; falls back to insertion order when
-  // timestamps are missing (older state rows pre-acceptedAt field).
   const sorted = [...executions].sort((a, b) => {
     const ta = a.state.acceptedAt ? Date.parse(a.state.acceptedAt) : 0;
     const tb = b.state.acceptedAt ? Date.parse(b.state.acceptedAt) : 0;
@@ -568,6 +709,104 @@ function AgentTasks({ agentWallet }: { agentWallet?: string }) {
           <span className="shrink-0"><StatusTag status={e.state.status} /></span>
         </div>
       ))}
+    </div>
+  );
+}
+
+function WebhookTab({ agentId: _agentId }: { agentId: string }) {
+  const [hooks, setHooks] = useState<AgentWebhook[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+
+  const [url, setUrl] = useState('');
+  const [secret, setSecret] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState('');
+
+  const loadHooks = useCallback(() => {
+    setLoading(true);
+    setError(false);
+    getWebhooks()
+      .then(setHooks)
+      .catch(() => setError(true))
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => { loadHooks(); }, [loadHooks]);
+
+  async function handleCreate() {
+    if (!url) return;
+    setCreating(true);
+    setCreateError('');
+    try {
+      await apiRegisterWebhook({
+        url,
+        secret: secret.trim() || undefined,
+      });
+      setUrl('');
+      setSecret('');
+      await loadHooks();
+    } catch (err) {
+      setCreateError((err as Error).message);
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  if (loading) return <LoadingState label="Loading webhooks…" />;
+  if (error) return <ErrorState title="Couldn't load webhooks" onRetry={() => loadHooks()} />;
+
+  return (
+    <div className="space-y-5">
+      {/* Existing webhooks */}
+      {hooks.length === 0 ? (
+        <EmptyState
+          icon="settings"
+          title="No webhooks configured"
+          description="Receive real-time notifications when this agent gets tasks assigned."
+        />
+      ) : (
+        <div className="space-y-2">
+          {hooks.map((h) => (
+            <div key={h.id} className="flex items-center justify-between gap-3 border border-line px-4 py-3 text-sm">
+              <div className="min-w-0 flex-1">
+                <div className="text-ink font-mono text-xs break-all truncate">{h.url}</div>
+                <div className="text-[11px] text-ink-3 mt-0.5">{h.events.join(', ')}</div>
+              </div>
+              <button
+                onClick={async () => {
+                  await deleteWebhook(h.id);
+                  await loadHooks();
+                }}
+                className="text-xs text-err hover:underline shrink-0"
+              >
+                Delete
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Register new webhook */}
+      <div className="border border-line p-5">
+        <div className="text-sm font-medium text-ink mb-3">Register webhook</div>
+        <FormField label="URL" required>
+          <FormInput className="font-mono" placeholder="https://your-service.com/webhook" value={url} onChange={(e) => setUrl(e.target.value)} />
+        </FormField>
+        <FormField label="Secret" hint="HMAC-SHA256 signing secret (auto-generated if empty)">
+          <FormInput className="font-mono" placeholder="Leave empty for auto-generate" value={secret} onChange={(e) => setSecret(e.target.value)} />
+        </FormField>
+        <div className="flex items-center gap-3 mt-3">
+          <Button
+            variant="primary"
+            size="sm"
+            label={creating ? 'Registering…' : 'Register webhook'}
+            disabled={!url || creating}
+            onClick={handleCreate}
+          />
+          {createError && <span className="text-xs text-err">{createError}</span>}
+        </div>
+      </div>
     </div>
   );
 }

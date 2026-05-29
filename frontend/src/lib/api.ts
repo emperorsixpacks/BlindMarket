@@ -87,4 +87,12 @@ export async function authedPatch<T>(path: string, body?: unknown, overrideToken
   return handleResponse<T>(res);
 }
 
+export async function authedDelete<T = void>(path: string, overrideToken?: string): Promise<T> {
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders(overrideToken)) },
+  });
+  return handleResponse<T>(res);
+}
+
 export { ApiError };

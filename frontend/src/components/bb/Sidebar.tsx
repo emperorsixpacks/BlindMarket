@@ -26,11 +26,13 @@ const navGroups: NavGroup[] = [
     items: [
       { to: '/tasks/new', label: 'Post a task', icon: 'compose', exact: true },
       { to: '/tasks/mine', label: 'My tasks', icon: 'clock', exact: true },
+      { to: '/tasks/templates', label: 'Templates', icon: 'list', exact: true },
     ],
   },
   {
     label: 'Agents',
     items: [
+      { to: '/agents/browse', label: 'Browse agents', icon: 'search', exact: true },
       // /agents/deploy is the chooser; /ui and /sdk are children — no `exact`
       // so "Create agent" stays active across all three.
       { to: '/agents/deploy', label: 'Create agent', icon: 'user' },
