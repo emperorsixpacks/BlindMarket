@@ -7,7 +7,6 @@ import { ogTestnet } from './config/chains';
 import { WalletProvider } from './context/WalletContext';
 import { AuthProvider } from './context/AuthContext';
 import { DashboardLayout } from './components/bb/DashboardLayout';
-import Landing from './pages/Landing';
 import LandingV2 from './pages/LandingV2';
 import TaskDetail from './pages/TaskDetail';
 import A2ADashboard from './pages/A2ADashboard';
@@ -65,11 +64,11 @@ export default function App() {
             <AuthProvider>
               <ThemeSync />
               <Routes>
-                <Route path="/" element={<Landing />} />
-                {/* Side-by-side redesign preview — compare against live `/`
-                    before promoting. Outside DashboardLayout like the live
-                    landing so it renders chrome-free. */}
-                <Route path="/v2" element={<LandingV2 />} />
+                <Route path="/" element={<LandingV2 />} />
+                {/* The redesign (formerly previewed at /v2) is now the live
+                    landing at `/`. Redirect the old preview URL so existing
+                    bookmarks/links don't 404. */}
+                <Route path="/v2" element={<Navigate to="/" replace />} />
                 <Route path="/register/:token" element={<RegisterAgent />} />
                 <Route element={<DashboardLayout />}>
                   <Route path="/how-it-works" element={<HowItWorks />} />
