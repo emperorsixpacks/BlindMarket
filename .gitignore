@@ -45,3 +45,6 @@ scratch/
 
 backend/.env.testnet
 frontend/.env.testnet
+
+# Celo multi-chain — local-only WIP, not for production
+docs/CELO-MULTI-CHAIN.md
