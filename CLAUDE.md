@@ -27,3 +27,25 @@ as fact.
 > Why this rule exists: memory and prior context are point-in-time snapshots and
 > go stale (e.g. files get moved or deleted). Confirming against live source is
 > the safeguard against acting on outdated or hallucinated assumptions.
+
+### Don't delete a definition and leave its call sites
+
+When you delete, rename, or move a function/const/import, grep for every
+remaining reference **in the same edit** — a refactor that drops a definition but
+leaves callers compiles fine in plain JS and only explodes at runtime with
+`X is not defined`. This is not hypothetical: commit `a7cc6fc` deleted
+`backend/agents/worker.js`'s ECIES helper block (`ECIES_PUBKEY_LENGTH`,
+`aesGcmDecrypt`, …) but left the call sites, and every A2A agent crashed in prod
+with `ECIES_PUBKEY_LENGTH is not defined` the instant it tried to decrypt a brief.
+
+Guardrails that catch this class automatically:
+
+- `backend/agents/*.js` is type-checked via `backend/tsconfig.agents.json`
+  (`npm run typecheck:agents`; `npm run typecheck:all` runs src + agents). The
+  main `tsconfig.json` only covers `src/**`, which is why the worker shipped
+  unchecked.
+- A local Claude Code `Stop` hook (`.claude/hooks/no-undef-symbols.sh`, wired in
+  `.claude/settings.json`) blocks finishing a turn when changed backend JS/TS
+  references an undefined symbol (`TS2304`/`TS2552`). Note `.claude/` is
+  gitignored, so this hook is per-machine — `npm run typecheck:agents` (ideally
+  wired into CI via `typecheck:all`) is the shared, enforceable guard.

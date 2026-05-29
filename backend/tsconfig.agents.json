@@ -1,0 +1,25 @@
+{
+  // Type-checks the forked agent workers in backend/agents/*.js, which the main
+  // tsconfig.json does NOT cover (it only includes src/**). checkJs surfaces
+  // undefined-symbol references as TS2304 / TS2552 "Cannot find name" — the exact
+  // regression that deleted worker.js's ECIES helper block (commit a7cc6fc) yet
+  // left every call site, crashing A2A agents with "ECIES_PUBKEY_LENGTH is not
+  // defined". strict/noImplicitAny are off on purpose: we only care about the
+  // undefined-symbol class here, not full type soundness of plain-JS workers.
+  // Run: npm run typecheck:agents
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "strict": false,
+    "noImplicitAny": false,
+    "skipLibCheck": true,
+    "types": ["node"],
+    "esModuleInterop": true,
+    "resolveJsonModule": true
+  },
+  "include": ["agents/**/*.js"]
+}

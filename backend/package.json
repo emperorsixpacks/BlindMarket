@@ -8,6 +8,8 @@
     "start": "npx tsx src/index.ts",
     "build": "echo 'No build step needed — using tsx'",
     "typecheck": "tsc --noEmit",
+    "typecheck:agents": "tsc -p tsconfig.agents.json",
+    "typecheck:all": "npm run typecheck && npm run typecheck:agents",
     "test": "vitest run",
     "test:watch": "vitest"
   },

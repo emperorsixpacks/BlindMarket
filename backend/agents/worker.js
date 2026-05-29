@@ -30,27 +30,35 @@ import { fileURLToPath } from 'url';
 import { dirname as pathDirname, join as pathJoin } from 'path';
 import { runInNewContext } from 'vm';
 import { ethers } from 'ethers';
-import { decryptSensitive } from '../src/services/crypto.js';
+import {
+  decryptSensitive,
+  aesEncrypt,
+  aesDecrypt,
+  eciesEncrypt,
+  eciesDecrypt,
+  generateAesKey,
+} from '../src/services/crypto.js';
 
 
-// ── ECIES + AES decrypt helpers ──
+// ── Crypto: ECIES + AES helpers ──
+//
+// The wrapping/unwrapping primitives (aesEncrypt/aesDecrypt, eciesEncrypt/
+// eciesDecrypt, generateAesKey) are imported from ../src/services/crypto.js so
+// there is exactly ONE implementation, shared by the backend, the frontend's
+// byte-compatible twin, and these forked workers. Do NOT re-hand-roll them here:
+// commit a7cc6fc deleted a local copy of this block but left the call sites,
+// crashing every A2A agent with "ECIES_PUBKEY_LENGTH is not defined".
 
 function sha256Hex(buf) {
   return createHash('sha256').update(buf).digest('hex');
 }
 
+// Thin adapter over the canonical eciesDecrypt that tolerates a 0x-prefixed
+// private key (agent keys are stored bare, but eciesDecrypt feeds the hex
+// straight into Buffer.from, so stay defensive).
 function eciesDecryptK1(blob, privKeyHex) {
-  if (blob.length < ECIES_PUBKEY_LENGTH + IV_LENGTH + TAG_LENGTH) {
-    throw new Error('ECIES blob too short');
-  }
-  const ephPub = blob.subarray(0, ECIES_PUBKEY_LENGTH);
-  const aesBlob = blob.subarray(ECIES_PUBKEY_LENGTH);
-  const ecdh = createECDH('secp256k1');
   const clean = privKeyHex.startsWith('0x') ? privKeyHex.slice(2) : privKeyHex;
-  ecdh.setPrivateKey(Buffer.from(clean, 'hex'));
-  const shared = ecdh.computeSecret(ephPub);
-  const aesKey = Buffer.from(hkdfSync('sha256', shared, '', ECIES_HKDF_INFO, KEY_LENGTH));
-  return aesGcmDecrypt(aesBlob, aesKey);
+  return eciesDecrypt(blob, clean);
 }
 
 // Derive the uncompressed secp256k1 public key (130 hex chars, leading 04, no
@@ -206,6 +214,13 @@ function isTransientAssignmentRevert(err) {
 
 const appliedTasks = new Set();
 const bidPlacedTasks = new Set();
+// Tasks currently being re-driven by resumeAssignedTasks(), so overlapping poll
+// cycles never double-run the same one. resumeFailures caps wasted retries on a
+// task that can't finalize (e.g. past its on-chain deadline) so it can't burn
+// LLM calls forever.
+const resumingTasks = new Set();
+const resumeFailures = new Map();
+const MAX_RESUME_ATTEMPTS = 3;
 
 process.on('disconnect', () => {
   log('parent disconnected, exiting');
@@ -261,7 +276,7 @@ async function fetchWithTimeout(url, options = {}, timeout = 30000) {
 
 // ── Tool builders ────────────────────────────────────────────────────────────
 
-function buildTools() {
+function buildTools(currentTaskHash = null) {
   const tools = {};
 
   // Standard tool for A2A delegation. Description deliberately discourages
@@ -317,8 +332,8 @@ function buildTools() {
         }
 
         // 1. Encrypt the brief; taskHash = sha256(ciphertext) (same as PostTask).
-        const aesKey = genAesKey();
-        const ciphertext = aesGcmEncrypt(Buffer.from(taskDescription, 'utf8'), aesKey);
+        const aesKey = generateAesKey();
+        const ciphertext = aesEncrypt(Buffer.from(taskDescription, 'utf8'), aesKey);
         const taskHash = '0x' + sha256Hex(ciphertext);
 
         // 2. Upload the encrypted blob to 0G Storage.
@@ -339,7 +354,7 @@ function buildTools() {
         for (const ex of executors) {
           if (!ex.publicKey) continue;
           try {
-            wrappedKeys[ex.address.toLowerCase()] = eciesEncryptK1(aesKey, ex.publicKey).toString('hex');
+            wrappedKeys[ex.address.toLowerCase()] = eciesEncrypt(aesKey, ex.publicKey).toString('hex');
           } catch (e) {
             log(`delegate: skip wrap for ${ex.address} (${e.message})`);
           }
@@ -402,7 +417,7 @@ function buildTools() {
                 const addr = (bid.address ?? '').toLowerCase();
                 if (!addr || !bid.publicKey || alreadyWrapped.has(addr)) continue;
                 try {
-                  additions[addr] = eciesEncryptK1(aesKey, bid.publicKey).toString('hex');
+                  additions[addr] = eciesEncrypt(aesKey, bid.publicKey).toString('hex');
                 } catch (e) {
                   log(`delegate: skip late-wrap for ${addr} (${e.message})`);
                 }
@@ -539,7 +554,7 @@ function buildTools() {
           },
           body: JSON.stringify({
             to: args.to,
-            taskId: args.taskId ?? acceptedTaskHash,
+            taskId: args.taskId ?? currentTaskHash,
             subject: args.subject,
             body: args.body,
           }),
@@ -645,6 +660,11 @@ async function releaseTask(taskHash) {
 async function pollAndWork() {
   try {
     sendHeartbeat();
+
+    // Finish any owed work first: tasks we accepted but never submitted (e.g. a
+    // mid-task crash) won't appear in the open feed below, so re-drive them from
+    // our executor index before looking for new work.
+    await resumeAssignedTasks();
 
     const url = `${BACKEND_URL}/api/v1/a2a/tasks`;
     log(`polling ${url}...`);
@@ -754,10 +774,28 @@ async function pollAndWork() {
       return;
     }
 
-    const taskStartedAt = Date.now();
-
+    // Fresh accept: give the fire-and-forget marketplaceAssign a moment to land
+    // before we use the assignment. Resume skips this wait — its assignment was
+    // confirmed long ago (see resumeAssignedTasks).
     log(`waiting for on-chain assignment to confirm for ${acceptedTaskHash.slice(0, 10)}…`);
     await sleep(12_000);
+
+    await runAcceptedTask(acceptedTaskHash, acceptedRootHash, acceptedWrappedKey);
+  } catch (err) {
+    log(`error: ${err.message}`);
+  }
+}
+
+// Drive an already-accepted task (assigned on-chain to THIS worker) through the
+// full pipeline: unwrap key → download + decrypt brief → run LLM → submit
+// evidence → broadcast on-chain → finalize. Shared by the fresh-accept flow
+// above and the resume-assigned-task recovery (resumeAssignedTasks). On-chain
+// guards (worker == caller, task status, deadline) are enforced downstream by
+// /submit and the submitEvidence revert handling, so no separate chain check is
+// needed here.
+async function runAcceptedTask(acceptedTaskHash, acceptedRootHash, acceptedWrappedKey) {
+  try {
+    const taskStartedAt = Date.now();
 
     let briefPlaintext = null;
     if (acceptedRootHash && acceptedWrappedKey && AGENT_PRIVATE_KEY) {
@@ -776,7 +814,7 @@ async function pollAndWork() {
         const b64 = dlJson.data?.blob;
         if (!b64) throw new Error('storage response missing blob');
         const ciphertext = Buffer.from(b64, 'base64');
-        const plaintext = aesGcmDecrypt(ciphertext, aesKey);
+        const plaintext = aesDecrypt(ciphertext, aesKey);
         briefPlaintext = plaintext.toString('utf8');
         log(`decrypted brief for ${acceptedTaskHash.slice(0, 10)}… (${briefPlaintext.length} chars)`);
       } catch (e) {
@@ -819,7 +857,7 @@ async function pollAndWork() {
         model: getModel(),
         system: `[IDENTITY]\n${AGENT_INSTRUCTIONS}\n\n[CAPABILITIES]\nYou have access to tools. If you use a tool, you must synthesize the results into a final text summary for the user. Do not simply output the raw tool result.`,
         prompt: briefPlaintext,
-        tools: buildTools(),
+        tools: buildTools(acceptedTaskHash),
         maxSteps: 10,
       });
 
@@ -1015,6 +1053,65 @@ async function pollAndWork() {
     log(`task ${acceptedTaskHash.slice(0, 10)}… done in ${totalElapsed}s (LLM ${llmElapsed}s)`);
   } catch (err) {
     log(`error: ${err.message}`);
+  }
+}
+
+// Resume tasks this worker already accepted (assigned on-chain to us) but never
+// finished — e.g. the process crashed mid-task (the ECIES decrypt regression did
+// exactly this). The open feed (/a2a/tasks) only lists 'open' tasks, so a
+// crashed-after-accept task is invisible there and would otherwise sit ASSIGNED
+// until the poster's claimTimeout. We poll our own executor index instead and
+// re-drive each owed task through runAcceptedTask.
+async function resumeAssignedTasks() {
+  if (!AGENT_PRIVATE_KEY || !signerWallet) return; // can't decrypt or submit without our key
+  const myAddr = signerWallet.address.toLowerCase();
+
+  let executions;
+  try {
+    const res = await fetchWithTimeout(`${BACKEND_URL}/api/v1/a2a/executions`, {
+      headers: { 'Authorization': `Bearer ${AGENT_PLATFORM_TOKEN}` },
+    });
+    if (!res.ok) return;
+    executions = (await res.json()).data?.executions;
+  } catch (e) {
+    log(`resume: failed to list executions: ${e.message}`);
+    return;
+  }
+  if (!Array.isArray(executions) || executions.length === 0) return;
+
+  for (const item of executions) {
+    const meta = item?.meta;
+    const state = item?.state;
+    if (!meta || !state) continue;
+    // Only tasks we still owe work on: accepted/in_progress, not yet submitted.
+    if (state.status !== 'accepted' && state.status !== 'in_progress') continue;
+
+    const taskHash = meta.taskId;
+    if (!taskHash || resumingTasks.has(taskHash)) continue;
+
+    const wrappedKey = meta.wrappedKeys?.[myAddr];
+    if (!meta.rootHash || !wrappedKey) continue; // no decryptable slice for us
+
+    const attempts = resumeFailures.get(taskHash) ?? 0;
+    if (attempts >= MAX_RESUME_ATTEMPTS) {
+      if (attempts === MAX_RESUME_ATTEMPTS) {
+        resumeFailures.set(taskHash, attempts + 1); // bump past the cap so this logs only once
+        log(`resume: giving up on ${taskHash.slice(0, 10)}… after ${MAX_RESUME_ATTEMPTS} attempts (likely past deadline — poster can claimTimeout)`);
+      }
+      continue;
+    }
+    // A still-'accepted' task on a later poll means the prior run didn't
+    // finalize; count attempts so a hopeless task can't burn LLM calls forever.
+    // A successful run flips it out of this filter, so the counter never matters.
+    resumeFailures.set(taskHash, attempts + 1);
+
+    resumingTasks.add(taskHash);
+    try {
+      log(`resuming assigned task ${taskHash.slice(0, 10)}… (status=${state.status}, attempt ${attempts + 1}/${MAX_RESUME_ATTEMPTS})`);
+      await runAcceptedTask(taskHash, meta.rootHash, wrappedKey);
+    } finally {
+      resumingTasks.delete(taskHash);
+    }
   }
 }
 
