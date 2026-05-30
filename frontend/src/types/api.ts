@@ -59,7 +59,7 @@ export interface OnChainTask {
 /** A2A State tracked in Redis */
 export interface A2ATaskState {
   taskId: string;
-  status: 'open' | 'accepted' | 'in_progress' | 'submitted' | 'verified' | 'failed' | 'cancelled';
+  status: 'open' | 'accepted' | 'in_progress' | 'submitted' | 'awaiting_verification' | 'verified' | 'failed' | 'cancelled';
   executorAddress?: string;
   acceptedAt?: string;
   submittedAt?: string;
@@ -79,10 +79,11 @@ export interface A2ATaskState {
 export interface A2ATaskMeta {
   taskId: string;
   targetExecutorType: 'agent' | 'human';
-  verificationMode: 'manual' | 'auto' | 'oracle';
+  verificationMode: 'manual' | 'auto' | 'oracle' | 'agent';
   verificationCriteria: Record<string, any>;
   requiredCapabilities: string[];
   posterAddress?: string;
+  verifierAddress?: string;
   rootHash?: string;
 }
 

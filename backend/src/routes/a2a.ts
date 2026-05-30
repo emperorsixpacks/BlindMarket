@@ -55,7 +55,7 @@ const submitSchema = z.object({
 const indexTaskSchema = z.object({
   txHash: z.string().regex(/^0x[0-9a-fA-F]{64}$/, 'txHash must be a 32-byte hex string'),
   taskHash: z.string().regex(/^0x[0-9a-fA-F]{64}$/, 'taskHash must be a bytes32 hex string'),
-  verificationMode: z.enum(['manual', 'auto', 'oracle']).optional(),
+  verificationMode: z.enum(['manual', 'auto', 'oracle', 'agent']).optional(),
   verificationCriteria: z
     .object({
       required_fields: z.array(z.string()).optional(),
@@ -83,7 +83,12 @@ const indexTaskSchema = z.object({
         )
         .optional(),
       pass_threshold: z.number().min(0).max(100).optional(),
+      acceptance: z.string().max(4000).optional(),
     })
+    .optional(),
+  verifierAddress: z
+    .string()
+    .regex(/^0x[0-9a-fA-F]{40}$/, 'verifierAddress must be a 0x-prefixed EOA hex string')
     .optional(),
   requiredCapabilities: z
     .array(z.enum(AGENT_CAPABILITIES as unknown as [string, ...string[]]))
@@ -370,6 +375,18 @@ a2aRouter.post('/tasks/:id/accept', requireAuth, async (req: AuthRequest, res, n
           `Need at least one of: ${meta.requiredCapabilities.join(', ')}`,
         );
       }
+    }
+
+    // A poster-designated verifier cannot also execute the task it must judge —
+    // it would later be blocked at /verdict (SELF_VERIFICATION), trapping the
+    // escrow in awaiting_verification with no exit but the poster's claimTimeout.
+    // Refuse the accept up front.
+    if (meta.verifierAddress && meta.verifierAddress.toLowerCase() === address.toLowerCase()) {
+      throw new AppError(
+        403,
+        'IS_VERIFIER',
+        'You are the designated verifier for this task and cannot also execute it',
+      );
     }
 
     const addrLc = address.toLowerCase();
@@ -774,6 +791,25 @@ a2aRouter.post('/tasks/index', requireAuth, async (req: AuthRequest, res, next) 
         )
       : undefined;
 
+    // Agent-verify integrity checks. A task in 'agent' mode is unjudgeable
+    // without a verifier, and a poster verifying their own task defeats the
+    // independent-judge premise (and would let a poster grief the worker).
+    if (data.verificationMode === 'agent') {
+      if (!data.verifierAddress) {
+        throw new AppError(400, 'NO_VERIFIER', "verificationMode='agent' requires verifierAddress");
+      }
+      if (data.verifierAddress.toLowerCase() === address.toLowerCase()) {
+        throw new AppError(400, 'INVALID_VERIFIER', 'The poster cannot be their own verifier');
+      }
+      if (!wrappedKeysNormalized?.[data.verifierAddress.toLowerCase()]) {
+        throw new AppError(
+          400,
+          'VERIFIER_NOT_WRAPPED',
+          'The brief AES key must be ECIES-wrapped to verifierAddress (include it in wrappedKeys) so the verifier can decrypt the task',
+        );
+      }
+    }
+
     await a2aStore.setMeta({
       taskId: taskHash,
       targetExecutorType: 'agent',
@@ -781,6 +817,7 @@ a2aRouter.post('/tasks/index', requireAuth, async (req: AuthRequest, res, next) 
       verificationCriteria: data.verificationCriteria,
       requiredCapabilities: (data.requiredCapabilities ?? []) as AgentCapability[],
       posterAddress: address,
+      verifierAddress: data.verifierAddress?.toLowerCase(),
       rootHash: data.rootHash,
       wrappedKeys: wrappedKeysNormalized,
       keyCustodyBlob: data.keyCustodyBlob,
@@ -1062,6 +1099,23 @@ a2aRouter.post('/tasks/:id/finalize', requireAuth, async (req: AuthRequest, res,
       throw new AppError(400, 'NO_RESULT_DATA', 'No resultData recorded for this task');
     }
 
+    // Agent-verify mode: park for the poster-designated verifier agent. It
+    // decrypts the brief (it holds a wrapped slice), judges the output against
+    // the real task, and posts a verdict to /tasks/:id/verdict — which fires the
+    // settlement bridge. No autoVerify and no bridge call happen here.
+    if (meta.verificationMode === 'agent') {
+      if (!meta.verifierAddress) {
+        throw new AppError(409, 'NO_VERIFIER', 'agent-verify task has no designated verifier');
+      }
+      await a2aStore.updateState(taskHash, { status: 'awaiting_verification' });
+      const body: ApiResponse = {
+        success: true,
+        data: { taskId: taskHash, status: 'awaiting_verification', verifier: meta.verifierAddress },
+      };
+      res.json(body);
+      return;
+    }
+
     // Manual mode: leave state='submitted' and let the poster decide via
     // the /verify endpoint. No on-chain action from the bridge here.
     if (meta.verificationMode !== 'auto' || !meta.verificationCriteria) {
@@ -1200,6 +1254,137 @@ a2aRouter.post('/tasks/:id/verify', requireAuth, async (req: AuthRequest, res, n
     const body: ApiResponse = {
       success: true,
       data: { taskId: taskHash, status: newStatus, verificationResult },
+    };
+    res.json(body);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/v1/a2a/tasks/:id/verdict
+ *
+ * A poster-designated verifier agent (verificationMode='agent') submits its
+ * judgement. The verifier decrypted the brief (it holds a wrapped slice in
+ * meta.wrappedKeys), read the executor's output, and judged correctness
+ * off-chain — the platform never saw the plaintext. We authorize the caller
+ * against meta.verifierAddress, gate on the submitEvidence tx being confirmed
+ * on chain, then fire the SAME settlement bridge as auto/manual verification so
+ * the marketplace signer relays completeVerification. No contract change: the
+ * on-chain verifier role stays with the bridge; only the source of the verdict
+ * changes (an independent agent instead of the lexical autoVerify rubric).
+ */
+a2aRouter.post('/tasks/:id/verdict', requireAuth, async (req: AuthRequest, res, next) => {
+  try {
+    const taskHash = req.params.id as string;
+    const address = req.user!.address;
+    const { passed, reasons } = verifySchema.parse(req.body);
+
+    const meta = await a2aStore.getMeta(taskHash);
+    if (!meta) throw new AppError(404, 'NOT_FOUND', 'Task not found or not A2A-enabled');
+
+    if (meta.verificationMode !== 'agent') {
+      throw new AppError(409, 'WRONG_MODE', 'Task is not in agent-verify mode');
+    }
+    if (!meta.verifierAddress || meta.verifierAddress.toLowerCase() !== address.toLowerCase()) {
+      throw new AppError(403, 'NOT_VERIFIER', "Only the task's designated verifier can submit a verdict");
+    }
+
+    const state = await a2aStore.getState(taskHash);
+    // Idempotent: if a verdict was already recorded (e.g. the verifier's first
+    // POST succeeded but its response was lost and it retried), return 200 with
+    // the recorded result instead of 409 — so the retry doesn't count as a
+    // failure against the verifier's attempt cap.
+    if (state && (state.status === 'verified' || state.status === 'failed') && state.verificationResult) {
+      const body: ApiResponse = {
+        success: true,
+        data: { taskId: taskHash, status: state.status, verificationResult: state.verificationResult, alreadyRecorded: true },
+      };
+      res.json(body);
+      return;
+    }
+    // 'awaiting_verification' is the normal park state after /finalize; accept
+    // 'submitted' too in case the verifier raced ahead of the executor's
+    // /finalize call.
+    if (!state || (state.status !== 'awaiting_verification' && state.status !== 'submitted')) {
+      throw new AppError(
+        409,
+        'INVALID_STATE',
+        `Cannot submit a verdict in state: ${state?.status ?? 'missing'}`,
+      );
+    }
+
+    // No self-verification: the agent that did the work cannot also sign off on
+    // it. (A poster could designate an agent as verifier that then also accepts
+    // the task as executor.) Reject so escrow can't be released on a self-grade.
+    if (
+      state.executorAddress &&
+      state.executorAddress.toLowerCase() === meta.verifierAddress.toLowerCase()
+    ) {
+      throw new AppError(
+        409,
+        'SELF_VERIFICATION',
+        'The executor of a task cannot also be its verifier',
+      );
+    }
+
+    // Gate on the submitEvidence tx being confirmed on-chain (status=Submitted)
+    // BEFORE moving state, so a 503 retry doesn't strand the task in a moved
+    // state. completeVerification reverts unless the contract is at Submitted.
+    const ocId = await getTaskIdByHash(taskHash);
+    if (!ocId) {
+      throw new AppError(503, 'NOT_INDEXED', 'On-chain taskId not yet indexed — retry shortly');
+    }
+    const onChainTask = await escrowService.getTask(Number(ocId));
+    if (onChainTask.status !== 2) { // 2 = Submitted
+      throw new AppError(
+        503,
+        'NOT_SUBMITTED_ON_CHAIN',
+        `SubmitEvidence not yet confirmed on-chain (status=${onChainTask.status}). Retry shortly.`,
+      );
+    }
+
+    const verificationResult = { passed, reasons: reasons ?? [] };
+    const newStatus: 'verified' | 'failed' = passed ? 'verified' : 'failed';
+    await a2aStore.updateState(taskHash, { status: newStatus, verificationResult });
+
+    if (passed && state.executorAddress) {
+      await recordWorkerPayout(taskHash, state.executorAddress);
+    } else if (!passed && state.executorAddress) {
+      await recordWorkerDispute(taskHash, state.executorAddress);
+    }
+
+    // Bridge: marketplace signer calls completeVerification on chain.
+    void settleVerification(taskHash, passed);
+
+    const body: ApiResponse = {
+      success: true,
+      data: { taskId: taskHash, status: newStatus, verificationResult },
+    };
+    res.json(body);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /api/v1/a2a/verifications
+ *
+ * The verifier agent's queue: tasks where the authenticated caller is the
+ * designated verifier (verificationMode='agent') and the work is awaiting a
+ * verdict. Each entry carries meta (rootHash + the caller's wrapped brief slice
+ * in wrappedKeys + verificationCriteria.acceptance) and state.resultData (the
+ * executor's output), so the verifier can decrypt the brief, read the output,
+ * judge, and POST /tasks/:id/verdict.
+ */
+a2aRouter.get('/verifications', requireAuth, async (req: AuthRequest, res, next) => {
+  try {
+    const address = req.user!.address;
+    const tasks = await a2aStore.getVerifierTasks(address);
+    const pending = tasks.filter((t) => t.state.status === 'awaiting_verification');
+    const body: ApiResponse = {
+      success: true,
+      data: { verifications: pending, total: pending.length },
     };
     res.json(body);
   } catch (err) {

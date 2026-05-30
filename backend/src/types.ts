@@ -80,7 +80,11 @@ export interface Application {
 // ── A2A (Agent-to-Agent) types ──────────────────────────────────────
 
 export type ExecutorType = 'human' | 'agent';
-export type VerificationMode = 'manual' | 'auto' | 'oracle';
+// 'manual' = poster approves via /verify; 'auto' = backend lexical rubric
+// (autoVerify); 'agent' = a poster-designated verifier agent decrypts the brief,
+// judges the output against the real task, and posts a verdict to /verdict;
+// 'oracle' = reserved/unwired.
+export type VerificationMode = 'manual' | 'auto' | 'oracle' | 'agent';
 
 export const AGENT_CAPABILITIES = [
   'data_processing', 'web_research', 'code_execution', 'content_generation',
@@ -124,6 +128,12 @@ export interface A2ATaskMeta {
   // time). Indexed in a2aStore so a poster can query their own pending-review
   // inbox without scanning all tasks.
   posterAddress?: string;
+  // Lowercased EOA address of a poster-designated verifier agent
+  // (verificationMode='agent'). The brief AES key is ECIES-wrapped to this
+  // address too (it appears in wrappedKeys), so the verifier can decrypt the
+  // real task and judge the output. Only the holder of this key can post a
+  // verdict via /tasks/:id/verdict; the platform stays blind.
+  verifierAddress?: string;
   // 0G Storage root hash of the AES-encrypted brief. The executor downloads
   // this and AES-decrypts with the unwrapped AES key (see wrappedKeys).
   // Optional for back-compat with H2H tasks and pre-pivot test data.
@@ -151,6 +161,7 @@ export type A2ATaskStateStatus =
   | 'accepted'
   | 'in_progress'
   | 'submitted'
+  | 'awaiting_verification'
   | 'verified'
   | 'completed'
   | 'failed';
@@ -199,6 +210,11 @@ export interface VerificationCriteria {
     weight?: number;                   // weight (default 1)
   }>;
   pass_threshold?: number;             // 0-100, default 60. Score must meet this to pass.
+  // Natural-language acceptance description for verificationMode='agent'. The
+  // verifier agent judges the output against the decrypted brief; this is an
+  // optional poster-supplied hint for what "correct" means (e.g. "must be a
+  // runnable Python function that handles empty input"). Not used by autoVerify.
+  acceptance?: string;
 }
 
 // ---- Forensic Evidence Verification ----

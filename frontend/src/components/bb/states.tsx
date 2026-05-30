@@ -97,7 +97,7 @@ const STATUS_TONE: Record<string, Tone> = {
   assigned: 'warn', accepted: 'warn', in_progress: 'warn', executing: 'warn',
   active: 'warn', paused: 'warn',
   // submitted / verifying — info, awaiting a verdict
-  submitted: 'info', verifying: 'info', pending: 'info',
+  submitted: 'info', verifying: 'info', pending: 'info', awaiting_verification: 'info',
   // done — green
   completed: 'ok', verified: 'ok', settled: 'ok', paid: 'ok', success: 'ok', running: 'ok',
   // failed — red

@@ -156,6 +156,40 @@ testing matrix, TypeDoc site, npm publish, Python port, backend dogfood
 
 ---
 
+## Post-launch upgrade: Trustless on-chain verifier identity
+
+> Status: PLANNED · added 2026-05-30. The poster-designated verifier agent ships
+> today with **relay** settlement (verifier judges off-chain, backend relays
+> `completeVerification`). This upgrade makes verdict settlement trustless.
+
+**Why:** Today the backend holds the single on-chain verifier role, so it is
+*trusted to relay the verdict honestly* — it could in principle settle a task
+without a real verdict. This upgrade makes the contract enforce that only the
+poster-designated verifier can complete the task, so the platform physically
+cannot fake or override a verdict (fully consistent with "no human/platform in
+the loop").
+
+**Scope:**
+- `BlindEscrow.sol`: add `address verifier` to the `Task` struct (today there is
+  only a single global `verifier` slot at L75; `completeVerification` at L316 is
+  `onlyVerifier`). Set it at `createTask`; gate `completeVerification` on
+  `msg.sender == task.verifier` for agent-verify tasks, falling back to the
+  global slot for `auto`/`manual` (backward compatible).
+- Verifier agent (`backend/agents/worker.js`) broadcasts `completeVerification`
+  itself (it already holds a signer) instead of POSTing the verdict for relay;
+  the backend indexes the on-chain event to drive `awaiting_verification →
+  verified/failed` UI state.
+
+**Cost / gate:** contract change → a **mainnet redeploy/migration** (new
+`BlindEscrow` address; existing tasks stay on the old contract) via the multisig
++ `docs/MAINNET-CHECKLIST.md`. Recommended: build + validate on 0G **testnet**,
+then gate the mainnet cutover behind the checklist.
+
+**Reuses (already shipped — no rework):** the verifier agent decrypting +
+LLM-judging the real brief, the `awaiting_verification` state, the
+`/verifications` queue, the PostTask verifier picker, and the TaskDetail verdict
+display.
+
 ## Phase 8: Post-Hackathon — Multi-Chain Expansion
 
 > Not part of hackathon submission. BlindMarket currently runs exclusively on 0G Chain. Multi-chain support is a post-hackathon goal.

@@ -14,13 +14,15 @@ export interface AgentExecutor {
 export interface A2ATaskMeta {
   taskId: string;
   targetExecutorType: 'human' | 'agent';
-  verificationMode: 'manual' | 'auto' | 'oracle';
+  verificationMode: 'manual' | 'auto' | 'oracle' | 'agent';
   verificationCriteria?: {
     required_fields?: string[];
     min_length?: number;
     contains_keywords?: string[];
+    acceptance?: string;
   };
   requiredCapabilities: string[];
+  verifierAddress?: string;
 }
 
 export interface A2ATaskState {

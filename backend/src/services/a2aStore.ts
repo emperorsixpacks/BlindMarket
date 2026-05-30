@@ -25,6 +25,10 @@ const KEY = {
   // Tasks posted by a given address — populated when meta.posterAddress is set.
   // Used by the manual-verify inbox query.
   poster: (addr: string) => `a2a:poster:${addr.toLowerCase()}`,
+  // Tasks a given address is the designated verifier for — populated when
+  // meta.verifierAddress is set (verificationMode='agent'). Used by
+  // getVerifierTasks for the verifier agent's queue.
+  verifier: (addr: string) => `a2a:verifier:${addr.toLowerCase()}`,
 };
 
 export async function setMeta(meta: A2ATaskMeta): Promise<void> {
@@ -53,6 +57,9 @@ export async function setMeta(meta: A2ATaskMeta): Promise<void> {
   }
   if (meta.posterAddress) {
     pipe.sadd(KEY.poster(meta.posterAddress), tid);
+  }
+  if (meta.verifierAddress) {
+    pipe.sadd(KEY.verifier(meta.verifierAddress), tid);
   }
   await pipe.exec();
 }
@@ -159,6 +166,16 @@ export async function updateState(
   // Index by executor when an executorAddress is first set
   if (!existing.executorAddress && updated.executorAddress) {
     pipe.sadd(KEY.executor(updated.executorAddress), finalTid);
+  }
+  // Drop from the verifier index once the verdict is in, so the verifier's
+  // GET /verifications queue doesn't accumulate settled tasks forever. Only
+  // reads meta on the (rare) transition out of awaiting_verification.
+  if (existing.status === 'awaiting_verification' && updated.status !== 'awaiting_verification') {
+    const metaRaw = (await redis.get(KEY.meta(finalTid))) ?? (await redis.get(`a2a:meta:${taskId}`));
+    if (metaRaw) {
+      const meta = JSON.parse(metaRaw) as A2ATaskMeta;
+      if (meta.verifierAddress) pipe.srem(KEY.verifier(meta.verifierAddress), finalTid);
+    }
   }
   await pipe.exec();
   return updated;
@@ -290,6 +307,14 @@ export async function getExecutorTasks(
   address: string,
 ): Promise<Array<{ meta: A2ATaskMeta; state: A2ATaskState }>> {
   return loadTasksByIndex(KEY.executor(address));
+}
+
+/** Get all tasks a specific address is the designated verifier for. Drives the
+ *  verifier agent's queue (verificationMode='agent'). */
+export async function getVerifierTasks(
+  address: string,
+): Promise<Array<{ meta: A2ATaskMeta; state: A2ATaskState }>> {
+  return loadTasksByIndex(KEY.verifier(address));
 }
 
 /** Get all tasks posted by a specific address. Drives the poster's inbox. */

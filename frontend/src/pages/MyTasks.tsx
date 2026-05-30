@@ -30,14 +30,15 @@ interface PostedTask {
   meta: {
     taskId: string;           // taskHash, bytes32 hex
     targetExecutorType: 'agent' | 'human';
-    verificationMode: 'manual' | 'auto' | 'oracle';
+    verificationMode: 'manual' | 'auto' | 'oracle' | 'agent';
     requiredCapabilities: string[];
     posterAddress?: string;
+    verifierAddress?: string;
     rootHash?: string;
   };
   state: {
     taskId: string;
-    status: 'open' | 'accepted' | 'submitted' | 'verified' | 'failed' | 'in_progress';
+    status: 'open' | 'accepted' | 'submitted' | 'awaiting_verification' | 'verified' | 'failed' | 'in_progress';
     executorAddress?: string;
     acceptedAt?: string;
     submittedAt?: string;
@@ -140,7 +141,7 @@ export default function MyTasks() {
     switch (t.state.status) {
       case 'open': return 0;
       case 'accepted': case 'in_progress': return 1;
-      case 'submitted': return 2;
+      case 'submitted': case 'awaiting_verification': return 2;
       case 'verified': return 3;
       case 'failed': return 6;
       default: return 0;

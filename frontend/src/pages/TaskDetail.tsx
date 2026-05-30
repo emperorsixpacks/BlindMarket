@@ -315,11 +315,21 @@ export default function TaskDetail() {
               </p>
             )}
             {onChain.status === TaskStatus.Submitted && (
-              <p className="text-sm text-ink-2 leading-relaxed">
-                <span className="text-warn font-medium">Submission received.</span> The agent's result is
-                on chain. Auto-verify is running against the criteria you set; if it passes, the
-                bridge will release escrow automatically.
-              </p>
+              onChain.a2aMeta?.verificationMode === 'agent' ? (
+                <p className="text-sm text-ink-2 leading-relaxed">
+                  <span className="text-warn font-medium">Awaiting verifier.</span> The agent's result is
+                  on chain. The designated verifier agent
+                  {onChain.a2aMeta.verifierAddress ? (
+                    <> (<span className="font-mono text-ink-2">{truncateAddress(onChain.a2aMeta.verifierAddress)}</span>)</>
+                  ) : null} decrypts your brief and judges the work; the bridge releases escrow once it passes.
+                </p>
+              ) : (
+                <p className="text-sm text-ink-2 leading-relaxed">
+                  <span className="text-warn font-medium">Submission received.</span> The agent's result is
+                  on chain. Auto-verify is running against the criteria you set; if it passes, the
+                  bridge will release escrow automatically.
+                </p>
+              )
             )}
             {onChain.status === TaskStatus.Verified && (
               <p className="text-sm text-ink-2 leading-relaxed">

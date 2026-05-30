@@ -84,7 +84,19 @@ export default function PostTask() {
     // seconds-from-now duration at submit time — the contract takes duration,
     // not an absolute date, so this is a UX layer over the on-chain primitive.
     deadlineAt: DEFAULT_DEADLINE_AT,
+    // Verification: 'auto' = backend length/keyword rubric; 'agent' = a
+    // poster-designated verifier agent that decrypts the brief and judges the
+    // work semantically (the platform stays blind — the key is wrapped to the
+    // verifier, not the platform).
+    verificationMode: 'auto' as 'auto' | 'agent',
+    verifierAddress: '',
+    verifierPublicKey: '',
+    acceptance: '',
   });
+  // Registered agents the poster can designate as a verifier. Fetched from the
+  // public executors list (no auth needed) — we need each agent's publicKey to
+  // ECIES-wrap the brief key to the chosen verifier.
+  const [verifiers, setVerifiers] = useState<Array<{ address: string; publicKey: string; capabilities: string[]; reputation: number }>>([]);
   // Pure A2A surface — every task posted from this UI is an agent-targeted
   // task that auto-verifies on submission. The executor toggle and
   // verification-mode picker are removed; we hardcode the values that drive
@@ -107,6 +119,16 @@ export default function PostTask() {
     trackEvent('post_task_view');
   }, []);
 
+  // Load the list of registered agents for the verifier picker (agent-verify
+  // mode). Public endpoint; empty list just means the picker shows none.
+  useEffect(() => {
+    authedGet<{ executors: Array<{ address: string; publicKey: string; capabilities: string[]; reputation: number }> }>(
+      '/api/v1/a2a/executors',
+    )
+      .then((r) => setVerifiers(r.executors ?? []))
+      .catch(() => { /* picker stays empty; poster can use Auto */ });
+  }, []);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!address || !walletClient) return;
@@ -117,6 +139,15 @@ export default function PostTask() {
 
       if (requiredCaps.length === 0) {
         throw new Error('Pick at least one required capability so executor agents can match your task.');
+      }
+
+      if (form.verificationMode === 'agent') {
+        if (!form.verifierAddress || !form.verifierPublicKey) {
+          throw new Error('Pick a verifier agent (or switch verification to Auto).');
+        }
+        if (address && form.verifierAddress.toLowerCase() === address.toLowerCase()) {
+          throw new Error('You cannot be your own verifier — pick a different agent.');
+        }
       }
 
       // Prefer the identity token (has linked_accounts → backend can derive
@@ -195,6 +226,21 @@ export default function PostTask() {
         `stashed locally for post-hoc bidders`,
       );
 
+      // 4a. Agent-verify: also wrap the AES key to the designated verifier so it
+      //     can decrypt the real brief and judge the work. The verifier usually
+      //     isn't in the capability-matched executor set, so wrap it separately.
+      //     The backend rejects the index unless this slice is present.
+      if (form.verificationMode === 'agent' && form.verifierPublicKey && form.verifierAddress) {
+        try {
+          const wrappedBytes = await eciesEncrypt(key, form.verifierPublicKey);
+          wrappedKeys[form.verifierAddress.toLowerCase()] =
+            Array.from(wrappedBytes, (b) => b.toString(16).padStart(2, '0')).join('');
+          console.log(`[PostTask] AES key wrapped to verifier ${form.verifierAddress.slice(0, 10)}…`);
+        } catch (e) {
+          throw new Error(`Could not wrap the brief to the chosen verifier: ${(e as Error).message}`);
+        }
+      }
+
       // 4b. ALSO seal the AES key to the platform key-custody key, if enabled.
       //     This lets an agent that registers AFTER this post be served a
       //     re-wrapped slice on /accept with no poster present — fixing the
@@ -239,6 +285,17 @@ export default function PostTask() {
         throw new Error('Deadline cannot be more than 90 days out.');
       }
 
+      // Shared verification payload for both the create-tx and the index call.
+      // 'auto' uses the backend length rubric; 'agent' routes to the designated
+      // verifier (criteria carries the optional acceptance hint; verifierAddress
+      // is sent so the backend can authorize the verdict and index the queue).
+      const isAgentVerify = form.verificationMode === 'agent';
+      const verificationMode = isAgentVerify ? ('agent' as const) : ('auto' as const);
+      const verificationCriteria = isAgentVerify
+        ? (form.acceptance.trim() ? { acceptance: form.acceptance.trim() } : undefined)
+        : { min_length: 10 };
+      const verifierAddress = isAgentVerify ? form.verifierAddress.toLowerCase() : undefined;
+
       // 6. Get unsigned tx from backend (with the rootHash + wrappedKeys bundle)
       const taskJson = await authedPost<any>('/api/v1/tasks', {
         taskHash,
@@ -247,13 +304,10 @@ export default function PostTask() {
         category: form.category,
         locationZone: form.locationZone,
         duration: String(durationSecs),
-        // Hardcoded A2A: every task posted from this UI targets agents and
-        // auto-verifies on submission. Settlement bridge closes the on-chain
-        // loop without further input. Posters who want manual review or
-        // human-targeted tasks would call /api/v1/tasks directly.
         targetExecutorType: 'agent' as const,
-        verificationMode: 'auto' as const,
-        verificationCriteria: { min_length: 10 },
+        verificationMode,
+        verificationCriteria,
+        verifierAddress,
         requiredCapabilities: requiredCaps,
         rootHash,
         wrappedKeys,
@@ -276,8 +330,9 @@ export default function PostTask() {
       await authedPost('/api/v1/a2a/tasks/index', {
         txHash,
         taskHash,
-        verificationMode: 'auto' as const,
-        verificationCriteria: { min_length: 10 },
+        verificationMode,
+        verificationCriteria,
+        verifierAddress,
         requiredCapabilities: requiredCaps,
         rootHash,
         wrappedKeys,
@@ -512,18 +567,86 @@ export default function PostTask() {
                 </div>
               </FormField>
 
-              {/* A2A-only flow — explicit info banner replaces the old
-                  executor + verification pickers. Every task posted here
-                  targets an agent and auto-verifies on submission. */}
-              <div className="border border-line bg-surface-2 px-4 py-3 flex gap-2.5">
-                <Icon name="shield" size={16} className="text-cream shrink-0 mt-0.5" />
-                <p className="text-xs text-ink-3 leading-relaxed">
-                  <span className="text-ink-2 font-medium">Auto-verified:</span> tasks posted here are
-                  visible to autonomous agents at <span className="font-mono text-ink-2">/a2a</span>.
-                  Submissions are checked against built-in criteria (minimum length, required fields)
-                  and escrow releases automatically — no further input from you.
-                </p>
-              </div>
+              {/* Verification: 'auto' = backend rubric; 'agent' = a
+                  poster-designated verifier agent that decrypts the brief and
+                  judges the work. Tasks are visible to autonomous agents at /a2a. */}
+              <FormField
+                label="Verification"
+                hint="How the submission is checked before escrow releases."
+              >
+                <div className="flex flex-wrap gap-1.5 mb-3">
+                  {([
+                    ['auto', 'Auto (length / keyword rubric)'],
+                    ['agent', 'Verifier agent (semantic)'],
+                  ] as const).map(([mode, label]) => {
+                    const active = form.verificationMode === mode;
+                    return (
+                      <button
+                        key={mode}
+                        type="button"
+                        onClick={() => setForm(f => ({ ...f, verificationMode: mode }))}
+                        className={`px-2.5 py-1 text-xs border transition-colors ${active
+                          ? 'bg-cream/10 border-cream/40 text-cream'
+                          : 'bg-surface-2 border-line text-ink-3 hover:text-ink-2'
+                          }`}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {form.verificationMode === 'auto' ? (
+                  <p className="text-xs text-ink-3 leading-relaxed">
+                    Submissions are checked against built-in criteria (minimum length, required
+                    fields) and escrow releases automatically — no further input from you.
+                  </p>
+                ) : (
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-xs text-ink-3 mb-1.5">
+                        Verifier agent — decrypts the brief and judges the work
+                      </label>
+                      <select
+                        className="w-full bg-surface-2 border border-line text-ink-2 text-sm px-3 py-2 font-mono focus:border-cream/40 outline-none"
+                        value={form.verifierAddress}
+                        onChange={(e) => {
+                          const v = verifiers.find(x => x.address.toLowerCase() === e.target.value.toLowerCase());
+                          setForm(f => ({ ...f, verifierAddress: v?.address ?? '', verifierPublicKey: v?.publicKey ?? '' }));
+                        }}
+                      >
+                        <option value="">Select a verifier agent…</option>
+                        {verifiers
+                          .filter(v => v.publicKey && v.address.toLowerCase() !== address?.toLowerCase())
+                          .map(v => (
+                            <option key={v.address} value={v.address}>
+                              {v.address.slice(0, 10)}… · rep {v.reputation} · {v.capabilities.slice(0, 3).join(', ')}
+                            </option>
+                          ))}
+                      </select>
+                      {verifiers.filter(v => v.publicKey && v.address.toLowerCase() !== address?.toLowerCase()).length === 0 && (
+                        <p className="mt-1 text-xs text-ink-3">No other registered agents to verify yet — register one or use Auto.</p>
+                      )}
+                    </div>
+                    <FormField label="Acceptance criteria (optional)" hint="What 'correct' means — keep it generic to protect task privacy.">
+                      <FormTextarea
+                        rows={2}
+                        value={form.acceptance}
+                        onChange={e => setForm(f => ({ ...f, acceptance: e.target.value }))}
+                        placeholder="e.g. A runnable Python function that sorts a list and handles the empty case."
+                      />
+                    </FormField>
+                    <div className="flex gap-2.5 border border-warn/30 bg-warn/5 px-3 py-2">
+                      <Icon name="lock" size={14} className="text-warn shrink-0 mt-0.5" />
+                      <p className="text-xs text-ink-3 leading-relaxed">
+                        The verifier agent can read your decrypted brief — pick one you trust. Keep
+                        acceptance criteria generic: specifics can leak task intent even though the
+                        brief stays encrypted from the platform.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </FormField>
             </div>
           </div>
 
