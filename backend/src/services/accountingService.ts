@@ -102,7 +102,6 @@ export function getSummary(addresses: string[], from?: string, to?: string): Tra
 
   let totalEarned = 0;
   let totalFees = 0;
-  let netRevenue = 0;
   let taskCount = 0;
 
   // Only payment-shaped rows ('payment' = worker payout, 'stake_return' =
@@ -115,11 +114,18 @@ export function getSummary(addresses: string[], from?: string, to?: string): Tra
 
   for (const row of rows) {
     if (!INCOME_TYPES.has(row.type)) continue;
-    totalEarned += row.total_amount;
-    totalFees += row.total_fee;
-    netRevenue += row.total_net;
+    totalEarned += row.total_amount ?? 0;
+    totalFees += row.total_fee ?? 0;
     taskCount += row.cnt;
   }
+
+  // Net revenue = gross earnings − platform fees, derived from the two sums
+  // rather than the stored per-row `net`. Earlier payout paths wrote `net`
+  // inconsistently (the A2A path passed an already-net amount and let
+  // recordTransaction subtract the fee again, double-counting it), which made
+  // this card read 0. Deriving it keeps the three numbers internally
+  // consistent regardless of how historical rows were recorded.
+  const netRevenue = totalEarned - totalFees;
 
   return {
     totalEarned: Math.round(totalEarned * 1_000_000) / 1_000_000,

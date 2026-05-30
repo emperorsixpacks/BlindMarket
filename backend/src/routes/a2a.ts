@@ -168,13 +168,21 @@ async function recordWorkerPayout(taskHash: string, executorAddr: string): Promi
       // Mirror the payout into the accounting ledger so the Earnings page can
       // surface it. Native 0G has 18 decimals.
       try {
+        // Ledger convention (must match submissions.ts /verify):
+        //   amount = GROSS escrow (worker share + platform fee)
+        //   fee    = platform fee
+        //   net    = worker take-home = amount − fee = workerShare
+        // Passing `net` explicitly avoids recordTransaction's default of
+        // `amount − fee`, which — when amount was the already-net workerShare —
+        // subtracted the fee a second time and zeroed out Net revenue.
         accountingService.recordTransaction({
           address: executorAddr.toLowerCase(),
           role: 'worker',
           taskId: onChainId,
           type: 'payment',
-          amount: Number(workerShare) / 1e18,
+          amount: Number(task.amount) / 1e18,
           fee: Number(platformFee) / 1e18,
+          net: Number(workerShare) / 1e18,
           status: 'confirmed',
         });
       } catch (acctErr) {

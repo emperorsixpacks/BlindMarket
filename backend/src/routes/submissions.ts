@@ -61,7 +61,11 @@ submissionsRouter.post('/verify', requireAuth, async (req: AuthRequest, res, nex
       const workerAddr = task.worker;
 
       if (passed) {
-        const fee = amount * 0.01; // 1% platform fee
+        // Use the real on-chain platform fee (feeBps, 1500 = 15%) — not a
+        // hardcoded 1% — so the ledger matches what the contract actually
+        // splits. amount is GROSS escrow, net is the worker take-home.
+        const feeBps = await escrowService.feeBps();
+        const fee = amount * (feeBps / 10_000);
         accountingService.recordTransaction({
           address: workerAddr,
           role: 'worker',
