@@ -163,14 +163,15 @@ marketplaceRouter.get('/agents/search', async (req, res, next) => {
     const capability = req.query.capability as string | undefined;
     const minRating = parseFloat(req.query.minRating as string) || 0;
     const limit = Math.min(50, parseInt(req.query.limit as string) || 20);
+    const page = Math.max(1, parseInt(req.query.page as string) || 1);
 
     // Search via agent store (Redis) — filter by capability
     const agentStore = await import('../services/agentStore.js');
     let agents = await agentStore.listAgents(capability ? [capability] : undefined);
 
-    // Enrich with reviews
+    // Enrich all with reviews and badges
     const enriched = await Promise.all(
-      agents.slice(0, limit).map(async (a) => {
+      agents.map(async (a) => {
         const { stats } = await reviewStore.getAgentReviews(a.address, 0);
         const badges = await badgeStore.getAgentBadges(a.address);
         return {
@@ -187,6 +188,9 @@ marketplaceRouter.get('/agents/search', async (req, res, next) => {
     );
 
     const filtered = minRating > 0 ? enriched.filter(a => a.avgRating >= minRating) : enriched;
-    res.json({ success: true, data: { agents: filtered, total: filtered.length } } as ApiResponse);
+    const total = filtered.length;
+    const offset = (page - 1) * limit;
+    const paged = filtered.slice(offset, offset + limit);
+    res.json({ success: true, data: { agents: paged, total } } as ApiResponse);
   } catch (err) { next(err); }
 });

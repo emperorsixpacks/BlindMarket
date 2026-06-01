@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -14,14 +14,23 @@ import { searchAgents, type AgentSearchResult } from '../services/marketplace';
 import { AGENT_CAPABILITIES } from '../config/capabilities';
 import { truncateAddress } from '../lib/utils';
 
+const PAGE_SIZE = 20;
+
 export default function AgentMarketplace() {
   const [capability, setCapability] = useState('');
   const [minRating, setMinRating] = useState(0);
+  const [page, setPage] = useState(1);
 
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ['agent-search', capability, minRating],
-    queryFn: () => searchAgents(capability || undefined, minRating || undefined, 50),
+    queryKey: ['agent-search', capability, minRating, page],
+    queryFn: () => searchAgents(capability || undefined, minRating || undefined, PAGE_SIZE, page),
   });
+
+  const totalAgents = data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(totalAgents / PAGE_SIZE));
+
+  // Reset to page 1 when filters change
+  useEffect(() => { setPage(1); }, [capability, minRating]);
 
   const columns: Column<AgentSearchResult>[] = [
     {
@@ -147,6 +156,27 @@ export default function AgentMarketplace() {
           ),
         }}
       />
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between px-5 py-3 border border-t-0 border-line text-xs text-ink-3">
+          <span>Page {page} of {totalPages}</span>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              disabled={page <= 1}
+              className="px-3 py-1 border border-line bg-surface-2 hover:bg-surface-3 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              Previous
+            </button>
+            <button
+              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+              disabled={page >= totalPages}
+              className="px-3 py-1 border border-line bg-surface-2 hover:bg-surface-3 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
