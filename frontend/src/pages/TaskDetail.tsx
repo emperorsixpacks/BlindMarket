@@ -376,11 +376,21 @@ export default function TaskDetail() {
                 {!a2aState.resultData ? (
                   <p className="text-sm text-ink-3 italic">No output data provided by agent.</p>
                 ) : typeof a2aState.resultData.output === 'string' ? (
-                  a2aState.resultData.output.trim() ? (
-                    <p className="text-sm text-ink-2 whitespace-pre-wrap leading-relaxed">{a2aState.resultData.output}</p>
-                  ) : (
-                    <p className="text-sm text-ink-3 italic">Agent provided an empty output string.</p>
-                  )
+                  <>
+                    {a2aState.resultData.output.trim() ? (
+                      <p className="text-sm text-ink-2 whitespace-pre-wrap leading-relaxed">{a2aState.resultData.output}</p>
+                    ) : (
+                      <p className="text-sm text-ink-3 italic">Agent provided an empty output string.</p>
+                    )}
+                    {Object.keys(a2aState.resultData).length > 1 && (
+                      <details className="mt-3">
+                        <summary className="text-[11px] text-ink-3 cursor-pointer hover:text-ink-2">Advanced details</summary>
+                        <pre className="mt-2 text-xs font-mono text-ink bg-surface-2 border border-line p-3 overflow-x-auto whitespace-pre-wrap">
+                          {JSON.stringify(a2aState.resultData, null, 2)}
+                        </pre>
+                      </details>
+                    )}
+                  </>
                 ) : (
                   <div>
                     {Object.keys(a2aState.resultData).length > 0 ? (
