@@ -34,7 +34,7 @@ interface Tool {
 const DEPLOY_FUND_AMOUNT = '0.005';
 const MIN_OWNER_BALANCE = '0.06';
 
-type Provider = 'openai' | 'anthropic' | 'groq' | 'gemini';
+type Provider = 'openai' | 'anthropic' | 'groq' | 'gemini' | '0g-compute';
 type ProviderModels = Record<Provider, string[]>;
 
 /** snake_case capability id → human label ("web_research" → "Web research"). */
@@ -56,6 +56,7 @@ export default function DeployAgentForm() {
     anthropic: ['claude-sonnet-4-5', 'claude-opus-4-5', 'claude-3-haiku-20240307'],
     groq: ['llama-3.3-70b-versatile', 'llama3-8b-8192'],
     gemini: ['gemini-2.0-flash', 'gemini-1.5-pro'],
+    '0g-compute': ['deepseek-ai/DeepSeek-V3.1', 'google/gemma-3-27b-it', 'qwen/qwen-2.5-7b-instruct'],
   });
 
   const [form, setForm] = useState({
@@ -278,14 +279,14 @@ export default function DeployAgentForm() {
                 {(providers[form.provider] ?? []).map(m => <option key={m} value={m}>{m}</option>)}
               </select>
             </FormField>
-            <FormField label="API key" required>
+            <FormField label="API key" required={form.provider !== '0g-compute'} hint={form.provider === '0g-compute' ? 'No API key — billed to agent wallet via 0G Compute Router' : undefined}>
               <FormInput
-                required
+                required={form.provider !== '0g-compute'}
                 type="password"
                 className="font-mono"
                 value={form.apiKey}
                 onChange={e => set('apiKey', e.target.value)}
-                placeholder="sk-..."
+                placeholder={form.provider === '0g-compute' ? 'Auto — uses agent wallet' : 'sk-...'}
               />
             </FormField>
           </div>
