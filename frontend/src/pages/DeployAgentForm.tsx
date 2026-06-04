@@ -230,13 +230,7 @@ export default function DeployAgentForm() {
   const minBal = minOwnerBalance(form.provider);
   const hasEnoughForDeploy = ownerBalanceEther >= parseFloat(minBal);
 
-  const OG_PRICING: Record<string, { promptUsd: string; completionUsd: string }> = {
-    'deepseek-ai/DeepSeek-V3.1': { promptUsd: '0.00000025256', completionUsd: '0.00000037928' },
-    'google/gemma-3-27b-it': { promptUsd: '0.0000001', completionUsd: '0.0000004' },
-    'qwen/qwen-2.5-7b-instruct': { promptUsd: '0.00000001936', completionUsd: '0.0000001892' },
-  };
-
-  const ogPrice = OG_PRICING[form.model] ?? null;
+  // model IDs don't match router API — no per-model pricing shown
 
   useEffect(() => {
     get<ProviderModels>('/api/v1/agents/providers')
@@ -506,19 +500,13 @@ export default function DeployAgentForm() {
                 <Icon name="bolt" size={14} />
                 <span>0G Compute — billed to agent wallet</span>
               </div>
-              {ogPrice && (
-                <div className="text-ink-2 space-y-1">
-                  <p>
-                    <span className="font-mono text-ink">{form.model}</span> pricing:
-                    {' '}{(+ogPrice.promptUsd * 1000).toFixed(4)}¢ / 1K prompt tokens,
-                    {' '}{(+ogPrice.completionUsd * 1000).toFixed(4)}¢ / 1K completion tokens.
-                  </p>
-                  <p>
-                    Wallet will receive <span className="font-mono text-ink">{OG_COMPUTE_DEPOSIT} 0G</span> —
-                    covers the ledger account deposit (~1.0 0G, one-time) plus gas for thousands of requests.
-                  </p>
-                </div>
-              )}
+              <div className="text-ink-2 space-y-1">
+                <p>
+                  Wallet receives <span className="font-mono text-ink">{OG_COMPUTE_DEPOSIT} 0G</span> —
+                  covers the one-time ledger deposit (~1.0 0G) plus gas for many requests.
+                  Cost per request varies by model (pennies per 100K tokens).
+                </p>
+              </div>
             </div>
           )}
         </div>
