@@ -38,6 +38,22 @@ type Provider = 'openai' | 'anthropic' | 'groq' | 'gemini' | '0g-compute';
 type ProviderModels = Record<Provider, string[]>;
 
 /** snake_case capability id → human label ("web_research" → "Web research"). */
+function renderMarkdown(text: string): string {
+  const escaped = text
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const html = escaped
+    .replace(/^### (.+)$/gm, '<h4 class="text-sm font-semibold mt-3 mb-1">$1</h4>')
+    .replace(/^## (.+)$/gm, '<h3 class="text-base font-semibold mt-4 mb-1.5">$1</h3>')
+    .replace(/^# (.+)$/gm, '<h2 class="text-lg font-semibold mt-4 mb-2">$1</h2>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/`([^`]+)`/g, '<code class="bg-surface-1 px-1 rounded text-xs font-mono">$1</code>')
+    .replace(/^- (.+)$/gm, '<li class="ml-4 list-disc text-sm">$1</li>')
+    .replace(/\n{2,}/g, '</p><p class="text-sm leading-relaxed">')
+    .replace(/\n/g, '<br>');
+  return `<p class="text-sm leading-relaxed">${html}</p>`;
+}
+
 function capLabel(cap: string): string {
   const t = cap.replace(/_/g, ' ');
   return t.charAt(0).toUpperCase() + t.slice(1);
@@ -67,6 +83,7 @@ export default function DeployAgentForm() {
     apiKey: '',
   });
 
+  const [previewTab, setPreviewTab] = useState<'write' | 'preview'>('write');
   const [tools, setTools] = useState<Tool[]>([]);
   const [capabilities, setCapabilities] = useState<string[]>([]);
   const [newTool, setNewTool] = useState<Tool>({
@@ -255,13 +272,32 @@ export default function DeployAgentForm() {
             </FormField>
           </div>
           <FormField label="Instructions" required className="mt-5">
-            <FormTextarea
-              required
-              rows={4}
-              value={form.instructions}
-              onChange={e => set('instructions', e.target.value)}
-              placeholder="Describe what this agent does, how it should behave, and what tasks it should pick up."
-            />
+            <div className="border border-line divide-y divide-line">
+              <div className="flex text-xs">
+                <button type="button" onClick={() => setPreviewTab('write')}
+                  className={`px-3 py-1.5 ${previewTab === 'write' ? 'bg-cream/10 text-cream' : 'text-ink-3 hover:text-ink'}`}>
+                  Write
+                </button>
+                <button type="button" onClick={() => setPreviewTab('preview')}
+                  className={`px-3 py-1.5 ${previewTab === 'preview' ? 'bg-cream/10 text-cream' : 'text-ink-3 hover:text-ink'}`}>
+                  Preview
+                </button>
+                <span className="px-3 py-1.5 text-ink-4 ml-auto text-[11px]">Markdown supported</span>
+              </div>
+              {previewTab === 'write' ? (
+                <textarea
+                  required
+                  rows={10}
+                  value={form.instructions}
+                  onChange={e => set('instructions', e.target.value)}
+                  placeholder="Describe what this agent does, how it should behave, and what tasks it should pick up."
+                  className="w-full px-3 py-2.5 bg-surface-2 text-ink text-sm focus:border-cream resize-y leading-relaxed font-mono border-0 outline-none"
+                />
+              ) : (
+                <div className="px-3 py-2.5 min-h-[200px] bg-surface-1 text-ink text-sm leading-relaxed"
+                  dangerouslySetInnerHTML={{ __html: renderMarkdown(form.instructions || '*Nothing written yet*') }} />
+              )}
+            </div>
           </FormField>
         </div>
 
