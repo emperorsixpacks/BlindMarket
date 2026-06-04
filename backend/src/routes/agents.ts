@@ -135,7 +135,7 @@ const DeploySchema = z.object({
   instructions: z.string().min(1),
   provider: z.enum(PROVIDERS),
   model: z.string().min(1),
-  apiKey: z.string().min(1),
+  apiKey: z.string().optional().default(''),
   // An agent with no capabilities can never accept a task that declares
   // requiredCapabilities — the /a2a/accept handler 403s with CAPABILITY_MISMATCH.
   // Deploying with caps=[] produces an agent that looks "running" but is a no-op,

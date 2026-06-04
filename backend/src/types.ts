@@ -320,13 +320,14 @@ export type AgentTool = HttpAgentTool | McpAgentTool | JsAgentTool;
 // ── Deployed Agent types ─────────────────────────────────────────────────────
 
 export type AgentStatus = 'stopped' | 'running' | 'paused';
-export type LLMProvider = 'openai' | 'anthropic' | 'groq' | 'gemini';
+export type LLMProvider = 'openai' | 'anthropic' | 'groq' | 'gemini' | '0g-compute';
 
 export const LLM_PROVIDER_MODELS: Record<LLMProvider, string[]> = {
-  openai:    ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo'],
-  anthropic: ['claude-opus-4-5', 'claude-sonnet-4-5', 'claude-3-haiku-20240307'],
-  groq:      ['llama-3.3-70b-versatile', 'llama3-8b-8192', 'mixtral-8x7b-32768'],
-  gemini:    ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'],
+  openai:      ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo'],
+  anthropic:   ['claude-opus-4-5', 'claude-sonnet-4-5', 'claude-3-haiku-20240307'],
+  groq:        ['llama-3.3-70b-versatile', 'llama3-8b-8192', 'mixtral-8x7b-32768'],
+  gemini:      ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'],
+  '0g-compute': ['deepseek-ai/DeepSeek-V3.1', 'qwen/qwen-2.5-7b-instruct', 'google/gemma-3-27b-it'],
 };
 
 export interface DeployedAgent {
