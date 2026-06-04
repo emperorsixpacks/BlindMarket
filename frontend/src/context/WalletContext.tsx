@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from 'react';
 import { ethers } from 'ethers';
 import { usePrivy, useWallets } from '@privy-io/react-auth';
 import { OG_CHAIN_CONFIG, OG_CHAIN_ID } from '../config/constants';
@@ -38,6 +38,8 @@ function PrivyWalletProvider({ children }: { children: ReactNode }) {
   const address = wallet?.address ?? null;
   const isCorrectChain = chainId === OG_CHAIN_ID;
 
+  const switchedRef = useRef(false);
+
   useEffect(() => {
     let cancelled = false;
     async function sync() {
@@ -47,7 +49,25 @@ function PrivyWalletProvider({ children }: { children: ReactNode }) {
         const bp = new ethers.BrowserProvider(ethereumProvider);
         const s = await bp.getSigner();
         const network = await bp.getNetwork();
-        if (!cancelled) { setProvider(bp); setSigner(s); setChainId(Number(network.chainId)); }
+        if (!cancelled) {
+          setProvider(bp); setSigner(s); setChainId(Number(network.chainId));
+          // Auto-switch to the correct chain if the wallet is on the wrong one.
+          // switchedRef prevents infinite loops if the chain switch succeeds.
+          if (Number(network.chainId) !== OG_CHAIN_ID && !switchedRef.current) {
+            switchedRef.current = true;
+            try {
+              await wallet.switchChain(OG_CHAIN_ID);
+            } catch {
+              // Switch failed — try adding the chain first, then switch again.
+              try {
+                const eth = await wallet.getEthereumProvider();
+                await eth.request({ method: 'wallet_addEthereumChain', params: [OG_CHAIN_CONFIG] });
+                await wallet.switchChain(OG_CHAIN_ID);
+              } catch { /* chain add also failed — user will see the banner */ }
+              switchedRef.current = false;
+            }
+          }
+        }
       } catch (err) { console.error('Failed to sync wallet provider:', err); }
     }
     sync();
@@ -56,7 +76,22 @@ function PrivyWalletProvider({ children }: { children: ReactNode }) {
 
   const switchChain = useCallback(async () => {
     if (!wallet) return;
-    try { await wallet.switchChain(OG_CHAIN_ID); } catch (err) { console.error('Failed to switch chain:', err); }
+    try {
+      await wallet.switchChain(OG_CHAIN_ID);
+    } catch (err: unknown) {
+      // If the wallet doesn't know the chain (e.g. 4902 / chain not added),
+      // add it via wallet_addEthereumChain then retry the switch.
+      const code = (err as { code?: number | string }).code;
+      if (code === 4902 || code === 'UNSUPPORTED_CHAIN_ID' || String(code).includes('4902')) {
+        try {
+          const eth = await wallet.getEthereumProvider();
+          await eth.request({ method: 'wallet_addEthereumChain', params: [OG_CHAIN_CONFIG] });
+          await wallet.switchChain(OG_CHAIN_ID);
+        } catch (addErr) { console.error('Failed to add 0G chain:', addErr); }
+      } else {
+        console.error('Failed to switch chain:', err);
+      }
+    }
   }, [wallet]);
 
   /**
