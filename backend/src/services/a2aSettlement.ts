@@ -115,6 +115,24 @@ export async function settleAssignment(taskHash: string, executor: string): Prom
 
     let tx: ContractTransactionResponse;
     try {
+      // Simulate the call first via staticCall to get a proper revert reason
+      // before broadcasting. The raw tx error from ethers often says "unknown
+      // custom error" when the ABI doesn't include the error definition,
+      // making debugging impossible. staticCall surfaces the actual reason.
+      try {
+        await escrowAsMarketplace!.marketplaceAssign.staticCall(BigInt(taskId), executor);
+      } catch (staticErr) {
+        if (isAlreadySettled(staticErr)) {
+          console.log(`[a2aSettlement] assignment skipped — task ${taskId} already past Funded state`);
+          return;
+        }
+        // Re-throw — the staticCall failed for a real reason. Log the message
+        // so the operator sees e.g. "NotVerifier" or "SelfAssignment" instead
+        // of "unknown custom error".
+        console.error(`[a2aSettlement] staticCall failed for taskId=${taskId}: ${(staticErr as Error).message}`);
+        throw staticErr;
+      }
+
       // Serialise on the signer's tx queue so concurrent /accept requests
       // can't collide on the nonce. Each call here waits for the previous
       // marketplaceAssign / completeVerification to at least broadcast
