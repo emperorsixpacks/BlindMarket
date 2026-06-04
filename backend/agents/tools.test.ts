@@ -12,6 +12,8 @@ import { describe, it, expect, vi } from 'vitest';
 vi.mock('ai', () => ({
   tool: (def) => def,
   generateText: vi.fn(),
+  generateObject: vi.fn(),
+  stepCountIs: (n) => n,
 }));
 
 vi.mock('@ai-sdk/openai', () => ({
@@ -41,6 +43,9 @@ process.env.AGENT_MODEL = 'gpt-4o';
 process.env.AGENT_PROVIDER = 'openai';
 process.env.AGENT_PRIVATE_KEY = '0x' + '11'.repeat(32);
 process.env.AGENT_INSTRUCTIONS = 'You are a test agent.';
+// The worker reads process.env.AGENT_CAPABILITIES / AGENT_TOOLS (not the *_RAW
+// const names). NODE_ENV=test keeps the imported module from auto-starting.
+process.env.NODE_ENV = 'test';
 process.env.AGENT_CAPABILITIES = '["data_processing"]';
 process.env.AGENT_TOOLS = JSON.stringify([
   {

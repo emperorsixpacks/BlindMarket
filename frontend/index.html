@@ -31,9 +31,19 @@
   </head>
   <body>
     <script>
-      // Apply saved theme before first paint to prevent flash
-      const t = localStorage.getItem('bb.theme') || 'dark';
-      document.documentElement.setAttribute('data-theme', t);
+      // Apply saved theme before first paint to prevent flash.
+      // Wrapped in an IIFE so it declares NO global identifiers: a bare
+      // top-level `const t` here lives in the page's global lexical scope and
+      // throws "Identifier 't' has already been declared" if a browser
+      // extension injected into the page also declares a global `t` (wallet
+      // extensions / SES lockdown do this). The IIFE + try/catch makes the
+      // theme set collision-proof and safe when localStorage is unavailable.
+      (function () {
+        try {
+          var theme = localStorage.getItem('bb.theme') || 'dark';
+          document.documentElement.setAttribute('data-theme', theme);
+        } catch (e) {}
+      })();
     </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
