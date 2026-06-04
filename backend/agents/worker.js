@@ -112,6 +112,44 @@ const DELEGATE_REWARD_OG = process.env.DELEGATE_REWARD_OG ?? '0.0001';
 // it can still pay gas for its own submitEvidence on the task it's working.
 const DELEGATE_GAS_RESERVE_OG = process.env.DELEGATE_GAS_RESERVE_OG ?? '0.005';
 
+// 0G Compute Router — when no AGENT_API_KEY is set, the agent uses its own
+// wallet to pay for inference on the 0G Compute Network (decentralized AI).
+// Models available: qwen/qwen-2.5-7b-instruct, deepseek-ai/DeepSeek-V3.1, etc.
+// The agent wallet must have 0G tokens to cover per-call costs.
+const OG_COMPUTE_ENABLED = !AGENT_API_KEY && !!AGENT_PRIVATE_KEY;
+const OG_COMPUTE_ROUTER_BASE_URL = 'https://router-api.0g.ai/v1';
+
+// Lazy-initialised 0G Compute broker + provider address. Initialised once when
+// the first LLM call hits the fetch interceptor below.
+let _ogComputeBroker = null;
+let _ogComputeProvider = null;
+
+async function ensureOgComputeBroker() {
+  if (_ogComputeBroker) return _ogComputeBroker;
+  if (!OG_COMPUTE_ENABLED) return null;
+  try {
+    const { ethers } = await import('ethers');
+    const { createRequire } = await import('module');
+    const req = createRequire(import.meta.url);
+    const mod = req('@0gfoundation/0g-compute-ts-sdk');
+    const createBroker = mod.createZGComputeNetworkBroker;
+    const rpcProvider = new ethers.JsonRpcProvider(OG_RPC_URL, OG_CHAIN_ID, {
+      batchMaxCount: 1, staticNetwork: true,
+    });
+    const wallet = new ethers.Wallet(AGENT_PRIVATE_KEY, rpcProvider);
+    _ogComputeBroker = await createBroker(wallet);
+    const services = await _ogComputeBroker.inference.listService();
+    if (services?.length > 0) {
+      _ogComputeProvider = services[0].provider || services[0].providerAddress;
+      try { await _ogComputeBroker.inference.acknowledgeProviderSigner(_ogComputeProvider); } catch {}
+    }
+    log(`0G Compute: broker ready, provider=${_ogComputeProvider?.slice(0, 10)}…`);
+  } catch (e) {
+    log(`0G Compute: broker init failed — ${e.message}`);
+  }
+  return _ogComputeBroker;
+}
+
 // ── Logging helpers ──────────────────────────────────────────────────────
 
 function nowStamp() {
@@ -237,6 +275,9 @@ try {
 }
 
 function getModel() {
+  if (OG_COMPUTE_ENABLED) {
+    return createOpenAI({ baseURL: OG_COMPUTE_ROUTER_BASE_URL, apiKey: '0g-compute' })(AGENT_MODEL);
+  }
   switch (AGENT_PROVIDER) {
     case 'anthropic': return createAnthropic({ apiKey: AGENT_API_KEY })(AGENT_MODEL);
     case 'groq': return createGroq({ apiKey: AGENT_API_KEY })(AGENT_MODEL);
@@ -245,7 +286,7 @@ function getModel() {
   }
 }
 
-log(`started | provider=${AGENT_PROVIDER} model=${AGENT_MODEL} tools=${agentTools.length}`);
+log(`started | provider=${OG_COMPUTE_ENABLED ? '0g-compute' : AGENT_PROVIDER} model=${AGENT_MODEL} tools=${agentTools.length}`);
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -829,15 +870,53 @@ async function runAcceptedTask(acceptedTaskHash, acceptedRootHash, acceptedWrapp
     let text = '';
     let llmElapsed = '0.0';
     let toolCalls = [];
+    let ogFetchRestore = null;
 
     try {
+      const model = getModel();
+      // 0G Compute Router: wrap fetch to inject per-request auth headers.
+      // The broker SDK generates single-use headers signed by the agent wallet,
+      // authorising payment for each inference call from the agent's balance.
+      if (OG_COMPUTE_ENABLED) {
+        const broker = await ensureOgComputeBroker();
+        if (broker && _ogComputeProvider) {
+          const origFetch = globalThis.fetch;
+          const providerAddr = _ogComputeProvider;
+          ogFetchRestore = () => { globalThis.fetch = origFetch; };
+          globalThis.fetch = async (...args) => {
+            const reqUrl = typeof args[0] === 'string' ? args[0] : args[0]?.url;
+            if (reqUrl?.includes(OG_COMPUTE_ROUTER_BASE_URL)) {
+              const reqInit = { ...(args[1] || {}) };
+              let body = reqInit.body;
+              let promptText = '';
+              try {
+                if (typeof body === 'string') {
+                  const parsed = JSON.parse(body);
+                  promptText = parsed?.messages?.map(m => m.content).join('\n') || body;
+                }
+              } catch {}
+              try {
+                const headers = await broker.inference.getRequestHeaders(providerAddr, promptText || 'inference');
+                reqInit.headers = { ...reqInit.headers, ...headers };
+              } catch (hdrErr) {
+                log(`0G Compute: header generation failed — ${hdrErr.message}`);
+              }
+              return origFetch(args[0], reqInit);
+            }
+            return origFetch(args[0], args[1]);
+          };
+        }
+      }
+
       const result = await generateText({
-        model: getModel(),
+        model,
         system: `[IDENTITY]\n${AGENT_INSTRUCTIONS}\n\n[CAPABILITIES]\nYou have access to tools. If you use a tool, you must synthesize the results into a final text summary for the user. Do not simply output the raw tool result.`,
         prompt: briefPlaintext,
         tools: buildTools(acceptedTaskHash),
         maxSteps: 10,
       });
+
+      if (ogFetchRestore) ogFetchRestore();
 
       text = result.text;
       llmElapsed = ((Date.now() - llmStartedAt) / 1000).toFixed(1);
@@ -878,6 +957,7 @@ async function runAcceptedTask(acceptedTaskHash, acceptedRootHash, acceptedWrapp
         log(`LLM response: "${text.slice(0, 200)}${text.length > 200 ? '…' : ''}"`);
       }
     } catch (llmErr) {
+      if (ogFetchRestore) ogFetchRestore();
       log(`LLM ERROR for ${acceptedTaskHash.slice(0, 10)}…: ${llmErr.message}`);
       if (llmErr.stack) log(`LLM Stack: ${llmErr.stack.split('\n').slice(0, 3).join(' | ')}`);
       text = `Error during LLM execution: ${llmErr.message}`;
