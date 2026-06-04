@@ -31,8 +31,17 @@ interface Tool {
   body: { contentType: 'application/json' | 'application/x-www-form-urlencoded'; payload: string };
 }
 
+const OG_COMPUTE_DEPOSIT = '1.5';
 const DEPLOY_FUND_AMOUNT = '0.005';
-const MIN_OWNER_BALANCE = '0.06';
+
+function fundAmount(provider: string) {
+  return provider === '0g-compute' ? OG_COMPUTE_DEPOSIT : DEPLOY_FUND_AMOUNT;
+}
+
+function minOwnerBalance(provider: string) {
+  const amt = parseFloat(fundAmount(provider));
+  return (amt + 0.055).toFixed(3);
+}
 
 type Provider = 'openai' | 'anthropic' | 'groq' | 'gemini' | '0g-compute';
 type ProviderModels = Record<Provider, string[]>;
@@ -217,7 +226,32 @@ export default function DeployAgentForm() {
     query: { enabled: !!address },
   });
   const ownerBalanceEther = ownerBalance ? parseFloat(formatEther(ownerBalance.value)) : 0;
-  const hasEnoughForDeploy = ownerBalanceEther >= parseFloat(MIN_OWNER_BALANCE);
+  const deployFundAmt = fundAmount(form.provider);
+  const minBal = minOwnerBalance(form.provider);
+  const hasEnoughForDeploy = ownerBalanceEther >= parseFloat(minBal);
+
+  const [ogPricing, setOgPricing] = useState<Record<string, { prompt: string; completion: string; promptUsd: string; completionUsd: string }>>({});
+
+  useEffect(() => {
+    fetch('https://router-api.0g.ai/v1/models')
+      .then(r => r.json())
+      .then(res => {
+        const map: typeof ogPricing = {};
+        for (const m of res.data || []) {
+          map[m.id] = {
+            prompt: m.pricing?.prompt ?? '',
+            completion: m.pricing?.completion ?? '',
+            promptUsd: m.pricing_usd?.prompt ?? '',
+            completionUsd: m.pricing_usd?.completion ?? '',
+          };
+        }
+        setOgPricing(map);
+      })
+      .catch(() => {});
+  }, []);
+
+  const ogModelId = form.model;
+  const ogPrice = ogPricing[ogModelId];
 
   useEffect(() => {
     get<ProviderModels>('/api/v1/agents/providers')
@@ -298,7 +332,7 @@ export default function DeployAgentForm() {
         const signer = await provider.getSigner();
         const tx = await signer.sendTransaction({
           to: data.walletAddress,
-          value: parseEther(DEPLOY_FUND_AMOUNT),
+          value: parseEther(deployFundAmt),
         });
         await tx.wait();
       } catch (fundErr) {
@@ -337,13 +371,13 @@ export default function DeployAgentForm() {
               <p>
                 This agent's wallet has <span className="font-mono">0 0G</span> and can't submit
                 evidence on-chain. Open the agent's page and click "Top up gas" to send{' '}
-                <span className="font-mono">{DEPLOY_FUND_AMOUNT} 0G</span> from your wallet.
+                <span className="font-mono">{form.provider === '0g-compute' ? OG_COMPUTE_DEPOSIT : DEPLOY_FUND_AMOUNT} 0G</span> from your wallet.
               </p>
             </div>
           ) : (
             <div className="flex items-center justify-center gap-2 text-[13px] text-ok">
               <Icon name="check" size={15} />
-              <span>Funded with <span className="font-mono">{DEPLOY_FUND_AMOUNT} 0G</span> for gas</span>
+              <span>Funded with <span className="font-mono">{deployFundAmt} 0G</span> for gas</span>
             </div>
           )}
 
@@ -356,8 +390,32 @@ export default function DeployAgentForm() {
               onClick={() => { setStatus('idle'); setAgentId(''); setFundingSkipped(false); }}
             />
           </div>
+          </div>
+
+          {form.provider === '0g-compute' && (
+            <div className="mt-4 border border-cream/20 bg-cream/[0.03] px-4 py-3.5 text-[13px] leading-relaxed space-y-2">
+              <div className="flex items-center gap-2 font-semibold text-cream">
+                <Icon name="bolt" size={14} />
+                <span>0G Compute — billed to agent wallet</span>
+              </div>
+              {ogPrice ? (
+                <div className="text-ink-2 space-y-1">
+                  <p>
+                    <span className="font-mono text-ink">{form.model}</span> pricing:
+                    {' '}{(+ogPrice.promptUsd * 1000).toFixed(4)}¢ / 1K prompt tokens,
+                    {' '}{(+ogPrice.completionUsd * 1000).toFixed(4)}¢ / 1K completion tokens.
+                  </p>
+                  <p>
+                    Wallet will receive <span className="font-mono text-ink">{OG_COMPUTE_DEPOSIT} 0G</span> —
+                    covers the ledger account deposit (~1.0 0G, one-time) plus gas for thousands of requests.
+                  </p>
+                </div>
+              ) : (
+                <p className="text-ink-3">Fetching pricing…</p>
+              )}
+            </div>
+          )}
         </div>
-      </div>
     );
   }
 
@@ -480,6 +538,30 @@ export default function DeployAgentForm() {
               />
             </FormField>
           </div>
+
+          {form.provider === '0g-compute' && (
+            <div className="mt-4 border border-cream/20 bg-cream/[0.03] px-4 py-3.5 text-[13px] leading-relaxed space-y-2">
+              <div className="flex items-center gap-2 font-semibold text-cream">
+                <Icon name="bolt" size={14} />
+                <span>0G Compute — billed to agent wallet</span>
+              </div>
+              {ogPrice ? (
+                <div className="text-ink-2 space-y-1">
+                  <p>
+                    <span className="font-mono text-ink">{form.model}</span> pricing:
+                    {' '}{(+ogPrice.promptUsd * 1000).toFixed(4)}¢ / 1K prompt tokens,
+                    {' '}{(+ogPrice.completionUsd * 1000).toFixed(4)}¢ / 1K completion tokens.
+                  </p>
+                  <p>
+                    Wallet will receive <span className="font-mono text-ink">{OG_COMPUTE_DEPOSIT} 0G</span> —
+                    covers the ledger account deposit (~1.0 0G, one-time) plus gas for thousands of requests.
+                  </p>
+                </div>
+              ) : (
+                <p className="text-ink-3">Fetching pricing…</p>
+              )}
+            </div>
+          )}
         </div>
 
         {/* 03 — Capabilities */}
@@ -654,7 +736,7 @@ export default function DeployAgentForm() {
                 </div>
                 <ol className="text-[13px] text-ink-2 leading-relaxed space-y-1 list-decimal list-inside">
                   <li>Sign a message — no gas, derives your owner public key for encryption.</li>
-                  <li>Send <span className="font-mono">{DEPLOY_FUND_AMOUNT} 0G</span> to the new agent wallet — pays for its gas.</li>
+                  <li>Send <span className="font-mono">{deployFundAmt} 0G</span> to the new agent wallet{form.provider === '0g-compute' ? ' — covers ledger deposit + gas for 0G Compute' : ' — pays for its gas'}.</li>
                 </ol>
                 <div className="text-[13px] text-ink-3 pt-0.5">
                   Your wallet balance:{' '}
@@ -671,7 +753,7 @@ export default function DeployAgentForm() {
                     <span>Not enough 0G to fund the agent</span>
                   </div>
                   <p>
-                    You need at least <span className="font-mono">{MIN_OWNER_BALANCE} 0G</span> (fund
+                    You need at least <span className="font-mono">{minBal} 0G</span> (fund
                     amount plus gas for the transfer). Top up your wallet at{' '}
                     <a href="https://faucet.0g.ai" target="_blank" rel="noreferrer" className="text-cream underline">faucet.0g.ai</a>
                     {' '}then refresh.
@@ -688,7 +770,7 @@ export default function DeployAgentForm() {
                     status === 'deploying'
                       ? 'Deploying…'
                       : status === 'funding'
-                        ? `Funding agent with ${DEPLOY_FUND_AMOUNT} 0G…`
+                        ? `Funding agent with ${deployFundAmt} 0G…`
                         : 'Deploy + fund agent →'
                   }
                 />
