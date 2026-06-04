@@ -128,7 +128,7 @@ async function ensureOgComputeBroker() {
   if (_ogComputeBroker) return _ogComputeBroker;
   if (!OG_COMPUTE_ENABLED) return null;
   try {
-    const { ethers } = await import('ethers');
+    const { ethers, formatEther } = await import('ethers');
     const { createRequire } = await import('module');
     const req = createRequire(import.meta.url);
     const mod = req('@0gfoundation/0g-compute-ts-sdk');
@@ -142,6 +142,31 @@ async function ensureOgComputeBroker() {
     if (services?.length > 0) {
       _ogComputeProvider = services[0].provider || services[0].providerAddress;
       try { await _ogComputeBroker.inference.acknowledgeProviderSigner(_ogComputeProvider); } catch {}
+      // Ensure the wallet has a ledger account on the compute network. The
+      // first deposit creates the account automatically. If the account already
+      // exists the contract rejects with LedgerExists — that's fine, skip it.
+      try {
+        const bal = await rpcProvider.getBalance(wallet.address);
+        const depositAmount = '1.0';
+        const depositWei = ethers.parseEther(depositAmount);
+        const minBalance = ethers.parseEther('0.5');
+        if (bal >= depositWei + minBalance) {
+          log(`0G Compute: depositing ${depositAmount} 0G to create ledger account...`);
+          await _ogComputeBroker.ledger.depositFund(depositAmount);
+          log(`0G Compute: ledger account created, starting auto-funding...`);
+          await _ogComputeBroker.inference.startAutoFunding(_ogComputeProvider);
+        } else {
+          log(`0G Compute: wallet balance ${formatEther(bal)} 0G too low to deposit ${depositAmount} 0G — inference may fail`);
+        }
+      } catch (ledgerErr) {
+        const m = (ledgerErr?.message || '').toLowerCase();
+        if (m.includes('ledgerexists')) {
+          // Account already exists — just start auto-funding
+          try { await _ogComputeBroker.inference.startAutoFunding(_ogComputeProvider); } catch {}
+        } else {
+          log(`0G Compute: ledger setup failed — ${ledgerErr.message}`);
+        }
+      }
     }
     log(`0G Compute: broker ready, provider=${_ogComputeProvider?.slice(0, 10)}…`);
   } catch (e) {
