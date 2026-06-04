@@ -279,14 +279,15 @@ export default function DeployAgentForm() {
                 {(providers[form.provider] ?? []).map(m => <option key={m} value={m}>{m}</option>)}
               </select>
             </FormField>
-            <FormField label="API key" required={form.provider !== '0g-compute'} hint={form.provider === '0g-compute' ? 'No API key — billed to agent wallet via 0G Compute Router' : undefined}>
+            <FormField label="API key" required={form.provider !== '0g-compute'} hint={form.provider === '0g-compute' ? 'No API key needed — billed to agent wallet via 0G Compute Router' : undefined}>
               <FormInput
                 required={form.provider !== '0g-compute'}
                 type="password"
-                className="font-mono"
+                className={`font-mono ${form.provider === '0g-compute' ? 'opacity-40' : ''}`}
                 value={form.apiKey}
                 onChange={e => set('apiKey', e.target.value)}
                 placeholder={form.provider === '0g-compute' ? 'Auto — uses agent wallet' : 'sk-...'}
+                disabled={form.provider === '0g-compute'}
               />
             </FormField>
           </div>

@@ -74,7 +74,19 @@ export function AgentMesh({ className = '' }: { className?: string }) {
     const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 100);
     camera.position.z = 16.5;
 
-    const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+    // WebGL can be unavailable: Brave/Firefox fingerprint shields, hardware
+    // acceleration switched off, locked-down or headless browsers, old GPUs.
+    // The WebGLRenderer constructor THROWS in that case — and with no error
+    // boundary above this component, that throw unmounts the entire React tree
+    // and blanks the whole landing page. Degrade gracefully instead: skip the
+    // globe and let the page render on its plain background.
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+    } catch (err) {
+      console.warn('[AgentMesh] WebGL unavailable — skipping globe background.', err);
+      return;
+    }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setClearColor(0x000000, 0); // transparent — page bg shows through
     mount.appendChild(renderer.domElement);

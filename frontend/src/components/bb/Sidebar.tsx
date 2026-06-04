@@ -64,9 +64,29 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   const location = useLocation();
   const { data: stats, refetch } = useQuery({
     queryKey: ['stats'],
-    queryFn: () => get<{ openTasks: number; activeAgents: number; activeValidators: number }>('/api/v1/stats'),
+    queryFn: () => get<{
+      openTasks: number;
+      activeAgents: number;
+      activeValidators: number;
+      // Platform totals surfaced in the live-stats widget below. Optional so a
+      // stale backend that predates these fields still renders (shows "—").
+      completedTasks?: number;
+      registeredUsers?: number;
+      totalAgents?: number;
+      activeWorkers?: number;
+    }>('/api/v1/stats'),
   });
   useSocket('platform', { 'stats:update': () => refetch() });
+
+  // Live platform counts for the footer widget. `activeWorkers` is the backend
+  // alias of activeAgents (agents currently running); totalAgents is all agents
+  // ever deployed. Labelled distinctly so the two don't read as the same stat.
+  const liveStats: Array<{ label: string; value?: number; live?: boolean }> = [
+    { label: 'Completed tasks', value: stats?.completedTasks },
+    { label: 'Registered users', value: stats?.registeredUsers },
+    { label: 'Agents running', value: stats?.activeWorkers ?? stats?.activeAgents, live: true },
+    { label: 'Agents deployed', value: stats?.totalAgents },
+  ];
 
   const isActive = (item: NavItem) =>
     item.exact
@@ -149,6 +169,28 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           ))}
         </nav>
 
+        {/* Live platform stats — compact widget. Shares the ['stats'] query
+            above, so it updates live off the same stats:update socket event. */}
+        <div className="px-5 py-4 border-t border-line">
+          <div className="flex items-center gap-1.5 mb-2.5">
+            <span className="w-1.5 h-1.5 bg-ok inline-block animate-bb-pulse" />
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-3">Live platform</span>
+          </div>
+          <dl className="space-y-1.5">
+            {liveStats.map((s) => (
+              <div key={s.label} className="flex items-center justify-between gap-2">
+                <dt className="flex items-center gap-1.5 min-w-0 text-[11px] text-ink-3">
+                  {s.live && <span className="w-1 h-1 bg-ok inline-block shrink-0 animate-bb-pulse" />}
+                  <span className="truncate">{s.label}</span>
+                </dt>
+                <dd className="text-[11px] font-medium text-ink tabular-nums shrink-0">
+                  {s.value == null ? '—' : s.value.toLocaleString()}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+
         {/* Footer status */}
         <div className="px-5 py-4 border-t border-line space-y-1.5">
           <div className="flex items-center gap-1.5">
@@ -157,7 +199,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           </div>
           {stats && (
             <div className="text-[11px] text-ink-3">
-              {stats.activeAgents} agents · {stats.openTasks} open tasks
+              {stats.openTasks} open tasks
             </div>
           )}
           <div className="text-[10px] font-mono text-ink-3 pt-0.5">v0.4.2{!isMainnet && ' · testnet'}</div>
