@@ -175,43 +175,33 @@ async function ensureOgComputeBroker() {
   return _ogComputeBroker;
 }
 
-// Transiently wrap globalThis.fetch to inject 0G Compute per-request wallet-auth
-// headers (the broker signs single-use headers authorising payment for each
-// inference call from the agent's balance). The AI SDK exposes no per-call header
-// hook, so we patch fetch around the inference call, filtered by the router URL.
-// Returns a restore function (call it in a finally), or null when 0G Compute is
-// off / the broker is unavailable. Used by BOTH the executor (runAcceptedTask)
-// and the verifier (judgeTask) so 0G Compute auth is applied consistently.
-// Callers run sequentially within a poll tick, so installs do not nest.
-async function installOgComputeFetchAuth() {
-  if (!OG_COMPUTE_ENABLED) return null;
+// Custom fetch for the 0G Compute Router model. The router authorises payment per
+// inference call via single-use headers the broker signs with the agent wallet;
+// the AI SDK exposes no per-call header hook, so we inject them here. Passed to
+// createOpenAI({ fetch }) so it scopes to that model's OWN requests — no global
+// fetch mutation, which keeps it concurrency-safe across overlapping poll ticks.
+// Passes the request through unauthenticated when the broker is unavailable.
+/** @type {typeof globalThis.fetch} */
+const ogComputeFetch = async (input, init) => {
+  const reqInit = { ...(init || {}) };
   const broker = await ensureOgComputeBroker();
-  if (!broker || !_ogComputeProvider) return null;
-  const origFetch = globalThis.fetch;
-  const providerAddr = _ogComputeProvider;
-  globalThis.fetch = async (...args) => {
-    const reqUrl = typeof args[0] === 'string' ? args[0] : args[0]?.url;
-    if (reqUrl?.includes(OG_COMPUTE_ROUTER_BASE_URL)) {
-      const reqInit = { ...(args[1] || {}) };
-      let promptText = '';
-      try {
-        if (typeof reqInit.body === 'string') {
-          const parsed = JSON.parse(reqInit.body);
-          promptText = parsed?.messages?.map(m => m.content).join('\n') || reqInit.body;
-        }
-      } catch {}
-      try {
-        const headers = await broker.inference.getRequestHeaders(providerAddr, promptText || 'inference');
-        reqInit.headers = { ...reqInit.headers, ...headers };
-      } catch (hdrErr) {
-        log(`0G Compute: header generation failed — ${hdrErr.message}`);
+  if (broker && _ogComputeProvider) {
+    let promptText = '';
+    try {
+      if (typeof reqInit.body === 'string') {
+        const parsed = JSON.parse(reqInit.body);
+        promptText = parsed?.messages?.map(m => m.content).join('\n') || reqInit.body;
       }
-      return origFetch(args[0], reqInit);
+    } catch {}
+    try {
+      const headers = await broker.inference.getRequestHeaders(_ogComputeProvider, promptText || 'inference');
+      reqInit.headers = { ...reqInit.headers, ...headers };
+    } catch (hdrErr) {
+      log(`0G Compute: header generation failed — ${hdrErr.message}`);
     }
-    return origFetch(args[0], args[1]);
-  };
-  return () => { globalThis.fetch = origFetch; };
-}
+  }
+  return globalThis.fetch(input, reqInit);
+};
 
 // ── Logging helpers ──────────────────────────────────────────────────────
 
@@ -342,7 +332,12 @@ function getModel() {
     // OpenAI-COMPATIBLE router: 0G serves models over /chat/completions. Use
     // .chat() explicitly — the callable provider (@ai-sdk/openai v3) defaults to
     // the OpenAI Responses API (/responses), which the router does not implement.
-    return createOpenAI({ baseURL: OG_COMPUTE_ROUTER_BASE_URL, apiKey: '0g-compute' }).chat(AGENT_MODEL);
+    // ogComputeFetch injects the per-request wallet-auth headers for each call.
+    return createOpenAI({
+      baseURL: OG_COMPUTE_ROUTER_BASE_URL,
+      apiKey: '0g-compute',
+      fetch: ogComputeFetch,
+    }).chat(AGENT_MODEL);
   }
   switch (AGENT_PROVIDER) {
     case 'anthropic': return createAnthropic({ apiKey: AGENT_API_KEY })(AGENT_MODEL);
@@ -937,13 +932,11 @@ async function runAcceptedTask(acceptedTaskHash, acceptedRootHash, acceptedWrapp
     let text = '';
     let llmElapsed = '0.0';
     let toolCalls = [];
-    let ogFetchRestore = null;
 
     try {
+      // 0G Compute auth is handled by the model's own fetch (see getModel /
+      // ogComputeFetch); other providers authenticate with their API key.
       const model = getModel();
-      // 0G Compute Router: inject per-request wallet-auth headers around the
-      // inference call (shared with the verifier path — see judgeTask).
-      ogFetchRestore = await installOgComputeFetchAuth();
 
       const result = await generateText({
         model,
@@ -955,8 +948,6 @@ async function runAcceptedTask(acceptedTaskHash, acceptedRootHash, acceptedWrapp
         // tool results into a final answer. Allow up to 10 tool-loop steps.
         stopWhen: stepCountIs(10),
       });
-
-      if (ogFetchRestore) ogFetchRestore();
 
       text = result.text;
       llmElapsed = ((Date.now() - llmStartedAt) / 1000).toFixed(1);
@@ -1212,11 +1203,9 @@ async function judgeTask(brief, output, acceptance) {
     String(output).slice(0, 12000),
   ].join('\n');
 
-  let ogFetchRestore = null;
   try {
-    // Verifier inference uses the same model as the executor; on 0G Compute that
-    // also needs the per-request wallet-auth headers, else the router rejects it.
-    ogFetchRestore = await installOgComputeFetchAuth();
+    // Verifier inference uses the same model as the executor; on 0G Compute the
+    // model's own fetch injects the per-request wallet-auth headers (see getModel).
     const { object } = await generateObject({
       model: getModel(),
       schema: z.object({
@@ -1234,8 +1223,6 @@ async function judgeTask(brief, output, acceptance) {
     // awaiting_verification and is retried on the next poll, bounded by the cap.
     log(`verify: judge model error (will not post a verdict): ${e.message}`);
     return null;
-  } finally {
-    if (ogFetchRestore) ogFetchRestore();
   }
 }
 
