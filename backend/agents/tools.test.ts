@@ -41,8 +41,8 @@ process.env.AGENT_MODEL = 'gpt-4o';
 process.env.AGENT_PROVIDER = 'openai';
 process.env.AGENT_PRIVATE_KEY = '0x' + '11'.repeat(32);
 process.env.AGENT_INSTRUCTIONS = 'You are a test agent.';
-process.env.AGENT_CAPABILITIES_RAW = '["data_processing"]';
-process.env.AGENT_TOOLS_RAW = JSON.stringify([
+process.env.AGENT_CAPABILITIES = '["data_processing"]';
+process.env.AGENT_TOOLS = JSON.stringify([
   {
     type: 'http',
     name: 'weather_lookup',
