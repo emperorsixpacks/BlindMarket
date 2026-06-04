@@ -232,6 +232,34 @@ export default function DeployAgentForm() {
 
   // model IDs don't match router API — no per-model pricing shown
 
+  const [ogPricing, setOgPricing] = useState<Record<string, { promptUsd: string; completionUsd: string } | null>>({});
+
+  useEffect(() => {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 2000);
+    fetch('https://router-api.0g.ai/v1/models', { signal: ctrl.signal })
+      .then(r => r.json())
+      .then(res => {
+        const routerModels = (res.data || []) as Array<{ id: string; pricing_usd?: { prompt: string; completion: string } }>;
+        const map: Record<string, { promptUsd: string; completionUsd: string } | null> = {};
+        for (const modelId of (providers['0g-compute'] ?? [])) {
+          const parts = modelId.toLowerCase().split(/[/\-_.]+/).filter(Boolean);
+          let best: { id: string; score: number; promptUsd: string; completionUsd: string } | null = null;
+          for (const rm of routerModels) {
+            const rid = rm.id.toLowerCase();
+            const score = parts.reduce((s, p) => s + (rid.includes(p) ? 1 : 0), 0);
+            if (score > (best?.score ?? -1) && rm.pricing_usd) {
+              best = { id: rm.id, score, promptUsd: rm.pricing_usd.prompt, completionUsd: rm.pricing_usd.completion };
+            }
+          }
+          map[modelId] = best ? { promptUsd: best.promptUsd, completionUsd: best.completionUsd } : null;
+        }
+        setOgPricing(map);
+      })
+      .catch(() => {});
+    return () => { clearTimeout(t); ctrl.abort(); };
+  }, []);
+
   useEffect(() => {
     get<ProviderModels>('/api/v1/agents/providers')
       .then(setProviders)
@@ -501,10 +529,18 @@ export default function DeployAgentForm() {
                 <span>0G Compute — billed to agent wallet</span>
               </div>
               <div className="text-ink-2 space-y-1">
+                {ogPricing[form.model] ? (
+                  <p>
+                    <span className="font-mono text-ink">{form.model}</span> pricing:
+                    {' '}{(+ogPricing[form.model]!.promptUsd * 1000).toFixed(3)}¢ / 1K prompt tokens,
+                    {' '}{(+ogPricing[form.model]!.completionUsd * 1000).toFixed(3)}¢ / 1K completion tokens.
+                  </p>
+                ) : ogPricing[form.model] === undefined ? (
+                  <p className="text-ink-3">Loading pricing…</p>
+                ) : null}
                 <p>
                   Wallet receives <span className="font-mono text-ink">{OG_COMPUTE_DEPOSIT} 0G</span> —
                   covers the one-time ledger deposit (~1.0 0G) plus gas for many requests.
-                  Cost per request varies by model (pennies per 100K tokens).
                 </p>
               </div>
             </div>
