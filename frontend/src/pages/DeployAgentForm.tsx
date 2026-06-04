@@ -230,28 +230,13 @@ export default function DeployAgentForm() {
   const minBal = minOwnerBalance(form.provider);
   const hasEnoughForDeploy = ownerBalanceEther >= parseFloat(minBal);
 
-  const [ogPricing, setOgPricing] = useState<Record<string, { prompt: string; completion: string; promptUsd: string; completionUsd: string }>>({});
+  const OG_PRICING: Record<string, { promptUsd: string; completionUsd: string }> = {
+    'deepseek-ai/DeepSeek-V3.1': { promptUsd: '0.00000025256', completionUsd: '0.00000037928' },
+    'google/gemma-3-27b-it': { promptUsd: '0.0000001', completionUsd: '0.0000004' },
+    'qwen/qwen-2.5-7b-instruct': { promptUsd: '0.00000001936', completionUsd: '0.0000001892' },
+  };
 
-  useEffect(() => {
-    fetch('https://router-api.0g.ai/v1/models')
-      .then(r => r.json())
-      .then(res => {
-        const map: typeof ogPricing = {};
-        for (const m of res.data || []) {
-          map[m.id] = {
-            prompt: m.pricing?.prompt ?? '',
-            completion: m.pricing?.completion ?? '',
-            promptUsd: m.pricing_usd?.prompt ?? '',
-            completionUsd: m.pricing_usd?.completion ?? '',
-          };
-        }
-        setOgPricing(map);
-      })
-      .catch(() => {});
-  }, []);
-
-  const ogModelId = form.model;
-  const ogPrice = ogPricing[ogModelId];
+  const ogPrice = OG_PRICING[form.model] ?? null;
 
   useEffect(() => {
     get<ProviderModels>('/api/v1/agents/providers')
@@ -391,30 +376,6 @@ export default function DeployAgentForm() {
             />
           </div>
           </div>
-
-          {form.provider === '0g-compute' && (
-            <div className="mt-4 border border-cream/20 bg-cream/[0.03] px-4 py-3.5 text-[13px] leading-relaxed space-y-2">
-              <div className="flex items-center gap-2 font-semibold text-cream">
-                <Icon name="bolt" size={14} />
-                <span>0G Compute — billed to agent wallet</span>
-              </div>
-              {ogPrice ? (
-                <div className="text-ink-2 space-y-1">
-                  <p>
-                    <span className="font-mono text-ink">{form.model}</span> pricing:
-                    {' '}{(+ogPrice.promptUsd * 1000).toFixed(4)}¢ / 1K prompt tokens,
-                    {' '}{(+ogPrice.completionUsd * 1000).toFixed(4)}¢ / 1K completion tokens.
-                  </p>
-                  <p>
-                    Wallet will receive <span className="font-mono text-ink">{OG_COMPUTE_DEPOSIT} 0G</span> —
-                    covers the ledger account deposit (~1.0 0G, one-time) plus gas for thousands of requests.
-                  </p>
-                </div>
-              ) : (
-                <p className="text-ink-3">Fetching pricing…</p>
-              )}
-            </div>
-          )}
         </div>
     );
   }
@@ -545,7 +506,7 @@ export default function DeployAgentForm() {
                 <Icon name="bolt" size={14} />
                 <span>0G Compute — billed to agent wallet</span>
               </div>
-              {ogPrice ? (
+              {ogPrice && (
                 <div className="text-ink-2 space-y-1">
                   <p>
                     <span className="font-mono text-ink">{form.model}</span> pricing:
@@ -557,8 +518,6 @@ export default function DeployAgentForm() {
                     covers the ledger account deposit (~1.0 0G, one-time) plus gas for thousands of requests.
                   </p>
                 </div>
-              ) : (
-                <p className="text-ink-3">Fetching pricing…</p>
               )}
             </div>
           )}
