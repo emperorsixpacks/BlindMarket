@@ -8,11 +8,9 @@ import {
   StatusTag,
   FormField,
   FormInput,
-  DataTable,
   LoadingState,
   EmptyState,
   ErrorState,
-  type Column,
 } from '../components/bb';
 import {
   useAgentProfile,
@@ -62,13 +60,7 @@ export default function A2ADashboard() {
   const taskLabel = (e: { meta: { taskId: string }; onChain?: { taskId?: string } }) =>
     e.onChain?.taskId ? `#${e.onChain.taskId}` : `${e.meta.taskId.slice(0, 10)}…`;
 
-  const browseColumns: Column<BrowseRow>[] = [
-    { key: 'id', header: 'Task', width: '110px', primary: true, cell: (r) => <span className="font-mono text-ink-2">{taskLabel(r)}</span> },
-    { key: 'caps', header: 'Required caps', width: '1fr', cell: (r) => <span className="text-ink-2">{r.meta.requiredCapabilities.join(', ') || '—'}</span> },
-    { key: 'verify', header: 'Verification', width: '130px', cell: (r) => <Tag tone="neutral">{r.meta.verificationMode}</Tag> },
-    { key: 'target', header: 'Target', width: '110px', cell: (r) => <span className="text-ink-3">{r.meta.targetExecutorType}</span> },
-    { key: 'status', header: 'Status', width: '110px', trailing: true, cell: (r) => <StatusTag status={r.state.status} /> },
-  ];
+  const browseRows = (browse?.tasks as BrowseRow[] | undefined) ?? [];
 
   const agentCardPreview = `{
   "name": "${displayName || '<agent_name>'}",
@@ -105,26 +97,75 @@ export default function A2ADashboard() {
       </div>
 
       {activeTab === 'browse' && (
-        <DataTable<BrowseRow>
-          columns={browseColumns}
-          rows={browse?.tasks as BrowseRow[] | undefined}
-          rowKey={(r) => r.meta.taskId}
-          rowHref={(r) => `/tasks/${taskId(r)}`}
-          loading={browseLoading}
-          loadingLabel="Loading tasks…"
-          error={browseError}
-          onRetry={() => refetchBrowse()}
-          empty={{
-            icon: 'briefcase',
-            title: 'No open tasks right now',
-            description: 'Agent-targeted tasks will appear here as they’re posted.',
-            action: (
+        browseLoading ? (
+          <LoadingState label="Loading tasks…" />
+        ) : browseError ? (
+          <ErrorState title="Couldn't load tasks" onRetry={() => refetchBrowse()} />
+        ) : browseRows.length === 0 ? (
+          <EmptyState
+            icon="briefcase"
+            title="No open tasks right now"
+            description="Agent-targeted tasks will appear here as they’re posted."
+            action={
               <Link to="/tasks/new">
                 <Button variant="outline" label="Post a task" size="sm" />
               </Link>
-            ),
-          }}
-        />
+            }
+          />
+        ) : (
+          /* Connected card grid — shared 1px borders, sharp corners (BlindMarket
+             grid idiom). Each card is a single Link to the task detail. */
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 border-t border-l border-line">
+            {browseRows.map((r) => (
+              <Link
+                key={r.meta.taskId}
+                to={`/tasks/${taskId(r)}`}
+                className="group flex flex-col gap-4 border-b border-r border-line p-5 min-h-[180px] hover:bg-surface-2 transition-colors"
+              >
+                {/* identifier + status */}
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-2xs uppercase tracking-wider text-ink-3">Task</div>
+                    <div className="font-mono text-sm text-ink truncate group-hover:text-cream transition-colors">
+                      {taskLabel(r)}
+                    </div>
+                  </div>
+                  <StatusTag status={r.state.status} />
+                </div>
+
+                {/* required capabilities */}
+                <div className="flex flex-wrap gap-1.5">
+                  {r.meta.requiredCapabilities.length > 0 ? (
+                    r.meta.requiredCapabilities.map((c) => (
+                      <Tag key={c} tone="neutral">{c}</Tag>
+                    ))
+                  ) : (
+                    <span className="text-xs text-ink-3">No specific capabilities</span>
+                  )}
+                </div>
+
+                <div className="flex-1" />
+
+                {/* footer: meta + view affordance */}
+                <div className="flex items-end justify-between border-t border-line -mx-5 px-5 pt-3">
+                  <div className="flex gap-5">
+                    <div>
+                      <div className="text-2xs uppercase tracking-wider text-ink-3">Verify</div>
+                      <div className="text-xs text-ink-2 capitalize">{r.meta.verificationMode}</div>
+                    </div>
+                    <div>
+                      <div className="text-2xs uppercase tracking-wider text-ink-3">Target</div>
+                      <div className="text-xs text-ink-2 capitalize">{r.meta.targetExecutorType}</div>
+                    </div>
+                  </div>
+                  <span className="text-2xs uppercase tracking-wider text-ink-3 group-hover:text-cream transition-colors">
+                    View →
+                  </span>
+                </div>
+              </Link>
+            ))}
+          </div>
+        )
       )}
 
       {activeTab === 'executions' && (
