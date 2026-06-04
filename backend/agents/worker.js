@@ -150,6 +150,43 @@ async function ensureOgComputeBroker() {
   return _ogComputeBroker;
 }
 
+// Wrap an LLM call with a fetch interceptor that injects 0G Compute auth
+// headers signed by the agent wallet. Falls through to the original fetch
+// for non-0G-Compute requests so other HTTP traffic is unaffected.
+async function withOgComputeAuth(fn) {
+  if (!OG_COMPUTE_ENABLED) return fn();
+  const broker = await ensureOgComputeBroker();
+  if (!broker || !_ogComputeProvider) return fn();
+  const origFetch = globalThis.fetch;
+  const providerAddr = _ogComputeProvider;
+  globalThis.fetch = async (...args) => {
+    const reqUrl = typeof args[0] === 'string' ? args[0] : args[0]?.url;
+    if (reqUrl?.includes(OG_COMPUTE_ROUTER_BASE_URL)) {
+      const reqInit = { ...(args[1] || {}) };
+      let promptText = '';
+      try {
+        if (typeof reqInit.body === 'string') {
+          const parsed = JSON.parse(reqInit.body);
+          promptText = parsed?.messages?.map(m => m.content).join('\n') || reqInit.body;
+        }
+      } catch {}
+      try {
+        const headers = await broker.inference.getRequestHeaders(providerAddr, promptText || 'inference');
+        reqInit.headers = { ...reqInit.headers, ...headers };
+      } catch (hdrErr) {
+        log(`0G Compute: header generation failed — ${hdrErr.message}`);
+      }
+      return origFetch(args[0], reqInit);
+    }
+    return origFetch(args[0], args[1]);
+  };
+  try {
+    return await fn();
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+}
+
 // ── Logging helpers ──────────────────────────────────────────────────────
 
 function nowStamp() {
@@ -276,7 +313,7 @@ try {
 
 function getModel() {
   if (OG_COMPUTE_ENABLED) {
-    return createOpenAI({ baseURL: OG_COMPUTE_ROUTER_BASE_URL, apiKey: '0g-compute' })(AGENT_MODEL);
+    return createOpenAI({ baseURL: OG_COMPUTE_ROUTER_BASE_URL, apiKey: '0g-compute' }).chat(AGENT_MODEL);
   }
   switch (AGENT_PROVIDER) {
     case 'anthropic': return createAnthropic({ apiKey: AGENT_API_KEY })(AGENT_MODEL);
@@ -870,53 +907,17 @@ async function runAcceptedTask(acceptedTaskHash, acceptedRootHash, acceptedWrapp
     let text = '';
     let llmElapsed = '0.0';
     let toolCalls = [];
-    let ogFetchRestore = null;
 
     try {
       const model = getModel();
-      // 0G Compute Router: wrap fetch to inject per-request auth headers.
-      // The broker SDK generates single-use headers signed by the agent wallet,
-      // authorising payment for each inference call from the agent's balance.
-      if (OG_COMPUTE_ENABLED) {
-        const broker = await ensureOgComputeBroker();
-        if (broker && _ogComputeProvider) {
-          const origFetch = globalThis.fetch;
-          const providerAddr = _ogComputeProvider;
-          ogFetchRestore = () => { globalThis.fetch = origFetch; };
-          globalThis.fetch = async (...args) => {
-            const reqUrl = typeof args[0] === 'string' ? args[0] : args[0]?.url;
-            if (reqUrl?.includes(OG_COMPUTE_ROUTER_BASE_URL)) {
-              const reqInit = { ...(args[1] || {}) };
-              let body = reqInit.body;
-              let promptText = '';
-              try {
-                if (typeof body === 'string') {
-                  const parsed = JSON.parse(body);
-                  promptText = parsed?.messages?.map(m => m.content).join('\n') || body;
-                }
-              } catch {}
-              try {
-                const headers = await broker.inference.getRequestHeaders(providerAddr, promptText || 'inference');
-                reqInit.headers = { ...reqInit.headers, ...headers };
-              } catch (hdrErr) {
-                log(`0G Compute: header generation failed — ${hdrErr.message}`);
-              }
-              return origFetch(args[0], reqInit);
-            }
-            return origFetch(args[0], args[1]);
-          };
-        }
-      }
 
-      const result = await generateText({
+      const result = await withOgComputeAuth(() => generateText({
         model,
         system: `[IDENTITY]\n${AGENT_INSTRUCTIONS}\n\n[CAPABILITIES]\nYou have access to tools. If you use a tool, you must synthesize the results into a final text summary for the user. Do not simply output the raw tool result.`,
         prompt: briefPlaintext,
         tools: buildTools(acceptedTaskHash),
         maxSteps: 10,
-      });
-
-      if (ogFetchRestore) ogFetchRestore();
+      }));
 
       text = result.text;
       llmElapsed = ((Date.now() - llmStartedAt) / 1000).toFixed(1);
@@ -957,7 +958,6 @@ async function runAcceptedTask(acceptedTaskHash, acceptedRootHash, acceptedWrapp
         log(`LLM response: "${text.slice(0, 200)}${text.length > 200 ? '…' : ''}"`);
       }
     } catch (llmErr) {
-      if (ogFetchRestore) ogFetchRestore();
       log(`LLM ERROR for ${acceptedTaskHash.slice(0, 10)}…: ${llmErr.message}`);
       if (llmErr.stack) log(`LLM Stack: ${llmErr.stack.split('\n').slice(0, 3).join(' | ')}`);
       text = `Error during LLM execution: ${llmErr.message}`;
@@ -1171,7 +1171,7 @@ async function judgeTask(brief, output, acceptance) {
   ].join('\n');
 
   try {
-    const { object } = await generateObject({
+    const { object } = await withOgComputeAuth(() => generateObject({
       model: getModel(),
       schema: z.object({
         passed: z.boolean(),
@@ -1179,7 +1179,7 @@ async function judgeTask(brief, output, acceptance) {
       }),
       system,
       prompt,
-    });
+    }));
     return { passed: !!object.passed, reasons: Array.isArray(object.reasons) ? object.reasons : [] };
   } catch (e) {
     // Could-not-judge (model outage, rate limit, malformed structured output).
@@ -1391,6 +1391,8 @@ async function ensureRegisteredAsA2AExecutor() {
     log(`a2a register error: ${e.message}`);
   }
 }
+
+export { buildTools };
 
 (async () => {
   await ensureRegisteredAsA2AExecutor();
