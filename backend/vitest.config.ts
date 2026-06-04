@@ -3,7 +3,7 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     environment: 'node',
-    include: ['src/**/*.test.ts'],
+    include: ['src/**/*.test.ts', 'agents/**/*.test.ts'],
     // config.ts calls required('PRIVY_APP_ID') at module load. We mock every
     // service that would otherwise drag it in, but set it here too so a stray
     // real import can't blow up the suite.

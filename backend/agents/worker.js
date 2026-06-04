@@ -18,7 +18,7 @@
  *   8. Send heartbeat to parent process
  */
 
-import { generateText, generateObject, tool } from 'ai';
+import { generateText, generateObject, tool, stepCountIs } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
@@ -150,6 +150,44 @@ async function ensureOgComputeBroker() {
   return _ogComputeBroker;
 }
 
+// Transiently wrap globalThis.fetch to inject 0G Compute per-request wallet-auth
+// headers (the broker signs single-use headers authorising payment for each
+// inference call from the agent's balance). The AI SDK exposes no per-call header
+// hook, so we patch fetch around the inference call, filtered by the router URL.
+// Returns a restore function (call it in a finally), or null when 0G Compute is
+// off / the broker is unavailable. Used by BOTH the executor (runAcceptedTask)
+// and the verifier (judgeTask) so 0G Compute auth is applied consistently.
+// Callers run sequentially within a poll tick, so installs do not nest.
+async function installOgComputeFetchAuth() {
+  if (!OG_COMPUTE_ENABLED) return null;
+  const broker = await ensureOgComputeBroker();
+  if (!broker || !_ogComputeProvider) return null;
+  const origFetch = globalThis.fetch;
+  const providerAddr = _ogComputeProvider;
+  globalThis.fetch = async (...args) => {
+    const reqUrl = typeof args[0] === 'string' ? args[0] : args[0]?.url;
+    if (reqUrl?.includes(OG_COMPUTE_ROUTER_BASE_URL)) {
+      const reqInit = { ...(args[1] || {}) };
+      let promptText = '';
+      try {
+        if (typeof reqInit.body === 'string') {
+          const parsed = JSON.parse(reqInit.body);
+          promptText = parsed?.messages?.map(m => m.content).join('\n') || reqInit.body;
+        }
+      } catch {}
+      try {
+        const headers = await broker.inference.getRequestHeaders(providerAddr, promptText || 'inference');
+        reqInit.headers = { ...reqInit.headers, ...headers };
+      } catch (hdrErr) {
+        log(`0G Compute: header generation failed — ${hdrErr.message}`);
+      }
+      return origFetch(args[0], reqInit);
+    }
+    return origFetch(args[0], args[1]);
+  };
+  return () => { globalThis.fetch = origFetch; };
+}
+
 // ── Logging helpers ──────────────────────────────────────────────────────
 
 function nowStamp() {
@@ -276,7 +314,10 @@ try {
 
 function getModel() {
   if (OG_COMPUTE_ENABLED) {
-    return createOpenAI({ baseURL: OG_COMPUTE_ROUTER_BASE_URL, apiKey: '0g-compute' })(AGENT_MODEL);
+    // OpenAI-COMPATIBLE router: 0G serves models over /chat/completions. Use
+    // .chat() explicitly — the callable provider (@ai-sdk/openai v3) defaults to
+    // the OpenAI Responses API (/responses), which the router does not implement.
+    return createOpenAI({ baseURL: OG_COMPUTE_ROUTER_BASE_URL, apiKey: '0g-compute' }).chat(AGENT_MODEL);
   }
   switch (AGENT_PROVIDER) {
     case 'anthropic': return createAnthropic({ apiKey: AGENT_API_KEY })(AGENT_MODEL);
@@ -310,7 +351,8 @@ async function fetchWithTimeout(url, options = {}, timeout = 30000) {
 
 // ── Tool builders ────────────────────────────────────────────────────────────
 
-function buildTools(currentTaskHash = null) {
+export function buildTools(currentTaskHash = null) {
+  /** @type {import('ai').ToolSet} */
   const tools = {};
 
   // Standard tool for A2A delegation. Description deliberately discourages
@@ -874,46 +916,19 @@ async function runAcceptedTask(acceptedTaskHash, acceptedRootHash, acceptedWrapp
 
     try {
       const model = getModel();
-      // 0G Compute Router: wrap fetch to inject per-request auth headers.
-      // The broker SDK generates single-use headers signed by the agent wallet,
-      // authorising payment for each inference call from the agent's balance.
-      if (OG_COMPUTE_ENABLED) {
-        const broker = await ensureOgComputeBroker();
-        if (broker && _ogComputeProvider) {
-          const origFetch = globalThis.fetch;
-          const providerAddr = _ogComputeProvider;
-          ogFetchRestore = () => { globalThis.fetch = origFetch; };
-          globalThis.fetch = async (...args) => {
-            const reqUrl = typeof args[0] === 'string' ? args[0] : args[0]?.url;
-            if (reqUrl?.includes(OG_COMPUTE_ROUTER_BASE_URL)) {
-              const reqInit = { ...(args[1] || {}) };
-              let body = reqInit.body;
-              let promptText = '';
-              try {
-                if (typeof body === 'string') {
-                  const parsed = JSON.parse(body);
-                  promptText = parsed?.messages?.map(m => m.content).join('\n') || body;
-                }
-              } catch {}
-              try {
-                const headers = await broker.inference.getRequestHeaders(providerAddr, promptText || 'inference');
-                reqInit.headers = { ...reqInit.headers, ...headers };
-              } catch (hdrErr) {
-                log(`0G Compute: header generation failed — ${hdrErr.message}`);
-              }
-              return origFetch(args[0], reqInit);
-            }
-            return origFetch(args[0], args[1]);
-          };
-        }
-      }
+      // 0G Compute Router: inject per-request wallet-auth headers around the
+      // inference call (shared with the verifier path — see judgeTask).
+      ogFetchRestore = await installOgComputeFetchAuth();
 
       const result = await generateText({
         model,
         system: `[IDENTITY]\n${AGENT_INSTRUCTIONS}\n\n[CAPABILITIES]\nYou have access to tools. If you use a tool, you must synthesize the results into a final text summary for the user. Do not simply output the raw tool result.`,
         prompt: briefPlaintext,
         tools: buildTools(acceptedTaskHash),
-        maxSteps: 10,
+        // AI SDK v6: `maxSteps` was removed; the default is stepCountIs(1),
+        // which would stop after one step and never let the model synthesize
+        // tool results into a final answer. Allow up to 10 tool-loop steps.
+        stopWhen: stepCountIs(10),
       });
 
       if (ogFetchRestore) ogFetchRestore();
@@ -929,7 +944,7 @@ async function runAcceptedTask(acceptedTaskHash, acceptedRootHash, acceptedWrapp
         log(`LLM made ${toolCalls.length} tool call(s): ${toolCalls.map(tc => {
           if (!tc) return 'null-tool-call';
           const name = tc.toolName || 'unknown-tool';
-          const args = tc.args ? JSON.stringify(tc.args) : 'no-args';
+          const args = tc.input ? JSON.stringify(tc.input) : 'no-args';
           const argsPreview = args.length > 50 ? args.slice(0, 50) + '…' : args;
           return `${name}(${argsPreview})`;
         }).join(', ')}`);
@@ -937,10 +952,13 @@ async function runAcceptedTask(acceptedTaskHash, acceptedRootHash, acceptedWrapp
 
       if (result.toolResults && result.toolResults.length > 0) {
         log(`LLM received ${result.toolResults.length} tool result(s).`);
-        for (const tr of result.toolResults) {
-          if (tr.isError) {
-            log(`ERROR in tool ${tr.toolName}: ${JSON.stringify(tr.result)}`);
-          }
+      }
+      // AI SDK v6 surfaces tool execution failures as `tool-error` content
+      // parts — there is no `isError` flag on toolResults. `content` is a
+      // discriminated union, so narrowing on `type` exposes toolName/error.
+      for (const part of result.content || []) {
+        if (part.type === 'tool-error') {
+          log(`ERROR in tool ${part.toolName}: ${JSON.stringify(part.error)}`);
         }
       }
 
@@ -1170,7 +1188,11 @@ async function judgeTask(brief, output, acceptance) {
     String(output).slice(0, 12000),
   ].join('\n');
 
+  let ogFetchRestore = null;
   try {
+    // Verifier inference uses the same model as the executor; on 0G Compute that
+    // also needs the per-request wallet-auth headers, else the router rejects it.
+    ogFetchRestore = await installOgComputeFetchAuth();
     const { object } = await generateObject({
       model: getModel(),
       schema: z.object({
@@ -1188,6 +1210,8 @@ async function judgeTask(brief, output, acceptance) {
     // awaiting_verification and is retried on the next poll, bounded by the cap.
     log(`verify: judge model error (will not post a verdict): ${e.message}`);
     return null;
+  } finally {
+    if (ogFetchRestore) ogFetchRestore();
   }
 }
 
@@ -1392,8 +1416,12 @@ async function ensureRegisteredAsA2AExecutor() {
   }
 }
 
-(async () => {
-  await ensureRegisteredAsA2AExecutor();
-  setInterval(pollAndWork, POLL_INTERVAL_MS);
-  pollAndWork();
-})();
+// Skip auto-start under test: the suite imports this module to exercise
+// buildTools() and must not kick off registration / the polling loop.
+if (process.env.NODE_ENV !== 'test') {
+  (async () => {
+    await ensureRegisteredAsA2AExecutor();
+    setInterval(pollAndWork, POLL_INTERVAL_MS);
+    pollAndWork();
+  })();
+}
