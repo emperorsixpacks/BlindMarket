@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAccount, useWalletClient, useBalance } from 'wagmi';
 import { recoverPublicKey, hashMessage } from 'viem';
@@ -38,6 +38,70 @@ type Provider = 'openai' | 'anthropic' | 'groq' | 'gemini' | '0g-compute';
 type ProviderModels = Record<Provider, string[]>;
 
 /** snake_case capability id → human label ("web_research" → "Web research"). */
+const INSTRUCTION_TEMPLATES: Record<string, string> = {
+  webResearch: `# Web Research Agent
+
+You are a web research agent. Your job is to find, verify, and summarize information from the web.
+
+## Capabilities
+- Perform deep web searches on any topic
+- Extract and verify key facts from multiple sources
+- Provide citations and source links
+
+## Behavior
+- Always verify information from at least 2 independent sources
+- Flag uncertainty or conflicting information clearly
+- Provide structured summaries with key takeaways
+
+## Output format
+Start every response with a brief **summary**, then list findings with sources.`,
+  dataProcessing: `# Data Processing Agent
+
+You process and transform data according to specified rules.
+
+## Capabilities
+- Parse structured and unstructured data
+- Transform between formats (JSON, CSV, text)
+- Validate data against schemas
+
+## Behavior
+- Never modify data beyond the specified transformation
+- Report errors and malformed input clearly
+- Log processing steps for auditability
+
+## Output format
+Return processed data in the requested format with a brief summary of what was done.`,
+  communityManager: `# Community Manager Agent
+
+You manage community interactions, moderate content, and engage with users.
+
+## Capabilities
+- Moderate messages and content against guidelines
+- Respond to common questions with approved answers
+- Escalate complex issues to human moderators
+
+## Behavior
+- Be polite, helpful, and professional at all times
+- Strictly enforce community guidelines without exception
+- Use judgment — not everything rule-breaking is explicit
+
+## Escalation
+When you cannot handle something, clearly state why and offer to escalate.`,
+  codeReview: `# Code Review Agent
+
+You review code for bugs, security issues, and best practices.
+
+## Capabilities
+- Analyze code for common vulnerabilities
+- Check for style guide compliance
+- Suggest optimizations
+
+## Behavior
+- Be constructive — point out what's good too
+- Prioritize security issues over style
+- Provide examples for suggested changes`,
+};
+
 function renderMarkdown(text: string): string {
   const escaped = text
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -84,6 +148,56 @@ export default function DeployAgentForm() {
   });
 
   const [previewTab, setPreviewTab] = useState<'write' | 'preview'>('write');
+  const [showTemplateMenu, setShowTemplateMenu] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const wrapSelection = useCallback((wrapper: string) => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    const text = form.instructions;
+    const selected = text.slice(start, end) || wrapper;
+    const wrapped = `${wrapper}${selected}${wrapper}`;
+    const newVal = text.slice(0, start) + wrapped + text.slice(end);
+    setForm(f => ({ ...f, instructions: newVal }));
+    requestAnimationFrame(() => { ta.focus(); ta.setSelectionRange(start + wrapper.length, start + wrapper.length + selected.length); });
+  }, [form.instructions]);
+
+  const insertAtCursor = useCallback((prefix: string) => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    const pos = ta.selectionStart;
+    const text = form.instructions;
+    const newVal = text.slice(0, pos) + prefix + text.slice(pos);
+    setForm(f => ({ ...f, instructions: newVal }));
+    requestAnimationFrame(() => { ta.focus(); ta.setSelectionRange(pos + prefix.length, pos + prefix.length); });
+  }, [form.instructions]);
+
+  const wrapLink = useCallback(() => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    const text = form.instructions;
+    const selected = text.slice(start, end) || 'link text';
+    const link = `[${selected}](url)`;
+    const newVal = text.slice(0, start) + link + text.slice(end);
+    setForm(f => ({ ...f, instructions: newVal }));
+    const cursorPos = start + link.length - 1;
+    requestAnimationFrame(() => { ta.focus(); ta.setSelectionRange(cursorPos, cursorPos); });
+  }, [form.instructions]);
+
+  useEffect(() => {
+    if (!showTemplateMenu) return;
+    function onDown(e: MouseEvent) {
+      const btn = (e.target as HTMLElement).closest('[data-tmpl-btn]');
+      if (!btn) setShowTemplateMenu(false);
+    }
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [showTemplateMenu]);
+
   const [tools, setTools] = useState<Tool[]>([]);
   const [capabilities, setCapabilities] = useState<string[]>([]);
   const [newTool, setNewTool] = useState<Tool>({
@@ -273,7 +387,7 @@ export default function DeployAgentForm() {
           </div>
           <FormField label="Instructions" required className="mt-5">
             <div className="border border-line divide-y divide-line">
-              <div className="flex text-xs">
+              <div className="flex text-xs items-stretch">
                 <button type="button" onClick={() => setPreviewTab('write')}
                   className={`px-3 py-1.5 ${previewTab === 'write' ? 'bg-cream/10 text-cream' : 'text-ink-3 hover:text-ink'}`}>
                   Write
@@ -282,10 +396,49 @@ export default function DeployAgentForm() {
                   className={`px-3 py-1.5 ${previewTab === 'preview' ? 'bg-cream/10 text-cream' : 'text-ink-3 hover:text-ink'}`}>
                   Preview
                 </button>
-                <span className="px-3 py-1.5 text-ink-4 ml-auto text-[11px]">Markdown supported</span>
+                {previewTab === 'write' && (
+                  <div className="flex items-center gap-0.5 px-2 border-l border-line">
+                    <button type="button" title="Bold" onClick={() => wrapSelection('**')}
+                      className="px-1.5 py-1 text-ink-4 hover:text-ink transition-colors font-bold text-sm leading-none">B</button>
+                    <button type="button" title="Italic" onClick={() => wrapSelection('*')}
+                      className="px-1.5 py-1 text-ink-4 hover:text-ink transition-colors italic text-sm leading-none">I</button>
+                    <button type="button" title="Inline code" onClick={() => wrapSelection('`')}
+                      className="px-1.5 py-1 text-ink-4 hover:text-ink transition-colors font-mono text-xs leading-none">&lt;/&gt;</button>
+                    <button type="button" title="Link" onClick={() => wrapLink()}
+                      className="px-1.5 py-1 text-ink-4 hover:text-ink transition-colors text-sm leading-none underline">L</button>
+                    <button type="button" title="Heading" onClick={() => insertAtCursor('### ')}
+                      className="px-1.5 py-1 text-ink-4 hover:text-ink transition-colors text-sm leading-none font-semibold">H</button>
+                    <button type="button" title="Bullet list" onClick={() => insertAtCursor('- ')}
+                      className="px-1.5 py-1 text-ink-4 hover:text-ink transition-colors text-sm leading-none">•</button>
+                  </div>
+                )}
+                <div className="relative ml-auto">
+                  <button type="button" data-tmpl-btn onClick={() => setShowTemplateMenu(!showTemplateMenu)}
+                    className="px-3 py-1.5 text-ink-4 hover:text-ink transition-colors text-sm leading-none block">
+                    ☰
+                  </button>
+                  {showTemplateMenu && (
+                    <div className="absolute right-0 top-full z-10 w-48 border border-line bg-surface-2 shadow-lg">
+                      <div className="px-3 py-1.5 text-[11px] text-ink-4 border-b border-line">Templates</div>
+                      {Object.entries(INSTRUCTION_TEMPLATES).map(([key, val]) => (
+                        <button key={key} type="button" data-tmpl-btn onClick={() => { set('instructions', val); setShowTemplateMenu(false); }}
+                          className="block w-full text-left px-3 py-1.5 text-xs text-ink-2 hover:bg-surface-1 transition-colors">
+                          {key.replace(/([A-Z])/g, ' $1').replace(/^./, s => s.toUpperCase())}
+                        </button>
+                      ))}
+                      <div className="border-t border-line">
+                        <button type="button" data-tmpl-btn onClick={() => { set('instructions', ''); setShowTemplateMenu(false); }}
+                          className="block w-full text-left px-3 py-1.5 text-xs text-err hover:bg-surface-1 transition-colors">
+                          Clear
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
               {previewTab === 'write' ? (
                 <textarea
+                  ref={textareaRef}
                   required
                   rows={10}
                   value={form.instructions}
