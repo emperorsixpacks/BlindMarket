@@ -62,8 +62,8 @@ export default function DeployAgentForm() {
   const [form, setForm] = useState({
     name: '',
     instructions: '',
-    provider: 'anthropic' as Provider,
-    model: 'claude-sonnet-4-5',
+    provider: '0g-compute' as Provider,
+    model: 'deepseek-ai/DeepSeek-V3.1',
     apiKey: '',
   });
 
