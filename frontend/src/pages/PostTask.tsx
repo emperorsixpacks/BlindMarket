@@ -108,8 +108,8 @@ export default function PostTask() {
   const [requiredCaps, setRequiredCaps] = useState<string[]>([]);
   // Snapshot of how many executors the AES key was wrapped to at post time.
   // Drives the post-success copy: a non-zero count means at least one agent
-  // can /accept immediately; zero means the task is awaiting bids and the
-  // poster has to revisit /my_tasks for useBidWatcher() to ship slices.
+  // can /accept immediately; zero means the task is awaiting bids. The
+  // server-side key custody will re-wrap to late joiners on /accept.
   const [initialWrapCount, setInitialWrapCount] = useState<number>(0);
 
   const toggleCap = (cap: string) =>
@@ -204,10 +204,10 @@ export default function PostTask() {
       //    The marketplace never sees the AES key in plaintext: privacy
       //    invariant from PITCH.md preserved.
       //
-      //    If zero executors match (or all wraps fail), wrappedKeys is empty
-      //    and the task posts as "awaiting bids" — useBidWatcher() will wrap
-      //    to new bidders as they /bid. We stash the AES key locally first
-      //    so the watcher has something to wrap *with* on the next tick.
+      //    If zero executors match (or all wraps fail), wrappedKeys is empty.
+      //    Server-side key custody handles the late-joiner re-wrap on /accept,
+      //    so no browser-side wrap loop is needed. We stash the AES key locally
+      //    as a client-side fallback in case custody is unavailable.
       stashAesKey(taskHash, key);
       const wrappedKeys: Record<string, string> = {};
       for (const exec of executors) {
@@ -412,47 +412,21 @@ export default function PostTask() {
                 </p>
               </div>
             ) : (
-              // Case B — no matching executors at post-time. The AES key lives
-              // only in this browser; wraps to future bidders are issued by
-              // useBidWatcher() running on /tasks/mine. Make the obligation
-              // explicit so users don't post tasks and walk away expecting them
-              // to be picked up unattended.
-              <div className="border border-warn/50 bg-warn/5 p-4 sm:p-5 space-y-4">
-                <div className="flex items-center gap-2 text-warn">
-                  <Icon name="clock" size={16} />
+              // Case B — no matching executors at post-time. The AES key is
+              // also sealed to the platform's custody key, so server-side re-wrap
+              // on /accept will handle late joiners automatically — no browser
+              // window needed.
+              <div className="border border-line p-4 sm:p-5 space-y-4">
+                <div className="flex items-center gap-2 text-cream">
+                  <Icon name="shield" size={16} />
                   <span className="text-sm font-semibold">Awaiting first bidder</span>
                 </div>
                 <p className="text-sm text-ink-2 leading-relaxed">
                   No agent with matching capabilities is registered yet. Your task is encrypted
-                  and posted, but when an agent bids we need{' '}
-                  <span className="text-ink font-semibold">your browser</span> to ship the
-                  encryption key — the platform can't see it.
+                  and posted — when an agent bids and accepts, the platform's key custody service
+                  will re-wrap the encryption key server-side. You don't need to keep a browser
+                  tab open.
                 </p>
-                <ul className="text-sm text-ink-2 leading-relaxed space-y-2">
-                  <li className="flex gap-2">
-                    <Icon name="arrow" size={14} className="text-cream shrink-0 mt-1" />
-                    <span>
-                      <span className="text-ink font-semibold">Keep My Tasks open in a background tab.</span>{' '}
-                      It auto-wraps as bids arrive (every 8s). You can do anything else in your browser.
-                    </span>
-                  </li>
-                  <li className="flex gap-2">
-                    <Icon name="arrow" size={14} className="text-cream shrink-0 mt-1" />
-                    <span>
-                      Or just come back later. One visit to My Tasks unblocks every pending bid
-                      in a few seconds.
-                    </span>
-                  </li>
-                </ul>
-                <div className="flex gap-2.5 pt-1 border-t border-warn/20 mt-1">
-                  <Icon name="lock" size={16} className="text-err shrink-0 mt-3" />
-                  <p className="text-sm text-err leading-relaxed pt-2.5">
-                    The encryption key for this task lives only in this browser until an agent is
-                    wrapped. If you clear this browser's data (or switch devices) before then, the
-                    key is lost and the task becomes permanently undecryptable — by anyone. Get a
-                    matching agent registered, or revisit My Tasks, before clearing anything.
-                  </p>
-                </div>
               </div>
             )}
 
@@ -463,8 +437,9 @@ export default function PostTask() {
                 onClick={() => navigate('/tasks/mine')}
               />
               {initialWrapCount === 0 && (
-                // Power-user shortcut: opens /tasks/mine in a new tab so the user
-                // can leave it running as a background watcher while keeping this
+                // The server-side custody key handles late-joiner re-wrap, so no
+                // browser window is needed. This is just a convenience link to
+                // the user's posted tasks.
                 // tab around to post more tasks.
                 <Button
                   variant="outline"

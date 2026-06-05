@@ -17,7 +17,6 @@ import {
   ErrorState,
 } from '../components/bb';
 import { useSocket } from '../hooks/useSocket';
-import { useBidWatcher } from '../hooks/useBidWatcher';
 import { authedGet } from '../lib/api';
 import { getAesKey } from '../lib/keyStash';
 
@@ -148,11 +147,8 @@ export default function MyTasks() {
     'task:completed': () => qc.invalidateQueries({ queryKey: ['my-tasks-posted', address] }),
   });
 
-  // Just-in-time wrap loop for tasks posted from this browser. Polls every
-  // task with a stashed AES key for new bidders and ECIES-wraps the key to
-  // them. Active for as long as this page is mounted.
-  useBidWatcher(!!address);
-
+  // Server-side key custody handles late-joiner re-wrap on /accept — no
+  // browser-side wrap loop needed. The `useBidWatcher` hook was removed.
   // For status counts we prefer the on-chain status (source of truth for
   // settlement); fall back to the a2a state for tasks whose chain index
   // hasn't caught up yet (mapped to the closest matching enum).
