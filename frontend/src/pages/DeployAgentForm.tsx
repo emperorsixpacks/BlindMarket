@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAccount, useWalletClient, useBalance } from 'wagmi';
 import { recoverPublicKey, hashMessage } from 'viem';
@@ -111,22 +111,6 @@ You review code for bugs, security issues, and best practices.
 - Provide examples for suggested changes`,
 };
 
-function renderMarkdown(text: string): string {
-  const escaped = text
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const html = escaped
-    .replace(/^### (.+)$/gm, '<h4 class="text-sm font-semibold mt-3 mb-1">$1</h4>')
-    .replace(/^## (.+)$/gm, '<h3 class="text-base font-semibold mt-4 mb-1.5">$1</h3>')
-    .replace(/^# (.+)$/gm, '<h2 class="text-lg font-semibold mt-4 mb-2">$1</h2>')
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.+?)\*/g, '<em>$1</em>')
-    .replace(/`([^`]+)`/g, '<code class="bg-surface-1 px-1 rounded text-xs font-mono">$1</code>')
-    .replace(/^- (.+)$/gm, '<li class="ml-4 list-disc text-sm">$1</li>')
-    .replace(/\n{2,}/g, '</p><p class="text-sm leading-relaxed">')
-    .replace(/\n/g, '<br>');
-  return `<p class="text-sm leading-relaxed">${html}</p>`;
-}
-
 function capLabel(cap: string): string {
   const t = cap.replace(/_/g, ' ');
   return t.charAt(0).toUpperCase() + t.slice(1);
@@ -156,46 +140,7 @@ export default function DeployAgentForm() {
     apiKey: '',
   });
 
-  const [previewTab, setPreviewTab] = useState<'write' | 'preview'>('write');
   const [showTemplateMenu, setShowTemplateMenu] = useState(false);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  const wrapSelection = useCallback((wrapper: string) => {
-    const ta = textareaRef.current;
-    if (!ta) return;
-    const start = ta.selectionStart;
-    const end = ta.selectionEnd;
-    const text = form.instructions;
-    const selected = text.slice(start, end) || wrapper;
-    const wrapped = `${wrapper}${selected}${wrapper}`;
-    const newVal = text.slice(0, start) + wrapped + text.slice(end);
-    setForm(f => ({ ...f, instructions: newVal }));
-    requestAnimationFrame(() => { ta.focus(); ta.setSelectionRange(start + wrapper.length, start + wrapper.length + selected.length); });
-  }, [form.instructions]);
-
-  const insertAtCursor = useCallback((prefix: string) => {
-    const ta = textareaRef.current;
-    if (!ta) return;
-    const pos = ta.selectionStart;
-    const text = form.instructions;
-    const newVal = text.slice(0, pos) + prefix + text.slice(pos);
-    setForm(f => ({ ...f, instructions: newVal }));
-    requestAnimationFrame(() => { ta.focus(); ta.setSelectionRange(pos + prefix.length, pos + prefix.length); });
-  }, [form.instructions]);
-
-  const wrapLink = useCallback(() => {
-    const ta = textareaRef.current;
-    if (!ta) return;
-    const start = ta.selectionStart;
-    const end = ta.selectionEnd;
-    const text = form.instructions;
-    const selected = text.slice(start, end) || 'link text';
-    const link = `[${selected}](url)`;
-    const newVal = text.slice(0, start) + link + text.slice(end);
-    setForm(f => ({ ...f, instructions: newVal }));
-    const cursorPos = start + link.length - 1;
-    requestAnimationFrame(() => { ta.focus(); ta.setSelectionRange(cursorPos, cursorPos); });
-  }, [form.instructions]);
 
   useEffect(() => {
     if (!showTemplateMenu) return;
@@ -429,30 +374,6 @@ export default function DeployAgentForm() {
           <FormField label="Instructions" required className="mt-5">
             <div className="border border-line divide-y divide-line">
               <div className="flex text-xs items-stretch">
-                <button type="button" onClick={() => setPreviewTab('write')}
-                  className={`px-3 py-1.5 ${previewTab === 'write' ? 'bg-cream/10 text-cream' : 'text-ink-3 hover:text-ink'}`}>
-                  Write
-                </button>
-                <button type="button" onClick={() => setPreviewTab('preview')}
-                  className={`px-3 py-1.5 ${previewTab === 'preview' ? 'bg-cream/10 text-cream' : 'text-ink-3 hover:text-ink'}`}>
-                  Preview
-                </button>
-                {previewTab === 'write' && (
-                  <div className="flex items-center gap-0.5 px-2 border-l border-line">
-                    <button type="button" title="Bold" onClick={() => wrapSelection('**')}
-                      className="px-1.5 py-1 text-ink-4 hover:text-ink transition-colors font-bold text-sm leading-none">B</button>
-                    <button type="button" title="Italic" onClick={() => wrapSelection('*')}
-                      className="px-1.5 py-1 text-ink-4 hover:text-ink transition-colors italic text-sm leading-none">I</button>
-                    <button type="button" title="Inline code" onClick={() => wrapSelection('`')}
-                      className="px-1.5 py-1 text-ink-4 hover:text-ink transition-colors font-mono text-xs leading-none">&lt;/&gt;</button>
-                    <button type="button" title="Link" onClick={() => wrapLink()}
-                      className="px-1.5 py-1 text-ink-4 hover:text-ink transition-colors text-sm leading-none underline">L</button>
-                    <button type="button" title="Heading" onClick={() => insertAtCursor('### ')}
-                      className="px-1.5 py-1 text-ink-4 hover:text-ink transition-colors text-sm leading-none font-semibold">H</button>
-                    <button type="button" title="Bullet list" onClick={() => insertAtCursor('- ')}
-                      className="px-1.5 py-1 text-ink-4 hover:text-ink transition-colors text-sm leading-none">•</button>
-                  </div>
-                )}
                 <div className="relative ml-auto">
                   <button type="button" data-tmpl-btn onClick={() => setShowTemplateMenu(!showTemplateMenu)}
                     className="px-3 py-1.5 text-ink-4 hover:text-ink transition-colors text-sm leading-none block">
@@ -477,20 +398,14 @@ export default function DeployAgentForm() {
                   )}
                 </div>
               </div>
-              {previewTab === 'write' ? (
-                <textarea
-                  ref={textareaRef}
-                  required
-                  rows={10}
-                  value={form.instructions}
-                  onChange={e => set('instructions', e.target.value)}
-                  placeholder="Describe what this agent does, how it should behave, and what tasks it should pick up."
-                  className="w-full px-3 py-2.5 bg-surface-2 text-ink text-sm focus:border-cream resize-y leading-relaxed font-mono border-0 outline-none"
-                />
-              ) : (
-                <div className="px-3 py-2.5 min-h-[200px] bg-surface-1 text-ink text-sm leading-relaxed"
-                  dangerouslySetInnerHTML={{ __html: renderMarkdown(form.instructions || '*Nothing written yet*') }} />
-              )}
+              <textarea
+                required
+                rows={10}
+                value={form.instructions}
+                onChange={e => set('instructions', e.target.value)}
+                placeholder="Describe what this agent does, how it should behave, and what tasks it should pick up."
+                className="w-full px-3 py-2.5 bg-surface-2 text-ink text-sm focus:border-cream resize-y leading-relaxed font-mono border-0 outline-none"
+              />
             </div>
           </FormField>
         </div>
