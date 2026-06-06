@@ -59,7 +59,7 @@ async function getJWKS() {
 }
 
 /** Verify a Privy JWT using jose */
-async function verifyPrivyToken(token: string): Promise<{ address: string }> {
+async function verifyPrivyToken(token: string): Promise<{ address: string; addresses?: string[] }> {
   const JWKS = await getJWKS();
   if (!JWKS) throw new Error('Privy not configured (missing PRIVY_APP_ID)');
 
@@ -68,47 +68,47 @@ async function verifyPrivyToken(token: string): Promise<{ address: string }> {
       audience: config.privyAppId,
     });
 
-    // Extract wallet address from Privy token claims
-    const walletAddress = extractWalletAddress(payload as any);
-    if (!walletAddress || !walletAddress.startsWith('0x')) {
-      // Debug log the claims if we can't find a wallet
+    const allAddresses = extractAllWalletAddresses(payload as any);
+    const primary = allAddresses.find(a => a.startsWith('0x')) || null;
+    if (!primary) {
       console.warn(`[Auth] No wallet found in token. Available keys: ${Object.keys(payload).join(', ')}`);
-      throw new Error(`No wallet address in Privy token (found: ${walletAddress})`);
+      throw new Error('No wallet address in Privy token');
     }
 
-    return { address: walletAddress };
+    return { address: primary, addresses: allAddresses };
   } catch (err: any) {
     throw err;
   }
 }
 
-/** Extract wallet address from Privy JWT claims */
-function extractWalletAddress(payload: any): string | null {
+/** Extract all wallet addresses from Privy JWT claims */
+function extractAllWalletAddresses(payload: any): string[] {
+  const addresses: string[] = [];
+
   // 1. Check for the preferred 'wallet_address' claim
-  if (typeof payload.wallet_address === 'string') return payload.wallet_address;
+  if (typeof payload.wallet_address === 'string') addresses.push(payload.wallet_address);
 
   // 2. Check linked_accounts array
   let accounts = payload.linked_accounts;
-  
-  // Handle stringified JSON if necessary
   if (typeof accounts === 'string') {
     try {
       accounts = JSON.parse(accounts);
-    } catch (e) {
-      console.warn('[Auth] Failed to parse stringified linked_accounts');
+    } catch { /* ignore */ }
+  }
+  if (Array.isArray(accounts)) {
+    for (const a of accounts) {
+      if (a.type === 'wallet' && typeof a.address === 'string' && a.address.startsWith('0x')) {
+        if (!addresses.includes(a.address)) addresses.push(a.address);
+      }
     }
   }
 
-  if (Array.isArray(accounts)) {
-    // Prioritize embedded wallets or external wallets
-    const wallet = accounts.find((a: any) => a.type === 'wallet' && a.address?.startsWith('0x'));
-    if (wallet) return wallet.address;
+  // 3. Last resort: check sub if it's an address
+  if (typeof payload.sub === 'string' && payload.sub.startsWith('0x')) {
+    if (!addresses.includes(payload.sub)) addresses.push(payload.sub);
   }
 
-  // 3. Last resort: check sub if it's an address
-  if (typeof payload.sub === 'string' && payload.sub.startsWith('0x')) return payload.sub;
-
-  return null;
+  return addresses;
 }
 
 /**

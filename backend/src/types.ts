@@ -3,6 +3,8 @@ import type { Request } from 'express';
 /** Authenticated user attached by auth middleware */
 export interface AuthUser {
   address: string;
+  /** All linked wallet addresses from the Privy JWT (multi-wallet support). */
+  addresses?: string[];
 }
 
 /** Express request with authenticated user */

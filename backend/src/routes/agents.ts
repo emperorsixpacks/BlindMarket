@@ -24,7 +24,6 @@ import { provider } from '../services/chain.js';
 async function authorizeOwner(req: AuthRequest, res: import('express').Response, agentId: string) {
   const authed = req.user?.address;
   if (!authed || authed === 'agent') {
-    // 'agent' is the shared platform API key — never the human owner.
     res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Owner authentication required' } });
     return null;
   }
@@ -33,10 +32,13 @@ async function authorizeOwner(req: AuthRequest, res: import('express').Response,
     res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Agent not found' } });
     return null;
   }
-  if (authed.toLowerCase() !== agent.ownerAddress.toLowerCase()) {
-    // Surface both addresses so the user can immediately see whether their
-    // session resolved to a different wallet than the one that deployed the
-    // agent. Common cause: Privy users with multiple linked wallets — the
+
+  // Check ALL linked wallets, not just the primary one — users often have
+  // multiple wallets in the same Privy account (e.g. embedded + external).
+  const allAddresses = [authed, ...(req.user?.addresses ?? [])];
+  const isOwner = allAddresses.some(a => a.toLowerCase() === agent.ownerAddress.toLowerCase());
+
+  if (!isOwner) {
     // JWT's first wallet entry isn't guaranteed to be the one used at deploy.
     // Truncated for log brevity; both are public blockchain addresses so no
     // privacy concern.
@@ -45,7 +47,7 @@ async function authorizeOwner(req: AuthRequest, res: import('express').Response,
       success: false,
       error: {
         code: 'FORBIDDEN',
-        message: `Only the agent owner can perform this action. You are signed in as ${tr(authed)} but this agent's owner is ${tr(agent.ownerAddress)}. If those are both yours, re-link wallets in Privy or sign in with the wallet that originally deployed the agent.`,
+        message: `Only the agent owner can perform this action. You are signed in as ${tr(authed)} but this agent's owner is ${tr(agent.ownerAddress)}. Make sure the owner wallet is linked in your Privy account.`,
         details: {
           authenticatedAs: authed,
           agentOwner: agent.ownerAddress,
