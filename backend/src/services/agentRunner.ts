@@ -234,3 +234,24 @@ export async function updateAgent(id: string, patch: Partial<Pick<DeployedAgent,
   await saveAgent(updated);
   return updated;
 }
+
+/**
+ * Append a wallet to an agent's authorizedOwners allowlist (lowercased,
+ * deduped). Drives the signature-gated owner-link flow so a Privy identity
+ * that differs from the original wagmi deploy wallet can manage the agent once
+ * it has proven control of the owner wallet. No-op (returns the unchanged
+ * record) if the address is already the ownerAddress or already authorized.
+ */
+export async function addAuthorizedOwner(id: string, address: string): Promise<DeployedAgent | undefined> {
+  const agent = await loadAgent(id);
+  if (!agent) return undefined;
+  const lower = address.toLowerCase();
+  const already =
+    lower === agent.ownerAddress.toLowerCase() ||
+    (agent.authorizedOwners ?? []).some((a) => a.toLowerCase() === lower);
+  if (!already) {
+    agent.authorizedOwners = [...(agent.authorizedOwners ?? []), lower];
+    await saveAgent(agent);
+  }
+  return agent;
+}

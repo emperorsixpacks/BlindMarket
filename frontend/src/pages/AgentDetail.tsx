@@ -20,7 +20,7 @@ import {
   Icon,
 } from '../components/bb';
 import { truncateAddress } from '../lib/utils';
-import { get, patch, authedPost } from '../lib/api';
+import { get, authedPatch, authedPost } from '../lib/api';
 import { API_BASE_URL } from '../config/constants';
 import { AGENT_CAPABILITIES } from '../config/capabilities';
 import {
@@ -110,6 +110,12 @@ export default function AgentDetail() {
   const [withdrawInfo, setWithdrawInfo] = useState<{ txHash: string; amount: string } | null>(null);
   const [withdrawError, setWithdrawError] = useState('');
 
+  // Owner-link recovery state — for the "deployed with one wallet, signed in
+  // as another" lock-out. Drives the inline recovery button in the action-error
+  // banner (signature-gated POST /agents/:id/link-owner).
+  const [linkStatus, setLinkStatus] = useState<'idle' | 'signing' | 'linking' | 'error'>('idle');
+  const [linkError, setLinkError] = useState('');
+
   const { data: balance, refetch: refetchBalance } = useBalance({
     address: agent?.walletAddress as `0x${string}` | undefined,
     query: { enabled: !!agent?.walletAddress },
@@ -166,10 +172,39 @@ export default function AgentDetail() {
     onSuccess: (data) => { setAgent(data); qc.invalidateQueries({ queryKey: ['my-agents'] }); },
   });
 
+  // Signature-gated owner-link recovery. When start/stop 403s because the agent
+  // was deployed with a different wallet than the current Privy sign-in, the
+  // user proves control of the owner wallet (their active wagmi wallet) by
+  // signing a server nonce. That adds their Privy identity to authorizedOwners,
+  // after which authorizeOwner stops rejecting them. We then retry the action.
+  async function handleLinkOwner() {
+    if (!walletClient || !id) return;
+    setLinkStatus('signing');
+    setLinkError('');
+    try {
+      const challenge = await authedPost<{ nonce: string; message: string; ownerAddress: string }>(
+        `/api/v1/agents/${id}/link-owner/challenge`,
+        {},
+      );
+      const signature = await walletClient.signMessage({ message: challenge.message });
+      setLinkStatus('linking');
+      await authedPost(`/api/v1/agents/${id}/link-owner`, { nonce: challenge.nonce, signature });
+      setLinkStatus('idle');
+      // Refresh the record (now carries authorizedOwners) and retry whatever
+      // action triggered the lock-out (defaults to start).
+      try { setAgent(await get<AgentDetails>(`/api/v1/agents/${id}`)); } catch { /* non-blocking */ }
+      action.mutate(action.variables ?? 'start');
+    } catch (err) {
+      setLinkError((err as Error).message || 'Could not link this wallet');
+      setLinkStatus('error');
+    }
+  }
+
+  // authedPatch so the Privy JWT flows to the backend, where requireAuth +
+  // authorizeOwner verify the caller (no more plaintext ownerAddress claim).
   const save = useMutation({
     mutationFn: () =>
-      patch<AgentDetails>(`/api/v1/agents/${id}`, {
-        ownerAddress: address,
+      authedPatch<AgentDetails>(`/api/v1/agents/${id}`, {
         instructions: editInstructions,
         model: editModel,
         capabilities: editCapabilities,
@@ -281,8 +316,29 @@ export default function AgentDetail() {
       />
       {action.isError && (
         <div className="mb-4 px-4 py-2.5 border border-err/40 bg-err/10 text-xs text-err">
-          {ACTION_LABELS[action.variables]} failed:{' '}
-          <span className="font-mono">{(action.error as Error).message}</span>
+          <div>
+            {ACTION_LABELS[action.variables]} failed:{' '}
+            <span className="font-mono">{(action.error as Error).message}</span>
+          </div>
+          {(action.error as { code?: string }).code === 'FORBIDDEN' && walletClient && (
+            <div className="mt-2.5 flex flex-wrap items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={linkStatus === 'signing' || linkStatus === 'linking'}
+                onClick={handleLinkOwner}
+                label={
+                  linkStatus === 'signing' ? 'Sign in your wallet…'
+                    : linkStatus === 'linking' ? 'Linking…'
+                      : 'Link this wallet to the agent'
+                }
+              />
+              <span className="text-ink-3">
+                One signature with your owner wallet authorizes this sign-in. No gas.
+              </span>
+            </div>
+          )}
+          {linkError && <div className="mt-1.5 font-mono">{linkError}</div>}
         </div>
       )}
 

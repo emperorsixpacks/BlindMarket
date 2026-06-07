@@ -1,15 +1,18 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import { randomBytes } from 'crypto';
 import { AGENT_CAPABILITIES, LLM_PROVIDER_MODELS } from '../types.js';
 import type { AuthRequest } from '../types.js';
 import { requireAuth } from '../middleware/auth.js';
 import {
   deployAgent, startAgent, pauseAgent, stopAgent,
   getAgent, listAgents, getAgentLogs, subscribeAgentLogs, updateAgent,
+  addAuthorizedOwner,
 } from '../services/agentRunner.js';
 import * as reputationService from '../services/reputation.js';
 import * as reputationDecay from '../services/reputationDecay.js';
 import * as agentStore from '../services/agentStore.js';
+import { redis } from '../services/redis.js';
 import { ethers } from 'ethers';
 import { provider } from '../services/chain.js';
 
@@ -36,7 +39,15 @@ async function authorizeOwner(req: AuthRequest, res: import('express').Response,
   // Check ALL linked wallets, not just the primary one — users often have
   // multiple wallets in the same Privy account (e.g. embedded + external).
   const allAddresses = [authed, ...(req.user?.addresses ?? [])];
-  const isOwner = allAddresses.some(a => a.toLowerCase() === agent.ownerAddress.toLowerCase());
+  // Owner set = the original wagmi deploy wallet plus any signature-linked
+  // wallets (authorizedOwners). The latter unlocks the common case where the
+  // wallet captured at deploy isn't the Privy identity the JWT surfaces — the
+  // user proves control of the owner wallet once via POST /:id/link-owner and
+  // their Privy identity is added here.
+  const ownerSet = new Set(
+    [agent.ownerAddress, ...(agent.authorizedOwners ?? [])].map(a => a.toLowerCase()),
+  );
+  const isOwner = allAddresses.some(a => ownerSet.has(a.toLowerCase()));
 
   if (!isOwner) {
     // JWT's first wallet entry isn't guaranteed to be the one used at deploy.
@@ -352,16 +363,128 @@ agentsRouter.post('/:id/withdraw', requireAuth, async (req: AuthRequest, res) =>
   }
 });
 
-// PATCH /api/v1/agents/:id
-agentsRouter.patch('/:id', async (req, res) => {
-  const agent = await getAgent(req.params.id);
-  if (!agent) { res.status(404).json({ success: false, error: 'Not found' }); return; }
-  const { ownerAddress, instructions, model, tools, capabilities } = req.body as {
-    ownerAddress?: string; instructions?: string; model?: string; tools?: object[]; capabilities?: string[];
-  };
-  if (!ownerAddress || ownerAddress.toLowerCase() !== agent.ownerAddress.toLowerCase()) {
-    res.status(403).json({ success: false, error: 'Forbidden' }); return;
+// ── Owner-link (signature-gated recovery) ─────────────────────────────────
+//
+// Recovers the "deployed with one wallet, authenticated as another" lock-out:
+// agents bind ownership to the wagmi-connected wallet captured at deploy
+// (DeployAgentForm), but start/stop/withdraw authorize against the Privy JWT
+// identity (authorizeOwner). When those differ — e.g. the user logged into
+// Privy with an embedded/email wallet but deployed while an external wallet
+// was the active wagmi connector — the owner is 403'd off their own agent.
+//
+// This flow lets the AUTHENTICATED caller add their current Privy identity to
+// the agent's authorizedOwners allowlist, but ONLY after proving control of
+// the ORIGINAL owner wallet by signing a server-issued, single-use,
+// agent-scoped nonce. Requiring a signature recovered to the recorded
+// ownerAddress (not merely any authed wallet) is what stops this from being an
+// agent-takeover vector.
+
+const LINK_NONCE_TTL_S = 10 * 60; // 10 minutes
+const linkNonceKey = (agentId: string, nonce: string) => `agent:linkowner:${agentId}:${nonce}`;
+const buildLinkMessage = (authedAddr: string, agentId: string, nonce: string) =>
+  `BlindMarket: authorize wallet ${authedAddr.toLowerCase()} to manage agent ${agentId}.\n\n` +
+  `Sign with the agent's current owner wallet to confirm. Nonce: ${nonce}`;
+
+// POST /api/v1/agents/:id/link-owner/challenge
+// The authenticated caller (the wallet to be authorized) requests a nonce and
+// the exact message the CURRENT owner wallet must sign.
+agentsRouter.post('/:id/link-owner/challenge', requireAuth, async (req: AuthRequest, res) => {
+  const authed = req.user?.address;
+  if (!authed || authed === 'agent') {
+    res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Owner authentication required' } });
+    return;
   }
+  const agent = await getAgent(req.params.id);
+  if (!agent) {
+    res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Agent not found' } });
+    return;
+  }
+  const nonce = randomBytes(16).toString('hex');
+  // Bind the nonce to the requesting identity so a challenge issued to one
+  // wallet can't be completed by another.
+  await redis.set(linkNonceKey(agent.id, nonce), authed.toLowerCase(), 'EX', LINK_NONCE_TTL_S);
+  res.json({
+    success: true,
+    data: {
+      nonce,
+      message: buildLinkMessage(authed, agent.id, nonce),
+      ownerAddress: agent.ownerAddress,
+      authorizeAddress: authed,
+    },
+  });
+});
+
+// POST /api/v1/agents/:id/link-owner
+// Body: { nonce, signature }. The signature must recover to the agent's
+// CURRENT ownerAddress (proof of control of the deploy wallet). On success the
+// authenticated caller's address is appended to authorizedOwners.
+agentsRouter.post('/:id/link-owner', requireAuth, async (req: AuthRequest, res) => {
+  const authed = req.user?.address;
+  if (!authed || authed === 'agent') {
+    res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Owner authentication required' } });
+    return;
+  }
+  const agent = await getAgent(req.params.id);
+  if (!agent) {
+    res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Agent not found' } });
+    return;
+  }
+  const { nonce, signature } = (req.body ?? {}) as { nonce?: string; signature?: string };
+  if (!nonce || !signature) {
+    res.status(400).json({ success: false, error: { code: 'MISSING_FIELDS', message: 'nonce and signature required' } });
+    return;
+  }
+  const nKey = linkNonceKey(agent.id, nonce);
+  const boundTo = await redis.get(nKey);
+  if (!boundTo) {
+    res.status(400).json({ success: false, error: { code: 'NONCE_INVALID', message: 'Challenge expired or already used — request a new one' } });
+    return;
+  }
+  if (boundTo.toLowerCase() !== authed.toLowerCase()) {
+    res.status(403).json({ success: false, error: { code: 'NONCE_MISMATCH', message: 'This challenge was issued to a different wallet' } });
+    return;
+  }
+  let recovered: string;
+  try {
+    recovered = ethers.verifyMessage(buildLinkMessage(authed, agent.id, nonce), signature).toLowerCase();
+  } catch {
+    res.status(400).json({ success: false, error: { code: 'BAD_SIGNATURE', message: 'Signature could not be verified' } });
+    return;
+  }
+  if (recovered !== agent.ownerAddress.toLowerCase()) {
+    const tr = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
+    res.status(403).json({
+      success: false,
+      error: {
+        code: 'NOT_OWNER_SIGNATURE',
+        message: `Signature must come from the current owner wallet ${tr(agent.ownerAddress)} — you signed with ${tr(recovered)}. Switch your active wallet to the owner wallet and try again.`,
+      },
+    });
+    return;
+  }
+  // Single-use: consume the nonce now that it has been validated.
+  await redis.del(nKey);
+  const updated = await addAuthorizedOwner(agent.id, authed);
+  console.log(`[agents] link-owner: ${authed.toLowerCase()} authorized on ${agent.id} (proven by owner ${agent.ownerAddress.toLowerCase()})`);
+  res.json({
+    success: true,
+    data: { authorizedOwners: updated?.authorizedOwners ?? [], authorizedAddress: authed.toLowerCase() },
+  });
+});
+
+// PATCH /api/v1/agents/:id
+//
+// Owner-only edit (instructions / model / tools / capabilities). Hardened from
+// the previous plaintext `body.ownerAddress` claim — which anyone could satisfy
+// with the agent's (public) owner address — to requireAuth + authorizeOwner,
+// matching start/stop/withdraw. This also makes it honor the authorizedOwners
+// allowlist so a signature-linked wallet can edit too.
+agentsRouter.patch('/:id', requireAuth, async (req: AuthRequest, res) => {
+  const agent = await authorizeOwner(req, res, req.params.id);
+  if (!agent) return;
+  const { instructions, model, tools, capabilities } = req.body as {
+    instructions?: string; model?: string; tools?: object[]; capabilities?: string[];
+  };
   const updated = await updateAgent(req.params.id, { instructions, model, tools: tools as any, capabilities: capabilities as any });
   res.json({ success: true, data: strip(updated) });
 });

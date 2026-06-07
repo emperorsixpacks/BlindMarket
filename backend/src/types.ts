@@ -335,6 +335,13 @@ export const LLM_PROVIDER_MODELS: Record<LLMProvider, string[]> = {
 export interface DeployedAgent {
   id: string;
   ownerAddress: string;
+  // Additional wallets authorized to manage this agent (start/stop/pause/
+  // restart/withdraw/export-key), beyond ownerAddress. Populated via the
+  // signature-gated POST /agents/:id/link-owner flow when the deploy wallet
+  // (the wagmi-connected wallet captured at deploy) differs from the Privy
+  // identity that authorizeOwner checks at action time. Always lowercased.
+  // Absent on legacy agents — authorizeOwner then falls back to ownerAddress.
+  authorizedOwners?: string[];
   name: string;
   instructions: string;
   provider: LLMProvider;
