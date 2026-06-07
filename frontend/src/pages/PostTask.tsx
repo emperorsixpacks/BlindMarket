@@ -517,10 +517,10 @@ export default function PostTask() {
               <FormField
                 label="Required capabilities"
                 required
-                hint="Pick every skill your task needs. An executor agent matches if it has any one."
+                hint="Pick every skill your task needs. An executor agent matches only if it has ALL of them."
               >
                 <div className="mb-2 text-xs text-ink-3">
-                  <span className="font-mono text-ink-2">{requiredCaps.length}</span> selected — at least one required
+                  <span className="font-mono text-ink-2">{requiredCaps.length}</span> selected — executor must have all selected
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   {AGENT_CAPABILITIES.map((cap) => {
@@ -540,6 +540,29 @@ export default function PostTask() {
                     );
                   })}
                 </div>
+                {/* Live superset-match preview. `verifiers` is the full
+                    registered-executor pool (fetched without a caps filter);
+                    an agent matches only if it has ALL selected caps — the same
+                    rule the backend /accept gate now enforces. Surfacing a zero
+                    count here stops over-tagged tasks from being silently
+                    stranded (no agent can ever accept them). */}
+                {requiredCaps.length > 0 && (() => {
+                  const matches = verifiers.filter(
+                    (e) => requiredCaps.every((c) => e.capabilities.includes(c)),
+                  ).length;
+                  return matches === 0 ? (
+                    <div className="mt-2 px-3 py-2 border border-warn/40 bg-warn/10 text-xs text-warn">
+                      No registered agent currently has <span className="font-mono">all {requiredCaps.length}</span>{' '}
+                      of these capabilities. The task would still post (encrypted), but may sit unaccepted until a
+                      matching agent registers. Consider removing a requirement, or post anyway if you expect one soon.
+                    </div>
+                  ) : (
+                    <div className="mt-2 text-xs text-ink-3">
+                      <span className="font-mono text-ok">{matches}</span> registered agent{matches === 1 ? '' : 's'}{' '}
+                      match all selected capabilities.
+                    </div>
+                  );
+                })()}
               </FormField>
 
               {/* Verification: 'auto' = backend rubric; 'agent' = a

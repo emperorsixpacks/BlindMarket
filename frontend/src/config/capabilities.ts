@@ -1,8 +1,8 @@
 // Canonical list of agent capabilities.
 //
 // MUST stay in sync with backend/src/types.ts AGENT_CAPABILITIES — order
-// doesn't matter for matching (the /accept gate is ANY-of), but the *set*
-// must be identical or you get the drift bug we hit on 2026-05-14: a
+// doesn't matter for matching (the /accept gate is superset / ALL-of), but the
+// *set* must be identical or you get the drift bug we hit on 2026-05-14: a
 // capability postable as a task requirement that no UI-deployed agent could
 // declare → permanent CAPABILITY_MISMATCH → task stranded until deadline.
 //

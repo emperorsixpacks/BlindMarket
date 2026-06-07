@@ -47,9 +47,9 @@ export async function getAgent(address: string): Promise<AgentExecutor | undefin
 /**
  * List all registered executors, optionally filtered by capability match.
  *
- * Matches the /accept gate's semantics (ANY of the required caps must be in
- * the agent's set). Used by the frontend at task-creation time to discover
- * which pubkeys to ECIES-wrap the AES key to.
+ * Matches the /accept gate's semantics (superset: the agent's set must include
+ * ALL of the required caps). Used by the frontend at task-creation time to
+ * discover which pubkeys to ECIES-wrap the AES key to.
  *
  * Returns at most MAX_AGENTS entries; small enough today that we don't
  * paginate. If we ever scale past ~1k registered executors this should move
@@ -75,5 +75,5 @@ export async function listAgents(requiredCapabilities?: string[]): Promise<Agent
   }
 
   if (!requiredCapabilities || requiredCapabilities.length === 0) return agents;
-  return agents.filter((a) => requiredCapabilities.some((c) => a.capabilities.includes(c as AgentExecutor['capabilities'][number])));
+  return agents.filter((a) => requiredCapabilities.every((c) => a.capabilities.includes(c as AgentExecutor['capabilities'][number])));
 }

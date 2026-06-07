@@ -284,7 +284,9 @@ a2aRouter.post('/register', requireAuth, async (req: AuthRequest, res, next) => 
 
 /**
  * GET /api/v1/a2a/executors
- * List registered A2A executors, optionally filtered by capability (ANY-match).
+ * List registered A2A executors, optionally filtered by capability (superset /
+ * ALL-match: an agent is returned only if its capability set includes every
+ * requested capability).
  *
  * Public — the executor set is not sensitive (you can see them all by polling
  * /a2a/tasks accepts anyway). Used by the frontend at task-creation time to
@@ -370,17 +372,17 @@ a2aRouter.post('/tasks/:id/accept', requireAuth, async (req: AuthRequest, res, n
       throw new AppError(403, 'NOT_REGISTERED', 'Register as an agent executor first');
     }
     if (meta.requiredCapabilities.length > 0) {
-      // Match the PostTask UI copy: "an executor agent matches if it has any one".
-      // Tasks usually list multiple caps as hints, not strict requirements — a
-      // worker with summarization can take a task tagged web_research+summarization
-      // even if it doesn't claim web_research.
-      const hasAny = meta.requiredCapabilities.some((c) => agent.capabilities.includes(c));
-      if (!hasAny) {
-        console.warn(`[a2a] accept: capability mismatch for ${taskId}: agent has [${agent.capabilities.join(',')}], needs one of [${meta.requiredCapabilities.join(',')}]`);
+      // Match the PostTask UI copy: "an executor agent matches only if it has ALL
+      // of them". Required caps are strict requirements (superset match): the
+      // agent's capability set must include every cap the task lists — a worker
+      // with only summarization can NOT take a task tagged web_research+summarization.
+      const hasAll = meta.requiredCapabilities.every((c) => agent.capabilities.includes(c));
+      if (!hasAll) {
+        console.warn(`[a2a] accept: capability mismatch for ${taskId}: agent has [${agent.capabilities.join(',')}], must have ALL of [${meta.requiredCapabilities.join(',')}]`);
         throw new AppError(
           403,
           'CAPABILITY_MISMATCH',
-          `Need at least one of: ${meta.requiredCapabilities.join(', ')}`,
+          `Need all of: ${meta.requiredCapabilities.join(', ')}`,
         );
       }
     }
@@ -522,9 +524,9 @@ a2aRouter.post('/tasks/:id/accept', requireAuth, async (req: AuthRequest, res, n
  * to them yet (e.g. they registered after the task was posted). Idempotent —
  * re-bidding from the same address just refreshes the bidAt timestamp.
  *
- * Capability gate matches /accept (ANY-of). Bids on tasks the agent couldn't
- * accept anyway are rejected at intent time so the poster's wrap step doesn't
- * burn cycles wrapping to executors who can't legally accept.
+ * Capability gate matches /accept (superset / ALL-of). Bids on tasks the agent
+ * couldn't accept anyway are rejected at intent time so the poster's wrap step
+ * doesn't burn cycles wrapping to executors who can't legally accept.
  */
 a2aRouter.post('/tasks/:id/bid', requireAuth, async (req: AuthRequest, res, next) => {
   try {
@@ -546,12 +548,12 @@ a2aRouter.post('/tasks/:id/bid', requireAuth, async (req: AuthRequest, res, next
       );
     }
     if (meta.requiredCapabilities.length > 0) {
-      const hasAny = meta.requiredCapabilities.some((c) => agent.capabilities.includes(c));
-      if (!hasAny) {
+      const hasAll = meta.requiredCapabilities.every((c) => agent.capabilities.includes(c));
+      if (!hasAll) {
         throw new AppError(
           403,
           'CAPABILITY_MISMATCH',
-          `Need at least one of: ${meta.requiredCapabilities.join(', ')}`,
+          `Need all of: ${meta.requiredCapabilities.join(', ')}`,
         );
       }
     }

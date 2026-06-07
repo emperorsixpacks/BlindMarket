@@ -147,6 +147,18 @@ const SCENARIOS: Scenario[] = [
     resultData: { output: 'Should never get submitted because accept is rejected.' },
     expect: 'AcceptRejected',
   },
+  {
+    // Superset-gate regression guard: executor has ONE of the two required caps.
+    // Under the old ANY-match this passed /accept; under superset (ALL-of) it
+    // must be 403'd. This is the exact case that flips, so it pins the predicate.
+    name: 'capability-partial-overlap-block',
+    bountyUsdc: '0.5',
+    executorCapabilities: ['data_processing'],
+    requiredCapabilities: ['data_processing', 'code_execution'], // missing code_execution → 403 on /accept
+    criteria: { min_length: 10 },
+    resultData: { output: 'Should never get submitted because accept is rejected.' },
+    expect: 'AcceptRejected',
+  },
 ];
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

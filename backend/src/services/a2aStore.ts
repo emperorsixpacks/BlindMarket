@@ -293,8 +293,11 @@ export async function browseAgentTasks(
     if (state.status !== 'open') continue;
 
     if (capabilities && capabilities.length > 0 && meta.requiredCapabilities.length > 0) {
-      const overlap = meta.requiredCapabilities.filter((c) => capabilities.includes(c));
-      if (overlap.length === 0) continue;
+      // Superset match against /accept: the browsing agent's caps must include
+      // ALL of the task's required caps, so browse only lists tasks the agent
+      // could actually accept (no partial-overlap teasers it would be 403'd on).
+      const hasAll = meta.requiredCapabilities.every((c) => capabilities.includes(c));
+      if (!hasAll) continue;
     }
 
     out.push({ meta, state });

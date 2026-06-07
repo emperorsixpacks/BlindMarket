@@ -223,3 +223,77 @@ describe('POST /accept — key custody', () => {
     expect(svc.rewrap).not.toHaveBeenCalled();
   });
 });
+
+// ── Capability gate (superset / ALL-of match) ──────────────────────────────
+//
+// Regression guard for the ANY-match -> superset-match flip (a2a.ts accept
+// gate). The key-custody suite above uses requiredCapabilities:[], which
+// short-circuits the gate (a2a.ts: `if (meta.requiredCapabilities.length > 0)`)
+// and therefore provides ZERO coverage of the predicate — it would pass under
+// BOTH some() and every(). These cases drive the predicate directly. We use
+// tasks with NO rootHash so the handler skips the NEEDS_WRAP / custody branch
+// and the capability decision alone determines the outcome.
+describe('POST /accept — capability gate (superset match)', () => {
+  it('partial overlap is REJECTED: agent has one of two required caps → 403 CAPABILITY_MISMATCH', async () => {
+    vi.mocked(agentStore.getAgent).mockResolvedValue(
+      agentRecord({ capabilities: ['data_processing'] }) as any,
+    );
+    vi.mocked(a2aStore.getMeta).mockResolvedValue(
+      meta({ requiredCapabilities: ['data_processing', 'code_execution'] }) as any,
+    );
+
+    const res = await accept();
+
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('CAPABILITY_MISMATCH');
+    expect(a2aStore.tryAccept).not.toHaveBeenCalled(); // gated before the CAS
+    expect(settleAssignment).not.toHaveBeenCalled();
+  });
+
+  it('disjoint caps are REJECTED: 403 CAPABILITY_MISMATCH', async () => {
+    vi.mocked(agentStore.getAgent).mockResolvedValue(
+      agentRecord({ capabilities: ['translation'] }) as any,
+    );
+    vi.mocked(a2aStore.getMeta).mockResolvedValue(
+      meta({ requiredCapabilities: ['data_processing', 'code_execution'] }) as any,
+    );
+
+    const res = await accept();
+
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('CAPABILITY_MISMATCH');
+    expect(a2aStore.tryAccept).not.toHaveBeenCalled();
+  });
+
+  it('superset is ACCEPTED: agent has all required caps plus extras → 200', async () => {
+    vi.mocked(agentStore.getAgent).mockResolvedValue(
+      agentRecord({ capabilities: ['data_processing', 'code_execution', 'translation'] }) as any,
+    );
+    // No rootHash → skips NEEDS_WRAP/custody; the capability gate is the only filter.
+    vi.mocked(a2aStore.getMeta).mockResolvedValue(
+      meta({ requiredCapabilities: ['data_processing', 'code_execution'] }) as any,
+    );
+    vi.mocked(a2aStore.tryAccept).mockResolvedValue({ ok: true, state: {} } as any);
+
+    const res = await accept();
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.status).toBe('accepted');
+    expect(settleAssignment).toHaveBeenCalledWith(TASK, AGENT);
+  });
+
+  it('exact match is ACCEPTED: agent caps equal required caps → 200', async () => {
+    vi.mocked(agentStore.getAgent).mockResolvedValue(
+      agentRecord({ capabilities: ['data_processing', 'code_execution'] }) as any,
+    );
+    vi.mocked(a2aStore.getMeta).mockResolvedValue(
+      meta({ requiredCapabilities: ['data_processing', 'code_execution'] }) as any,
+    );
+    vi.mocked(a2aStore.tryAccept).mockResolvedValue({ ok: true, state: {} } as any);
+
+    const res = await accept();
+
+    expect(res.status).toBe(200);
+    expect(settleAssignment).toHaveBeenCalledWith(TASK, AGENT);
+  });
+});
