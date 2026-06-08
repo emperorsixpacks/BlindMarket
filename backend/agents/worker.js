@@ -30,6 +30,7 @@ import { fileURLToPath } from 'url';
 import { dirname as pathDirname, join as pathJoin } from 'path';
 import { runInNewContext } from 'vm';
 import { ethers } from 'ethers';
+import { io as socketClient } from 'socket.io-client';
 import {
   decryptSensitive,
   aesEncrypt,
@@ -298,9 +299,13 @@ function isTransientAssignmentRevert(err) {
   }
   return false;
 }
-
 const appliedTasks = new Set();
+
 const bidPlacedTasks = new Set();
+
+// Guard against concurrent task execution — WS events and poll fallback
+// must not overlap (both use the same wallet for tx signing).
+let _working = false;
 // Tasks currently being re-driven by resumeAssignedTasks(), so overlapping poll
 // cycles never double-run the same one. resumeFailures caps wasted retries on a
 // task that can't finalize (e.g. past its on-chain deadline) so it can't burn
@@ -771,6 +776,11 @@ async function releaseTask(taskHash) {
 }
 
 async function pollAndWork() {
+  if (_working) {
+    log('poll skipped: another task is in progress');
+    return;
+  }
+  _working = true;
   try {
     sendHeartbeat();
 
@@ -810,95 +820,15 @@ async function pollAndWork() {
       return;
     }
 
-    let acceptedTaskHash = null;
-    let acceptedEntry = null;
-    let acceptedRootHash = null;
-    let acceptedWrappedKey = null;
-
     for (const entry of available) {
       const taskHash = entry.meta.taskId;
-      log(`accepting task ${taskHash.slice(0, 10)}…`);
-      const acceptRes = await fetchWithTimeout(`${BACKEND_URL}/api/v1/a2a/tasks/${taskHash}/accept`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${AGENT_PLATFORM_TOKEN}`,
-        },
-      });
-      if (acceptRes.ok) {
-        appliedTasks.add(taskHash);
-        acceptedTaskHash = taskHash;
-        acceptedEntry = entry;
-        try {
-          const acceptJson = await acceptRes.json();
-          acceptedRootHash = acceptJson.data?.rootHash ?? null;
-          acceptedWrappedKey = acceptJson.data?.wrappedKey ?? null;
-        } catch {
-          // Non-JSON response body; treat as no brief available.
-        }
-        break;
-      }
-      const err = await acceptRes.json().catch(() => ({}));
-      // Include the backend's message so the user can self-diagnose without
-      // grepping source. For CAPABILITY_MISMATCH specifically, also surface
-      // this agent's own caps so the gap is obvious — the most common
-      // misread of these logs is "the matcher is broken" when the agent
-      // simply doesn't have any of the task's required capabilities.
-      const errMsg = err.error?.message ? ` — ${err.error.message}` : '';
-      let extra = '';
-      if (acceptRes.status === 403 && err.error?.code === 'CAPABILITY_MISMATCH') {
-        extra = ` (this agent has: ${agentCapabilities.join(',')})`;
-      }
-      log(`accept failed for ${taskHash.slice(0, 10)}…: ${acceptRes.status} ${err.error?.code || ''}${errMsg}${extra}`);
-
-      if (acceptRes.status === 403 && err.error?.code === 'NEEDS_WRAP') {
-        if (!bidPlacedTasks.has(taskHash)) {
-          try {
-            const bidRes = await fetchWithTimeout(`${BACKEND_URL}/api/v1/a2a/tasks/${taskHash}/bid`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${AGENT_PLATFORM_TOKEN}`,
-              },
-            });
-            if (bidRes.ok) {
-              bidPlacedTasks.add(taskHash);
-              log(`bid registered on ${taskHash.slice(0, 10)}… — awaiting wrap`);
-            } else {
-              const bidErr = await bidRes.json().catch(() => ({}));
-              log(`bid failed for ${taskHash.slice(0, 10)}…: ${bidRes.status} ${bidErr.error?.code || ''}`);
-              if (bidRes.status === 403 || bidRes.status === 400) {
-                appliedTasks.add(taskHash);
-              }
-            }
-          } catch (bidErr) {
-            log(`bid network error for ${taskHash.slice(0, 10)}…: ${bidErr.message || bidErr}`);
-          }
-        }
-        continue;
-      }
-
-      if (acceptRes.status === 403 || acceptRes.status === 409) {
-        appliedTasks.add(taskHash);
-        continue;
-      }
-      return;
+      const accepted = await tryAcceptTask(taskHash);
+      if (accepted) break; // tryAcceptTask runs the full pipeline internally
     }
-
-    if (!acceptedTaskHash) {
-      log(`could not accept any of the ${available.length} available tasks`);
-      return;
-    }
-
-    // Fresh accept: give the fire-and-forget marketplaceAssign a moment to land
-    // before we use the assignment. Resume skips this wait — its assignment was
-    // confirmed long ago (see resumeAssignedTasks).
-    log(`waiting for on-chain assignment to confirm for ${acceptedTaskHash.slice(0, 10)}…`);
-    await sleep(12_000);
-
-    await runAcceptedTask(acceptedTaskHash, acceptedRootHash, acceptedWrappedKey);
   } catch (err) {
     log(`error: ${err.message}`);
+  } finally {
+    _working = false;
   }
 }
 
@@ -1444,12 +1374,151 @@ async function ensureRegisteredAsA2AExecutor() {
   }
 }
 
+// ── WebSocket event-driven assignment ──
+//
+// Connects to the backend's Socket.IO server for push-based task offers
+// instead of polling. Falls back to long-interval poll as safety net.
+
+let wsClient = null;
+
+function connectWebSocket() {
+  const socketUrl = BACKEND_URL.replace(/^http/, 'ws');
+  wsClient = socketClient(socketUrl, {
+    transports: ['websocket'],
+    auth: { token: AGENT_PLATFORM_TOKEN },
+    reconnection: true,
+    reconnectionDelay: 2_000,
+    reconnectionDelayMax: 30_000,
+  });
+
+  wsClient.on('connect', () => {
+    const agentAddress = deriveAddressFromPubkey(AGENT_PUBLIC_KEY);
+    log(`WS connected as ${AGENT_NAME} (${agentAddress.slice(0, 10)}…)`);
+    // Join the agent's personal room to receive exclusive task:offer events
+    wsClient.emit('join', `agent:${agentAddress}`);
+    // Also join the global tasks room for broadcast task:available events
+    wsClient.emit('join', 'tasks');
+  });
+
+  wsClient.on('task:offer', (data) => {
+    log(`WS received task:offer for ${data.taskId?.slice(0, 10) || 'unknown'}… (score=${data.score})`);
+    if (!data.taskId) return;
+    acceptFromWs(data.taskId);
+  });
+
+  wsClient.on('task:available', (data) => {
+    log(`WS received task:available for ${data.taskId?.slice(0, 10) || 'unknown'}…`);
+    if (!data.taskId) return;
+    acceptFromWs(data.taskId);
+  });
+
+  wsClient.on('disconnect', (reason) => {
+    log(`WS disconnected: ${reason}`);
+  });
+
+  wsClient.on('connect_error', (err) => {
+    log(`WS connection error: ${err.message}`);
+  });
+}
+
+function deriveAddressFromPubkey(pubkeyHex) {
+  try {
+    return ethers.computeAddress('0x' + pubkeyHex).toLowerCase();
+  } catch {
+    return 'unknown';
+  }
+}
+
+// Consolidated accept logic shared by WS handlers and poll fallback.
+// Does NOT manage _working — caller must set/clear it.
+// Returns true if a task was accepted (and will be worked on the current
+// microtask); false if the task was skipped.
+async function tryAcceptTask(taskHash) {
+  if (appliedTasks.has(taskHash)) return false;
+  log(`accepting task ${taskHash.slice(0, 10)}…`);
+
+  const acceptRes = await fetchWithTimeout(`${BACKEND_URL}/api/v1/a2a/tasks/${taskHash}/accept`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${AGENT_PLATFORM_TOKEN}`,
+    },
+  });
+
+  if (acceptRes.ok) {
+    appliedTasks.add(taskHash);
+    let rootHash = null;
+    let wrappedKey = null;
+    try {
+      const acceptJson = await acceptRes.json();
+      rootHash = acceptJson.data?.rootHash ?? null;
+      wrappedKey = acceptJson.data?.wrappedKey ?? null;
+    } catch { /* non-JSON body */ }
+    log(`assignment confirmed for ${taskHash.slice(0, 10)}…, starting work`);
+    // Run the task in the foreground (blocks this handler until done)
+    await runAcceptedTask(taskHash, rootHash, wrappedKey);
+    return true;
+  }
+
+  const err = await acceptRes.json().catch(() => ({}));
+  const errMsg = err.error?.message ? ` — ${err.error.message}` : '';
+  let extra = '';
+  if (acceptRes.status === 403 && err.error?.code === 'CAPABILITY_MISMATCH') {
+    extra = ` (this agent has: ${agentCapabilities.join(',')})`;
+  }
+  log(`accept failed for ${taskHash.slice(0, 10)}…: ${acceptRes.status} ${err.error?.code || ''}${errMsg}${extra}`);
+
+  if (acceptRes.status === 403 && err.error?.code === 'NEEDS_WRAP') {
+    if (!bidPlacedTasks.has(taskHash)) {
+      try {
+        const bidRes = await fetchWithTimeout(`${BACKEND_URL}/api/v1/a2a/tasks/${taskHash}/bid`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${AGENT_PLATFORM_TOKEN}`,
+          },
+        });
+        if (bidRes.ok) {
+          bidPlacedTasks.add(taskHash);
+          log(`bid registered on ${taskHash.slice(0, 10)}… — awaiting wrap`);
+        } else {
+          appliedTasks.add(taskHash);
+        }
+      } catch { /* network error */ }
+    }
+  } else if (acceptRes.status === 403 || acceptRes.status === 409) {
+    appliedTasks.add(taskHash);
+  }
+  return false;
+}
+
+// WS-triggered accept with concurrency guard.
+async function acceptFromWs(taskHash) {
+  if (_working) {
+    log(`WS accept skipped for ${taskHash.slice(0, 10)}…: another task in progress`);
+    return;
+  }
+  if (appliedTasks.has(taskHash)) return;
+  _working = true;
+  try {
+    await tryAcceptTask(taskHash);
+  } catch (err) {
+    log(`WS accept error for ${taskHash.slice(0, 10)}…: ${err.message}`);
+  } finally {
+    _working = false;
+  }
+}
+
 // Skip auto-start under test: the suite imports this module to exercise
 // buildTools() and must not kick off registration / the polling loop.
 if (process.env.NODE_ENV !== 'test') {
   (async () => {
     await ensureRegisteredAsA2AExecutor();
-    setInterval(pollAndWork, POLL_INTERVAL_MS);
-    pollAndWork();
+    // Connect WebSocket for push-based assignment (instant task offers)
+    connectWebSocket();
+    // Keep a long-interval poll as safety net for missed WS events
+    setInterval(() => { pollAndWork().catch(() => {}); }, 5 * 60 * 1000);
+    // Run initial poll to catch any tasks posted before WS connected
+    pollAndWork().catch(() => {});
   })();
 }
