@@ -139,59 +139,69 @@ async function getFeeBps(): Promise<number> {
 
 /**
  * Record a successful task completion on the executor's record: bump
- * tasksCompleted, reputation, and totalEarnedRaw by the worker's share of the
- * escrow (amount minus platform fee). Idempotent at the route level — only
- * called from auto-/verify success branches, each of which checks state isn't
- * already 'verified' before transitioning.
+ * tasksCompleted, reputation, and totalEarnedRaw TOGETHER by the worker's share
+ * of the escrow (gross amount minus platform fee).
+ *
+ * The on-chain id and gross amount are resolved by the CALLER (which has already
+ * confirmed the task is indexed + on-chain Submitted/Completed) and passed in —
+ * this function never does its own getTaskIdByHash lookup. That closes the
+ * "3 tasks · 0 0G" drift: previously tasksCompleted was bumped unconditionally
+ * while totalEarnedRaw was only written if a SECOND, internal getTaskIdByHash
+ * happened to resolve. Under indexing lag that lookup returned null (even though
+ * the caller's own lookup resolved a moment later and settlement still fired),
+ * so the task counter advanced while the earnings credit was silently dropped,
+ * and the route's state guard then blocked any retry from repairing it.
  *
  * Persists to Redis (agentStore) so the /agents endpoint can surface these
  * stats to the UI without re-deriving from on-chain history. If anything in
  * here fails we log + continue: settleVerification still fires and the worker
  * still gets paid on chain — only the UI counter is at risk.
  */
-async function recordWorkerPayout(taskHash: string, executorAddr: string): Promise<void> {
+async function recordWorkerPayout(
+  taskHash: string,
+  executorAddr: string,
+  onChainId: string,
+  grossAmount: bigint,
+): Promise<void> {
   try {
     const agent = await agentStore.getAgent(executorAddr);
     if (!agent) return;
+
+    const feeBps = await getFeeBps();
+    const workerShare = (grossAmount * (10_000n - BigInt(feeBps))) / 10_000n;
+    const platformFee = grossAmount - workerShare;
+
+    // tasksCompleted, reputation, and totalEarnedRaw move as one unit — the task
+    // counter is never advanced without crediting the matching earnings.
     agent.tasksCompleted += 1;
     agent.reputation = Math.min(100, agent.reputation + 1);
-
-    const onChainId = await getTaskIdByHash(taskHash);
-    if (onChainId) {
-      const task = await escrowService.getTask(Number(onChainId));
-      const feeBps = await getFeeBps();
-      const workerShare = (task.amount * (10_000n - BigInt(feeBps))) / 10_000n;
-      const platformFee = task.amount - workerShare;
-      const prev = BigInt(agent.totalEarnedRaw ?? '0');
-      agent.totalEarnedRaw = (prev + workerShare).toString();
-
-      // Mirror the payout into the accounting ledger so the Earnings page can
-      // surface it. Native 0G has 18 decimals.
-      try {
-        // Ledger convention (must match submissions.ts /verify):
-        //   amount = GROSS escrow (worker share + platform fee)
-        //   fee    = platform fee
-        //   net    = worker take-home = amount − fee = workerShare
-        // Passing `net` explicitly avoids recordTransaction's default of
-        // `amount − fee`, which — when amount was the already-net workerShare —
-        // subtracted the fee a second time and zeroed out Net revenue.
-        accountingService.recordTransaction({
-          address: executorAddr.toLowerCase(),
-          role: 'worker',
-          taskId: onChainId,
-          type: 'payment',
-          amount: Number(task.amount) / 1e18,
-          fee: Number(platformFee) / 1e18,
-          net: Number(workerShare) / 1e18,
-          status: 'confirmed',
-        });
-      } catch (acctErr) {
-        console.warn(`[a2a] accounting recordTransaction failed for ${taskHash.slice(0, 10)}…:`, (acctErr as Error).message);
-      }
-    } else {
-      console.warn(`[a2a] recordWorkerPayout: hash ${taskHash.slice(0, 10)}… not indexed yet; tasksCompleted bumped but totalEarnedRaw untouched`);
-    }
+    const prev = BigInt(agent.totalEarnedRaw ?? '0');
+    agent.totalEarnedRaw = (prev + workerShare).toString();
     await agentStore.registerAgent(agent);
+
+    // Mirror the payout into the accounting ledger so the Earnings page can
+    // surface it. Native 0G has 18 decimals.
+    try {
+      // Ledger convention (must match submissions.ts /verify):
+      //   amount = GROSS escrow (worker share + platform fee)
+      //   fee    = platform fee
+      //   net    = worker take-home = amount − fee = workerShare
+      // Passing `net` explicitly avoids recordTransaction's default of
+      // `amount − fee`, which — when amount was the already-net workerShare —
+      // subtracted the fee a second time and zeroed out Net revenue.
+      accountingService.recordTransaction({
+        address: executorAddr.toLowerCase(),
+        role: 'worker',
+        taskId: onChainId,
+        type: 'payment',
+        amount: Number(grossAmount) / 1e18,
+        fee: Number(platformFee) / 1e18,
+        net: Number(workerShare) / 1e18,
+        status: 'confirmed',
+      });
+    } catch (acctErr) {
+      console.warn(`[a2a] accounting recordTransaction failed for ${taskHash.slice(0, 10)}…:`, (acctErr as Error).message);
+    }
 
     // Off-chain decay-based reputation (Neon PostgreSQL)
     try {
@@ -1141,39 +1151,40 @@ a2aRouter.post('/tasks/:id/finalize', requireAuth, async (req: AuthRequest, res,
     const verificationResult = autoVerify(state.resultData, meta.verificationCriteria);
     const newStatus: 'verified' | 'failed' = verificationResult.passed ? 'verified' : 'failed';
 
+    // Resolve + gate the on-chain task BEFORE mutating a2a state or executor
+    // stats. If the createTask event isn't indexed yet, or submitEvidence hasn't
+    // confirmed, we 503 with state still 'submitted' so the executor's retry
+    // re-runs cleanly — instead of advancing to 'verified', bumping
+    // tasksCompleted, and then losing the earnings credit to the indexing-lag
+    // race (the "3 tasks · 0 0G" bug). Without submitEvidence confirmed the
+    // bridge's completeVerification would also revert with InvalidStatus and the
+    // task would stick permanently.
+    const ocId = await getTaskIdByHash(taskHash);
+    if (!ocId) {
+      throw new AppError(
+        503,
+        'NOT_INDEXED',
+        'On-chain taskId not yet indexed — wait a few seconds and retry',
+      );
+    }
+    const onChainTask = await escrowService.getTask(Number(ocId));
+    if (onChainTask.status !== 2) { // 2 = Submitted
+      throw new AppError(
+        503,
+        'NOT_SUBMITTED_ON_CHAIN',
+        `SubmitEvidence not yet confirmed on-chain (status=${onChainTask.status}). Wait for the tx to confirm and retry.`,
+      );
+    }
+
     await a2aStore.updateState(taskHash, {
       status: newStatus,
       verificationResult,
     });
 
     if (verificationResult.passed) {
-      await recordWorkerPayout(taskHash, address);
+      await recordWorkerPayout(taskHash, address, ocId, onChainTask.amount);
     } else {
       await recordWorkerDispute(taskHash, address);
-    }
-
-    // Verify the submitEvidence tx has confirmed on-chain before asking the
-    // bridge to call completeVerification. If the executor called /finalize
-    // before broadcasting or before the tx mined, the contract status is still
-    // Assigned — the bridge would call completeVerification, get an
-    // InvalidStatus revert, and silently treat it as "already settled" via
-    // isAlreadySettled, leaving the task stuck permanently.
-    const ocId = await getTaskIdByHash(taskHash);
-    if (ocId) {
-      const onChainTask = await escrowService.getTask(Number(ocId));
-      if (onChainTask.status !== 2) { // 2 = Submitted
-        throw new AppError(
-          503,
-          'NOT_SUBMITTED_ON_CHAIN',
-          `SubmitEvidence not yet confirmed on-chain (status=${onChainTask.status}). Wait for the tx to confirm and retry.`,
-        );
-      }
-    } else {
-      throw new AppError(
-        503,
-        'NOT_INDEXED',
-        'On-chain taskId not yet indexed — wait a few seconds and retry',
-      );
     }
 
     // Bridge: marketplace signer calls completeVerification on chain.
@@ -1226,36 +1237,38 @@ a2aRouter.post('/tasks/:id/verify', requireAuth, async (req: AuthRequest, res, n
     const verificationResult = { passed, reasons: reasons ?? [] };
     const newStatus: 'verified' | 'failed' = passed ? 'verified' : 'failed';
 
+    // Resolve + gate the on-chain task BEFORE mutating a2a state or executor
+    // stats, so an indexing-lag 503 leaves state='submitted' for a clean retry
+    // instead of advancing to 'verified' and bumping tasksCompleted while the
+    // earnings credit is lost (the "3 tasks · 0 0G" drift). The executor may
+    // have called /finalize (manual mode defers to /verify) before the
+    // submitEvidence tx mined, so confirm status=Submitted here too.
+    const ocId = await getTaskIdByHash(taskHash);
+    if (!ocId) {
+      throw new AppError(
+        503,
+        'NOT_INDEXED',
+        'On-chain taskId not yet indexed — wait a few seconds and retry',
+      );
+    }
+    const onChainTask = await escrowService.getTask(Number(ocId));
+    if (onChainTask.status !== 2) { // 2 = Submitted
+      throw new AppError(
+        503,
+        'NOT_SUBMITTED_ON_CHAIN',
+        `SubmitEvidence not yet confirmed on-chain (status=${onChainTask.status}). Wait for the tx to confirm and retry.`,
+      );
+    }
+
     await a2aStore.updateState(taskHash, {
       status: newStatus,
       verificationResult,
     });
 
     if (passed && state.executorAddress) {
-      await recordWorkerPayout(taskHash, state.executorAddress);
+      await recordWorkerPayout(taskHash, state.executorAddress, ocId, onChainTask.amount);
     } else if (!passed && state.executorAddress) {
       await recordWorkerDispute(taskHash, state.executorAddress);
-    }
-
-    // Verify the submitEvidence tx has confirmed on-chain before calling the
-    // bridge. The executor may have called /finalize (manual mode defers to
-    // /verify) before the submitEvidence tx mined.
-    const ocId = await getTaskIdByHash(taskHash);
-    if (ocId) {
-      const onChainTask = await escrowService.getTask(Number(ocId));
-      if (onChainTask.status !== 2) { // 2 = Submitted
-        throw new AppError(
-          503,
-          'NOT_SUBMITTED_ON_CHAIN',
-          `SubmitEvidence not yet confirmed on-chain (status=${onChainTask.status}). Wait for the tx to confirm and retry.`,
-        );
-      }
-    } else {
-      throw new AppError(
-        503,
-        'NOT_INDEXED',
-        'On-chain taskId not yet indexed — wait a few seconds and retry',
-      );
     }
 
     // Bridge: marketplace signer calls completeVerification on chain.
@@ -1373,7 +1386,9 @@ a2aRouter.post('/tasks/:id/verdict', requireAuth, async (req: AuthRequest, res, 
     await a2aStore.updateState(taskHash, { status: newStatus, verificationResult });
 
     if (passed && state.executorAddress) {
-      await recordWorkerPayout(taskHash, state.executorAddress);
+      // ocId + onChainTask were already resolved + gated above (status must be
+      // Completed=4 here), so the payout credit can't be lost to an indexing race.
+      await recordWorkerPayout(taskHash, state.executorAddress, ocId, onChainTask.amount);
     } else if (!passed && state.executorAddress) {
       await recordWorkerDispute(taskHash, state.executorAddress);
     }
