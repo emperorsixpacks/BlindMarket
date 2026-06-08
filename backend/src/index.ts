@@ -2,7 +2,7 @@ import express from 'express';
 import { createServer } from 'http';
 import cors from 'cors';
 import helmet from 'helmet';
-import { config } from './config.js';
+import { config, assertBootConfig } from './config.js';
 import { globalErrorHandler } from './middleware/errorHandler.js';
 import { createRateLimiter } from './middleware/rateLimit.js';
 import { requestLogger } from './middleware/requestLogger.js';
@@ -30,7 +30,11 @@ import { getDb } from './services/database.js';
 import { startEscrowEventLoop } from './services/escrowEvents.js';
 import { isBridgeConfigured } from './services/a2aSettlement.js';
 import { marketplaceSigner, escrow } from './services/chain.js';
+import { reconcileAgents } from './services/agentRunner.js';
 import { config as appConfig } from './config.js';
+
+// Fail fast on a misconfigured (esp. production) deploy before binding the port.
+assertBootConfig();
 
 const app = express();
 
@@ -115,6 +119,15 @@ httpServer.listen(config.port, () => {
   // mapping that the A2A settlement bridge needs to call assignWorker /
   // completeVerification by on-chain id.
   startEscrowEventLoop();
+
+  // Re-fork agents that were 'running' before this restart — the in-memory
+  // process map doesn't survive a deploy/crash, so without this they show
+  // 'running' in the UI but do no work and stop heartbeating. Off only if an
+  // operator running an unusual (multi-instance) topology opts out, since each
+  // instance would otherwise re-fork the same agents.
+  if (process.env.AGENT_RECONCILE_ON_BOOT !== 'false') {
+    void reconcileAgents();
+  }
   // Visibility into whether the A2A settlement bridge will actually fire
   // when an agent accepts/submits. Off-by-default if MARKETPLACE_SIGNER_PRIVATE_KEY
   // is unset; when on, log the signer address so it's clear which key is signing.
