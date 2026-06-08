@@ -1,10 +1,16 @@
 import { Router } from 'express';
+import { formatEther } from 'ethers';
 import type { ApiResponse } from '../types.js';
-import { escrow, marketplaceSigner } from '../services/chain.js';
+import { escrow, marketplaceSigner, provider } from '../services/chain.js';
 import { isBridgeConfigured } from '../services/a2aSettlement.js';
 import { config } from '../config.js';
 
 export const healthRouter = Router();
+
+// Below this native-0G balance the marketplace signer is at risk of failing to
+// broadcast marketplaceAssign / completeVerification (out of gas), which surfaces
+// as BRIDGE_FAILED even though the verifier role is correct.
+const SIGNER_GAS_LOW_OG = 0.02;
 
 healthRouter.get('/', (_req, res) => {
   const body: ApiResponse<{ status: string; timestamp: string }> = {
@@ -45,6 +51,23 @@ healthRouter.get('/bridge', async (_req, res, next) => {
     const verifierMatches =
       onChainVerifier !== null &&
       onChainVerifier.toLowerCase() === signerAddr.toLowerCase();
+
+    // Signer gas balance — disambiguates BRIDGE_FAILED. A signer that holds the
+    // verifier role but is out of gas can't broadcast marketplaceAssign /
+    // completeVerification, so tasks stick exactly like a role mismatch would.
+    // Best-effort: if the RPC read fails, still return the verifier info above.
+    let signerBalanceOg: string | null = null;
+    let signerGasLow: boolean | null = null;
+    let signerBalanceError: string | null = null;
+    try {
+      const balanceWei = await provider.getBalance(signerAddr);
+      const og = Number(formatEther(balanceWei));
+      signerBalanceOg = formatEther(balanceWei);
+      signerGasLow = og < SIGNER_GAS_LOW_OG;
+    } catch (e) {
+      signerBalanceError = (e as Error).message;
+    }
+
     const network = config.ogChainId === 16661 ? 'mainnet' : 'testnet';
     const body: ApiResponse = {
       success: true,
@@ -56,6 +79,9 @@ healthRouter.get('/bridge', async (_req, res, next) => {
         onChainVerifier,
         verifierMatches,
         escrowReadError,
+        signerBalanceOg,
+        signerGasLow,
+        signerBalanceError,
         rotateCommand: verifierMatches
           ? null
           : `cd contracts && MARKETPLACE_SIGNER_ADDRESS=${signerAddr} npx hardhat run scripts/rotate-verifier.ts --network 0g-${network}`,
