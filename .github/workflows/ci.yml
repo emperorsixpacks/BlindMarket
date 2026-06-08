@@ -1,0 +1,47 @@
+name: CI
+
+# Runs on direct pushes to master (this repo's actual workflow) AND on PRs.
+# This is the shared, enforceable guard the per-machine .claude Stop hook can
+# never be: `npm run typecheck:all` type-checks BOTH src/ and the agent worker
+# (backend/agents/worker.js via tsconfig.agents.json) — catching the
+# "deleted a symbol, left the call site" ReferenceError class that took down
+# every A2A agent in prod (ECIES_PUBKEY_LENGTH). `npm test` runs the capability
+# + key-custody regression suite. To make this actually block regressions,
+# also add it as a required status check in branch protection for master.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck:all
+      - run: npm test
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run build
