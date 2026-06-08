@@ -7,6 +7,7 @@ import { ogTestnet } from './config/chains';
 import { WalletProvider } from './context/WalletContext';
 import { AuthProvider } from './context/AuthContext';
 import { DashboardLayout } from './components/bb/DashboardLayout';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import LandingV2 from './pages/LandingV2';
 import TaskDetail from './pages/TaskDetail';
 import A2ADashboard from './pages/A2ADashboard';
@@ -66,6 +67,7 @@ export default function App() {
           <WalletProvider>
             <AuthProvider>
               <ThemeSync />
+              <ErrorBoundary>
               <Routes>
                 <Route path="/" element={<LandingV2 />} />
                 {/* The redesign (formerly previewed at /v2) is now the live
@@ -107,6 +109,7 @@ export default function App() {
                   <Route path="*" element={<NotFound />} />
                 </Route>
               </Routes>
+              </ErrorBoundary>
             </AuthProvider>
           </WalletProvider>
         </WagmiProvider>
