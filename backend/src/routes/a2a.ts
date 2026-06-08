@@ -18,6 +18,8 @@ import { redis } from '../services/redis.js';
 import { ethers } from 'ethers';
 import type { AuthRequest, ApiResponse, AgentCapability } from '../types.js';
 import { AGENT_CAPABILITIES } from '../types.js';
+import { rankAgents } from '../services/agentScorer.js';
+import { emitTaskOffer, emitTaskAvailable } from '../services/socket.js';
 
 export const a2aRouter = Router();
 
@@ -444,6 +446,23 @@ a2aRouter.post('/tasks/:id/accept', requireAuth, async (req: AuthRequest, res, n
       );
     }
 
+    // Check for an exclusive offer. If one exists and it's for this caller,
+    // proceed to CAS. If one exists for a different caller, refuse — the
+    // best-fit agent should get first dibs. If no offer (expired or never
+    // created), fall through to open CAS race.
+    const offer = await a2aStore.getOffer(taskId);
+    if (offer) {
+      if (offer.address.toLowerCase() !== address.toLowerCase()) {
+        console.warn(`[a2a] accept: offer belongs to ${offer.address}, caller is ${address}`);
+        throw new AppError(
+          409,
+          'OFFER_HELD',
+          'This task has been offered to a higher-scored agent; wait for the offer window to expire for CAS-race fallback',
+        );
+      }
+      // Caller holds the offer — they are the expected winner. Continue to CAS.
+    }
+
     // Atomic open→accepted via a Lua CAS. Two concurrent /accept requests can
     // both pass an open-state read, so we serialise the transition itself on
     // the Redis server. Loser gets 409, no on-chain side effect — preserves
@@ -489,14 +508,20 @@ a2aRouter.post('/tasks/:id/accept', requireAuth, async (req: AuthRequest, res, n
       console.log(`[a2a] accept: key-custody self-heal OK for ${taskId}, agent=${address}`);
     }
 
-    // Fire-and-forget on-chain settlement: backend marketplace signer calls
-    // marketplaceAssign(taskId, executor) so the contract knows who to pay.
-    // We deliberately don't await — the HTTP response returns immediately
-    // and the bridge logs its own progress. State update inside the bridge
-    // persists the tx hash to a2aStore so clients can poll for confirmation.
-    // Only reached after a successful self-heal (or when none was needed).
-    console.log(`[a2a] accept: transition OK for ${taskId}, triggering bridge assignment`);
-    void settleAssignment(taskId, address);
+    // Clear the exclusive offer now that the CAS is won.
+    await a2aStore.clearOffer(taskId).catch(() => {});
+
+    // Await on-chain settlement: marketplaceAssign(taskId, executor) so the
+    // contract knows who to pay. The HTTP response waits for confirmation,
+    // eliminating the redundant 12s sleep on the worker side.
+    console.log(`[a2a] accept: CAS won for ${taskId}, awaiting on-chain settlement`);
+    const settleResult = await settleAssignment(taskId, address);
+    if (!settleResult.success) {
+      console.error(`[a2a] accept: settlement failed for ${taskId}: ${settleResult.error}`);
+      // Release task back to open so another agent can retry.
+      try { await a2aStore.releaseToOpen(taskId); } catch { /* best-effort */ }
+      throw new AppError(503, 'SETTLEMENT_FAILED', `On-chain assignment failed: ${settleResult.error}. Task released — another agent may retry.`);
+    }
 
     // Encrypted-brief slice: return the caller's wrappedKey + rootHash so the
     // worker can download from 0G Storage and AES-decrypt. Use the freshly
@@ -512,6 +537,8 @@ a2aRouter.post('/tasks/:id/accept', requireAuth, async (req: AuthRequest, res, n
         status: 'accepted',
         rootHash: meta.rootHash,
         wrappedKey,
+        alreadySettled: settleResult.alreadySettled,
+        assignTxHash: settleResult.txHash,
       },
     };
     res.json(body);
@@ -830,12 +857,13 @@ a2aRouter.post('/tasks/index', requireAuth, async (req: AuthRequest, res, next) 
       }
     }
 
+    const requiredCaps = (data.requiredCapabilities ?? []) as AgentCapability[];
     await a2aStore.setMeta({
       taskId: taskHash,
       targetExecutorType: 'agent',
       verificationMode: data.verificationMode ?? 'manual',
       verificationCriteria: data.verificationCriteria,
-      requiredCapabilities: (data.requiredCapabilities ?? []) as AgentCapability[],
+      requiredCapabilities: requiredCaps,
       posterAddress: address,
       verifierAddress: data.verifierAddress?.toLowerCase(),
       rootHash: data.rootHash,
@@ -846,6 +874,34 @@ a2aRouter.post('/tasks/index', requireAuth, async (req: AuthRequest, res, next) 
     console.log(
       `[a2a] indexed taskHash=${taskHash.slice(0, 10)}… → onChainId=${onChainTaskId} poster=${address}`,
     );
+
+    // Score matching agents and emit exclusive offer to the best one.
+    // Non-blocking: if scoring fails or no agents match, the task is already
+    // in a2a:open for CAS-race fallback.
+    if (requiredCaps.length > 0) {
+      rankAgents(requiredCaps).then((ranked) => {
+        if (ranked.length === 0) {
+          emitTaskAvailable(taskHash, { requiredCapabilities: requiredCaps });
+          return;
+        }
+        const best = ranked[0];
+        const deadline = Date.now() + 15_000;
+        a2aStore.setOffer(taskHash, {
+          address: best.address,
+          score: best.score,
+          expiresAt: deadline,
+        }).catch(() => {});
+        emitTaskOffer(best.address, taskHash, {
+          requiredCapabilities: requiredCaps,
+          rootHash: data.rootHash,
+        }, best.score, deadline);
+      }).catch((err) => {
+        console.error(`[a2a] scoring/offer failed for ${taskHash.slice(0, 10)}…:`, (err as Error).message);
+        emitTaskAvailable(taskHash, { requiredCapabilities: requiredCaps });
+      });
+    } else {
+      emitTaskAvailable(taskHash, {});
+    }
 
     const body: ApiResponse = {
       success: true,
@@ -925,42 +981,24 @@ a2aRouter.post('/tasks/:id/submit', requireAuth, async (req: AuthRequest, res, n
       );
     }
 
-    // Wait briefly for the on-chain assignment to confirm before issuing the
-    // unsigned submitEvidence. /accept fires settleAssignment fire-and-forget,
-    // so task.worker can still be 0x0 here even though our A2A state moved to
-    // 'accepted'. Broadcasting submitEvidence in that window reverts with
-    // NotWorker() — wastes gas, no recovery on the worker side. Return 503 so
-    // the worker's existing 503-retry loop handles the wait.
-    const ASSIGNMENT_WAIT_DEADLINE_MS = 20_000;
-    const ASSIGNMENT_POLL_INTERVAL_MS = 2_000;
-    const assignDeadline = Date.now() + ASSIGNMENT_WAIT_DEADLINE_MS;
-    let onChainWorker = '';
-    while (true) {
+    // Single on-chain assignment check. /accept now awaits settleAssignment,
+    // so the assignment should already be confirmed. This is just a defensive
+    // sanity check with one retry in case of RPC lag.
+    {
       const onChainTask = await escrowService.getTask(Number(onChainId));
-      onChainWorker = onChainTask.worker;
-      if (onChainWorker.toLowerCase() === address.toLowerCase()) break;
-      // Re-check for a freshly-surfaced bridge error inside the poll loop —
-      // settleAssignment may have started concurrently with the worker's
-      // /submit-result and only just failed.
-      const freshState = await a2aStore.getState(taskHash);
-      if (freshState?.assignError) {
-        throw new AppError(
-          503,
-          'BRIDGE_FAILED',
-          `Assignment bridge failed mid-poll — ${freshState.assignError}. Release and retry.`,
-        );
+      if (onChainTask.worker.toLowerCase() !== address.toLowerCase()) {
+        // One retry after 2s — covers edge cases like reorgs.
+        await new Promise((r) => setTimeout(r, 2_000));
+        const retryTask = await escrowService.getTask(Number(onChainId));
+        if (retryTask.worker.toLowerCase() !== address.toLowerCase()) {
+          const freshState = await a2aStore.getState(taskHash);
+          if (freshState?.assignError) {
+            throw new AppError(503, 'BRIDGE_FAILED', `Assignment bridge failed — ${freshState.assignError}. Release and retry.`);
+          }
+          console.warn(`[a2a] submit: on-chain assignment not confirmed for ${taskHash} (task.worker=${retryTask.worker}, caller=${address})`);
+          throw new AppError(503, 'NOT_ASSIGNED_YET', `On-chain assignment not yet confirmed — task.worker=${retryTask.worker}, caller=${address}. Retry shortly.`);
+        }
       }
-      if (Date.now() >= assignDeadline) {
-        console.warn(
-          `[a2a] submit: on-chain assignment not confirmed for ${taskHash} after ${ASSIGNMENT_WAIT_DEADLINE_MS}ms (task.worker=${onChainWorker}, caller=${address})`,
-        );
-        throw new AppError(
-          503,
-          'NOT_ASSIGNED_YET',
-          `On-chain assignment not yet confirmed — task.worker=${onChainWorker}, caller=${address}. Retry shortly.`,
-        );
-      }
-      await new Promise((r) => setTimeout(r, ASSIGNMENT_POLL_INTERVAL_MS));
     }
 
     // Deterministic evidence hash = keccak256(JSON.stringify(resultData)).
