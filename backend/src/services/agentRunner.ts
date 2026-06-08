@@ -177,8 +177,28 @@ export async function startAgent(id: string): Promise<void> {
     }
   });
 
-  child.on('exit', async () => {
+  // A fork that fails to SPAWN (worker.js missing, EACCES, OOM at spawn time)
+  // emits 'error', NOT 'exit'. With no listener Node re-throws it in THIS
+  // (backend) process — which would take down the API and every other running
+  // agent. Catch it, surface it on the agent's log stream, and treat it as a
+  // stop so one bad fork can never cascade into a full backend outage.
+  child.on('error', async (err) => {
+    appendLog(id, `[agentRunner] worker failed to start: ${err.message}`);
     processes.delete(id);
+    const a = await loadAgent(id);
+    if (a && a.status === 'running') { a.status = 'stopped'; await saveAgent(a); }
+  });
+
+  child.on('exit', async (code, signal) => {
+    processes.delete(id);
+    // Make a crash distinguishable from a clean Stop in the agent's log stream
+    // (previously both looked identical). Status still flips to 'stopped';
+    // auto-restart / boot reconciliation are separate guards.
+    if (code && code !== 0) {
+      appendLog(id, `[agentRunner] worker crashed (exit code=${code}${signal ? ` signal=${signal}` : ''}) — agent stopped; click Start to relaunch`);
+    } else if (signal) {
+      appendLog(id, `[agentRunner] worker terminated by signal ${signal} — agent stopped`);
+    }
     const a = await loadAgent(id);
     if (a && a.status === 'running') {
       a.status = 'stopped';

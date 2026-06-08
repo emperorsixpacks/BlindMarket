@@ -320,6 +320,23 @@ process.on('disconnect', () => {
   process.exit();
 });
 
+// Make a stray crash VISIBLE and clean instead of silent. The poll loop has its
+// own try/catch, but a rejection from a timer/microtask OUTSIDE it (an ethers
+// callback, a 0g-compute fetch, the unawaited boot pollAndWork()) would
+// otherwise terminate the worker on modern Node with no log line — and the
+// parent never auto-restarts it. Log loudly (this reaches the agent's UI log
+// stream via the parent), then exit non-zero so it's a recorded, restartable
+// event that agentRunner's exit handler reports as a crash.
+process.on('unhandledRejection', (reason) => {
+  const msg = reason instanceof Error ? `${reason.message}\n${reason.stack}` : String(reason);
+  log(`FATAL unhandledRejection — ${msg}`);
+  process.exit(1);
+});
+process.on('uncaughtException', (err) => {
+  log(`FATAL uncaughtException — ${err.message}\n${err.stack}`);
+  process.exit(1);
+});
+
 let agentTools = [];
 try {
   agentTools = JSON.parse(AGENT_TOOLS_RAW);
