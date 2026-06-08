@@ -105,6 +105,20 @@ const AGENT_TOOLS_RAW = process.env.AGENT_TOOLS ?? '[]';
 const AGENT_CAPABILITIES_RAW = process.env.AGENT_CAPABILITIES ?? '[]';
 const BACKEND_URL = process.env.BACKEND_URL ?? 'http://localhost:3001';
 const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS ?? 30_000);
+// Liveness heartbeat cadence — DECOUPLED from POLL_INTERVAL_MS. The parent
+// refreshes a Redis key with a 90s TTL on each heartbeat (see redis.ts
+// HEARTBEAT_TTL_S / isAgentLive); if liveness were tied to the poll loop, an
+// operator who raised POLL_INTERVAL_MS past 90s — or a single poll cycle that
+// spends minutes inside an LLM call — would make a perfectly alive agent flap
+// to "dead". A dedicated short timer (default 30s, must stay well under the 90s
+// TTL) reports process-aliveness regardless of work-cycle timing.
+const HEARTBEAT_INTERVAL_MS = Number(process.env.HEARTBEAT_INTERVAL_MS ?? 30_000);
+// Set by agentRunner ONLY on a post-crash auto-restart. When '1', skip
+// re-driving in-flight (accepted-but-unsubmitted) tasks — a brief that crashed
+// the worker would just crash the restart too. The task stays accepted on-chain
+// and is recoverable via the poster's claimTimeout. Fresh starts and graceful
+// boot-reconciles leave this unset and resume owed work normally.
+const SKIP_RESUME = process.env.AGENT_SKIP_RESUME === '1';
 // Escrow reward (in 0G) for a sub-task posted via delegate_to_agent, funded
 // from THIS agent's own wallet. Fixed default; ops can tune via env. The model
 // cannot set it (keeps a weak LLM from over-paying out of the agent's balance).
@@ -302,6 +316,16 @@ function isTransientAssignmentRevert(err) {
 const appliedTasks = new Set();
 
 const bidPlacedTasks = new Set();
+// NEEDS_WRAP backoff cap. A task we can't accept until the poster wraps the AES
+// brief key to our bid is re-attempted on every poll. The normal flow resolves
+// in seconds (poster's wrap watcher / a posting agent's late-bidder wrap loop),
+// but if the poster's browser is gone and no custody key is set, the wrap NEVER
+// lands and we'd 403 the task forever. Track NEEDS_WRAP polls per task and give
+// up after the cap (~10min at the 30s default) so we stop burning poll calls on
+// a key that's likely lost. A worker restart re-creates this set, re-opening the
+// window; the poster can re-wrap from their dashboard or cancel to reclaim escrow.
+const needsWrapPolls = new Map();
+const MAX_NEEDS_WRAP_POLLS = 20;
 
 // Guard against concurrent task execution — WS events and poll fallback
 // must not overlap (both use the same wallet for tx signing).
@@ -782,12 +806,17 @@ async function pollAndWork() {
   }
   _working = true;
   try {
-    sendHeartbeat();
+    // Liveness no longer rides on the poll loop — a dedicated timer beats the
+    // heartbeat (see HEARTBEAT_INTERVAL_MS / startup), so a long task or a high
+    // POLL_INTERVAL_MS can't make a live agent look dead.
 
     // Finish any owed work first: tasks we accepted but never submitted (e.g. a
     // mid-task crash) won't appear in the open feed below, so re-drive them from
-    // our executor index before looking for new work.
-    await resumeAssignedTasks();
+    // our executor index before looking for new work. Skipped on a post-crash
+    // auto-restart (SKIP_RESUME) so a poison brief can't re-crash us.
+    if (!SKIP_RESUME) {
+      await resumeAssignedTasks();
+    }
 
     // Then judge any tasks we're the designated verifier for.
     await pollAndVerify();
@@ -822,8 +851,84 @@ async function pollAndWork() {
 
     for (const entry of available) {
       const taskHash = entry.meta.taskId;
-      const accepted = await tryAcceptTask(taskHash);
-      if (accepted) break; // tryAcceptTask runs the full pipeline internally
+      log(`accepting task ${taskHash.slice(0, 10)}…`);
+      const acceptRes = await fetchWithTimeout(`${BACKEND_URL}/api/v1/a2a/tasks/${taskHash}/accept`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${AGENT_PLATFORM_TOKEN}`,
+        },
+      });
+      if (acceptRes.ok) {
+        appliedTasks.add(taskHash);
+        acceptedTaskHash = taskHash;
+        acceptedEntry = entry;
+        try {
+          const acceptJson = await acceptRes.json();
+          acceptedRootHash = acceptJson.data?.rootHash ?? null;
+          acceptedWrappedKey = acceptJson.data?.wrappedKey ?? null;
+        } catch {
+          // Non-JSON response body; treat as no brief available.
+        }
+        break;
+      }
+      const err = await acceptRes.json().catch(() => ({}));
+      // Include the backend's message so the user can self-diagnose without
+      // grepping source. For CAPABILITY_MISMATCH specifically, also surface
+      // this agent's own caps so the gap is obvious — the most common
+      // misread of these logs is "the matcher is broken" when the agent
+      // simply doesn't have any of the task's required capabilities.
+      const errMsg = err.error?.message ? ` — ${err.error.message}` : '';
+      let extra = '';
+      if (acceptRes.status === 403 && err.error?.code === 'CAPABILITY_MISMATCH') {
+        extra = ` (this agent has: ${agentCapabilities.join(',')})`;
+      }
+      log(`accept failed for ${taskHash.slice(0, 10)}…: ${acceptRes.status} ${err.error?.code || ''}${errMsg}${extra}`);
+
+      if (acceptRes.status === 403 && err.error?.code === 'NEEDS_WRAP') {
+        // Bound re-attempts: once we've waited MAX_NEEDS_WRAP_POLLS polls with no
+        // wrapped key materializing, give up on this task (mark it touched so it
+        // drops out of `available`) and log once. Without this, a task whose key
+        // was never wrapped (poster's browser gone, no custody key) 403s us on
+        // every poll forever.
+        const polls = (needsWrapPolls.get(taskHash) ?? 0) + 1;
+        needsWrapPolls.set(taskHash, polls);
+        if (polls > MAX_NEEDS_WRAP_POLLS) {
+          appliedTasks.add(taskHash);
+          log(`giving up on ${taskHash.slice(0, 10)}… after ${MAX_NEEDS_WRAP_POLLS} polls awaiting a wrapped brief key — the poster never wrapped it to our bid (likely their browser is gone and no custody key is set). They can re-wrap from their dashboard or cancel to reclaim escrow.`);
+          continue;
+        }
+        if (!bidPlacedTasks.has(taskHash)) {
+          try {
+            const bidRes = await fetchWithTimeout(`${BACKEND_URL}/api/v1/a2a/tasks/${taskHash}/bid`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${AGENT_PLATFORM_TOKEN}`,
+              },
+            });
+            if (bidRes.ok) {
+              bidPlacedTasks.add(taskHash);
+              log(`bid registered on ${taskHash.slice(0, 10)}… — awaiting wrap`);
+            } else {
+              const bidErr = await bidRes.json().catch(() => ({}));
+              log(`bid failed for ${taskHash.slice(0, 10)}…: ${bidRes.status} ${bidErr.error?.code || ''}`);
+              if (bidRes.status === 403 || bidRes.status === 400) {
+                appliedTasks.add(taskHash);
+              }
+            }
+          } catch (bidErr) {
+            log(`bid network error for ${taskHash.slice(0, 10)}…: ${bidErr.message || bidErr}`);
+          }
+        }
+        continue;
+      }
+
+      if (acceptRes.status === 403 || acceptRes.status === 409) {
+        appliedTasks.add(taskHash);
+        continue;
+      }
+      return;
     }
   } catch (err) {
     log(`error: ${err.message}`);
@@ -1513,6 +1618,13 @@ async function acceptFromWs(taskHash) {
 // buildTools() and must not kick off registration / the polling loop.
 if (process.env.NODE_ENV !== 'test') {
   (async () => {
+    // Start liveness FIRST and beat it immediately — before registration's
+    // network I/O, which could hang — so the agent reports alive from boot and
+    // on its own cadence, independent of the poll/work loop below.
+    sendHeartbeat();
+    setInterval(sendHeartbeat, HEARTBEAT_INTERVAL_MS);
+    if (SKIP_RESUME) log('auto-restarted after a crash — skipping in-flight task resume for this run');
+
     await ensureRegisteredAsA2AExecutor();
     // Connect WebSocket for push-based assignment (instant task offers)
     connectWebSocket();

@@ -76,3 +76,58 @@ export const config = {
     privateKey: process.env.KEY_CUSTODY_PRIVATE_KEY || '',
   },
 } as const;
+
+// Mainnet chain id — kept in sync with the production default above.
+const MAINNET_CHAIN_ID = 16661;
+
+/**
+ * Fail-fast boot assertions. Call once at startup (before the server binds) so a
+ * misconfigured production deploy dies loudly with an actionable message instead
+ * of failing deep at runtime (an agent that can't mint a token, a bridge that
+ * silently can't settle, a prod backend pointed at testnet contracts).
+ *
+ * Deliberately conservative — this guards a LIVE product, so it only HARD-FAILS
+ * on misconfigurations that are never legitimate in production, and otherwise
+ * warns. The chain-id assert has an ALLOW_NONMAINNET_PROD escape hatch for the
+ * rare intentional prod-on-testnet (staging) deploy.
+ */
+export function assertBootConfig(): void {
+  const isProd = config.nodeEnv === 'production';
+  const fatals: string[] = [];
+  const warnings: string[] = [];
+
+  if (isProd) {
+    // JWT_SECRET signs the 365d agent platform tokens (agentRunner). Empty in
+    // prod means agents can't start and any token path is unsigned — never valid.
+    if (!config.jwtSecret) {
+      fatals.push('JWT_SECRET is empty in production — deployed agents cannot mint platform tokens and will fail to start.');
+    }
+
+    // A prod backend on the testnet chain id is the cross-chain poaching footgun
+    // (it would act on mainnet task ids against testnet escrow). Refuse, unless
+    // the operator explicitly opts into a non-mainnet prod deploy.
+    const allowNonMainnet = process.env.ALLOW_NONMAINNET_PROD === 'true';
+    if (config.ogChainId !== MAINNET_CHAIN_ID && !allowNonMainnet) {
+      fatals.push(`OG_CHAIN_ID=${config.ogChainId} in production — expected mainnet ${MAINNET_CHAIN_ID}. Refusing to boot a production backend against a non-mainnet chain (set ALLOW_NONMAINNET_PROD=true to override for staging).`);
+    }
+
+    // Degraded-but-not-fatal: the bridge being optional is an existing design
+    // choice, and persistence may be SQLite-only in some deploys.
+    if (!config.marketplaceSignerPrivateKey) {
+      warnings.push('MARKETPLACE_SIGNER_PRIVATE_KEY is empty — the A2A settlement bridge is DISABLED; agent tasks will accept/submit off-chain but never settle on-chain.');
+    }
+    if (!config.databaseUrl) {
+      warnings.push('DATABASE_URL is empty in production — Neon-backed persistence is unavailable.');
+    }
+  }
+
+  for (const w of warnings) console.warn(`[config] ⚠ ${w}`);
+
+  if (fatals.length > 0) {
+    console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.error(`[config] ⛔ ${fatals.length} fatal boot-config problem(s) — refusing to start:`);
+    for (const f of fatals) console.error(`    • ${f}`);
+    console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    throw new Error(`Invalid boot config: ${fatals.length} fatal problem(s) — see logs above.`);
+  }
+}
