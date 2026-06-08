@@ -34,8 +34,6 @@ vi.mock('../services/a2aStore.js', () => ({
   tryAccept: vi.fn(),
   mergeWrappedKeys: vi.fn(),
   releaseToOpen: vi.fn(),
-  // Unused by /accept but imported by the module's other routes — stub so the
-  // namespace import resolves.
   setMeta: vi.fn(),
   getState: vi.fn(),
   updateState: vi.fn(),
@@ -43,6 +41,11 @@ vi.mock('../services/a2aStore.js', () => ({
   getExecutorTasks: vi.fn(),
   browseAgentTasks: vi.fn(),
   getIndexedHashes: vi.fn(),
+  // Offer ops — default to "no offer" so existing tests pass unchanged
+  getOffer: vi.fn(() => Promise.resolve(undefined)),
+  checkOffer: vi.fn(() => Promise.resolve(false)),
+  clearOffer: vi.fn(() => Promise.resolve()),
+  setOffer: vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock('../services/agentStore.js', () => ({ getAgent: vi.fn() }));
@@ -53,7 +56,7 @@ vi.mock('../services/keyCustodyService.js', () => ({
 }));
 
 vi.mock('../services/a2aSettlement.js', () => ({
-  settleAssignment: vi.fn(() => Promise.resolve()),
+  settleAssignment: vi.fn(() => Promise.resolve({ success: true, txHash: '0xtx' })),
   settleVerification: vi.fn(() => Promise.resolve()),
 }));
 
