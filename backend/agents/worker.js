@@ -849,6 +849,10 @@ async function pollAndWork() {
       return;
     }
 
+    let acceptedTaskHash = null;
+    let acceptedRootHash = null;
+    let acceptedWrappedKey = null;
+
     for (const entry of available) {
       const taskHash = entry.meta.taskId;
       log(`accepting task ${taskHash.slice(0, 10)}…`);
@@ -862,7 +866,6 @@ async function pollAndWork() {
       if (acceptRes.ok) {
         appliedTasks.add(taskHash);
         acceptedTaskHash = taskHash;
-        acceptedEntry = entry;
         try {
           const acceptJson = await acceptRes.json();
           acceptedRootHash = acceptJson.data?.rootHash ?? null;
@@ -930,6 +933,17 @@ async function pollAndWork() {
       }
       return;
     }
+
+    if (!acceptedTaskHash) {
+      log(`could not accept any of the ${available.length} available tasks`);
+      return;
+    }
+
+    // /accept now awaits on-chain settlement, so the assignment is confirmed
+    // before the HTTP response returns. No sleep needed.
+    log(`assignment confirmed for ${acceptedTaskHash.slice(0, 10)}…, starting work`);
+
+    await runAcceptedTask(acceptedTaskHash, acceptedRootHash, acceptedWrappedKey);
   } catch (err) {
     log(`error: ${err.message}`);
   } finally {
