@@ -17,18 +17,22 @@ import type { A2ATaskMeta, A2ATaskState, AgentCapability } from '../types.js';
 //     state.status=='open'). updateState removes on status transition.
 //   - a2a:executor:<addr> contains a taskId iff state.executorAddress==addr.
 
+export interface TaskOffer {
+  address: string;
+  score: number;
+  expiresAt: number; // epoch ms
+}
+
+const OFFER_TTL_MS = 15_000; // exclusive offer window
+
 const KEY = {
   meta: (taskId: string) => `a2a:meta:${taskId.toLowerCase()}`,
   state: (taskId: string) => `a2a:state:${taskId.toLowerCase()}`,
   open: 'a2a:open',
   executor: (addr: string) => `a2a:executor:${addr.toLowerCase()}`,
-  // Tasks posted by a given address — populated when meta.posterAddress is set.
-  // Used by the manual-verify inbox query.
   poster: (addr: string) => `a2a:poster:${addr.toLowerCase()}`,
-  // Tasks a given address is the designated verifier for — populated when
-  // meta.verifierAddress is set (verificationMode='agent'). Used by
-  // getVerifierTasks for the verifier agent's queue.
   verifier: (addr: string) => `a2a:verifier:${addr.toLowerCase()}`,
+  offer: (taskId: string) => `a2a:offer:${taskId.toLowerCase()}`,
 };
 
 export async function setMeta(meta: A2ATaskMeta): Promise<void> {
@@ -365,6 +369,46 @@ export async function releaseToOpen(taskId: string): Promise<void> {
     pipe.srem(KEY.executor(existing.executorAddress), finalTid);
   }
   await pipe.exec();
+}
+
+/**
+ * Create an exclusive offer for the best-scoring agent.
+ * Expires after OFFER_TTL_MS. Only one offer exists per task.
+ */
+export async function setOffer(taskId: string, offer: TaskOffer): Promise<void> {
+  const tid = taskId.toLowerCase();
+  const ttl = Math.max(OFFER_TTL_MS, 5_000);
+  await redis.setex(KEY.offer(tid), Math.ceil(ttl / 1000), JSON.stringify(offer));
+}
+
+/**
+ * Read the current offer for a task. Returns undefined if no offer or expired.
+ */
+export async function getOffer(taskId: string): Promise<TaskOffer | undefined> {
+  const raw = await redis.get(KEY.offer(taskId));
+  if (!raw) return undefined;
+  const offer = JSON.parse(raw) as TaskOffer;
+  if (Date.now() > offer.expiresAt) {
+    await redis.del(KEY.offer(taskId));
+    return undefined;
+  }
+  return offer;
+}
+
+/**
+ * Check whether `callerAddress` is the offered agent and the offer is still
+ * valid. Returns true if the caller should be allowed to accept; false
+ * means the offer expired or belongs to someone else.
+ */
+export async function checkOffer(taskId: string, callerAddress: string): Promise<boolean> {
+  const offer = await getOffer(taskId);
+  if (!offer) return false;
+  return offer.address.toLowerCase() === callerAddress.toLowerCase();
+}
+
+/** Remove the offer for a task (used after accept, release, or expiry). */
+export async function clearOffer(taskId: string): Promise<void> {
+  await redis.del(KEY.offer(taskId));
 }
 
 /** Helper used by getExecutorTasks and getPosterTasks — same shape, different

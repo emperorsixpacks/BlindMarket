@@ -89,86 +89,78 @@ function isAlreadySettled(err: unknown): boolean {
   return msg.includes('InvalidStatus');
 }
 
+export interface SettleResult {
+  success: boolean;
+  error?: string;
+  txHash?: string;
+  alreadySettled?: boolean;
+}
+
 /**
  * Translate an A2A `accepted` transition into an on-chain assignment.
  * Looks up the on-chain taskId from the taskHash (waiting for the
  * TaskCreated event listener if needed), then calls marketplaceAssign as the
  * verifier. Persists the tx hash to the A2A state on success.
+ *
+ * Returns a SettleResult so callers can await and respond accordingly.
+ * Unexpected errors (not bridge-not-ready, not already-settled) propagate.
  */
-export async function settleAssignment(taskHash: string, executor: string): Promise<void> {
+export async function settleAssignment(taskHash: string, executor: string): Promise<SettleResult> {
   if (!bridgeReady()) {
-    // Persist this too — without surfacing, the agent would loop on
-    // NOT_ASSIGNED_YET indefinitely while the bridge has been silently
-    // off the entire time.
-    await safePersistAssignError(taskHash, 'Bridge disabled: MARKETPLACE_SIGNER_PRIVATE_KEY not set');
-    return;
-  }
-
-  try {
-    const taskId = await waitForTaskId(taskHash);
-    if (taskId === null) {
-      const msg = `hash2id lookup timed out — createTask event never seen by indexer (taskHash=${taskHash.slice(0, 10)}…)`;
-      console.error(`[a2aSettlement] ${msg}`);
-      await safePersistAssignError(taskHash, msg);
-      return;
-    }
-
-    let tx: ContractTransactionResponse;
-    try {
-      // Simulate the call first via staticCall to get a proper revert reason
-      // before broadcasting. The raw tx error from ethers often says "unknown
-      // custom error" when the ABI doesn't include the error definition,
-      // making debugging impossible. staticCall surfaces the actual reason.
-      try {
-        await escrowAsMarketplace!.marketplaceAssign.staticCall(BigInt(taskId), executor);
-      } catch (staticErr) {
-        if (isAlreadySettled(staticErr)) {
-          console.log(`[a2aSettlement] assignment skipped — task ${taskId} already past Funded state`);
-          return;
-        }
-        // Re-throw — the staticCall failed for a real reason. Log the message
-        // so the operator sees e.g. "NotVerifier" or "SelfAssignment" instead
-        // of "unknown custom error".
-        console.error(`[a2aSettlement] staticCall failed for taskId=${taskId}: ${(staticErr as Error).message}`);
-        throw staticErr;
-      }
-
-      // Serialise on the signer's tx queue so concurrent /accept requests
-      // can't collide on the nonce. Each call here waits for the previous
-      // marketplaceAssign / completeVerification to at least broadcast
-      // before computing its own nonce.
-      tx = await enqueueSignerTx(() =>
-        escrowAsMarketplace!.marketplaceAssign(BigInt(taskId), executor) as Promise<ContractTransactionResponse>,
-      );
-    } catch (err) {
-      if (isAlreadySettled(err)) {
-        console.log(`[a2aSettlement] assignment skipped — task ${taskId} already past Funded state`);
-        return;
-      }
-      throw err;
-    }
-
-    // Record the broadcast immediately so a crash here doesn't lose the trace.
-    // Also clear any stale assignError from a previous failed attempt (e.g.
-    // the agent released-and-retried and now the bridge is succeeding).
-    await a2aStore.updateState(taskHash, { assignTxHash: tx.hash, assignError: undefined });
-    console.log(`[a2aSettlement] marketplaceAssign broadcast taskId=${taskId} tx=${tx.hash}`);
-
-    const receipt = await tx.wait();
-    console.log(
-      `[a2aSettlement] marketplaceAssign confirmed taskId=${taskId} block=${receipt?.blockNumber} status=${receipt?.status}`,
-    );
-    if (receipt?.status !== 1) {
-      await safePersistAssignError(taskHash, `marketplaceAssign tx ${tx.hash} reverted on chain`);
-    }
-  } catch (err) {
-    const msg = (err as Error).message;
-    console.error(
-      `[a2aSettlement] assignment failed for hash=${taskHash.slice(0, 10)}…:`,
-      msg,
-    );
+    const msg = 'Bridge disabled: MARKETPLACE_SIGNER_PRIVATE_KEY not set';
     await safePersistAssignError(taskHash, msg);
+    return { success: false, error: msg };
   }
+
+  const taskId = await waitForTaskId(taskHash);
+  if (taskId === null) {
+    const msg = `hash2id lookup timed out — createTask event never seen by indexer (taskHash=${taskHash.slice(0, 10)}…)`;
+    console.error(`[a2aSettlement] ${msg}`);
+    await safePersistAssignError(taskHash, msg);
+    return { success: false, error: msg };
+  }
+
+  let tx: ContractTransactionResponse;
+  try {
+    try {
+      await escrowAsMarketplace!.marketplaceAssign.staticCall(BigInt(taskId), executor);
+    } catch (staticErr) {
+      if (isAlreadySettled(staticErr)) {
+        console.log(`[a2aSettlement] assignment skipped — task ${taskId} already past Funded state`);
+        return { success: true, alreadySettled: true };
+      }
+      console.error(`[a2aSettlement] staticCall failed for taskId=${taskId}: ${(staticErr as Error).message}`);
+      throw staticErr;
+    }
+
+    tx = await enqueueSignerTx(() =>
+      escrowAsMarketplace!.marketplaceAssign(BigInt(taskId), executor) as Promise<ContractTransactionResponse>,
+    );
+  } catch (err) {
+    if (isAlreadySettled(err)) {
+      console.log(`[a2aSettlement] assignment skipped — task ${taskId} already past Funded state`);
+      return { success: true, alreadySettled: true };
+    }
+    const msg = (err as Error).message;
+    console.error(`[a2aSettlement] assignment failed for hash=${taskHash.slice(0, 10)}…:`, msg);
+    await safePersistAssignError(taskHash, msg);
+    return { success: false, error: msg };
+  }
+
+  await a2aStore.updateState(taskHash, { assignTxHash: tx.hash, assignError: undefined });
+  console.log(`[a2aSettlement] marketplaceAssign broadcast taskId=${taskId} tx=${tx.hash}`);
+
+  const receipt = await tx.wait();
+  console.log(
+    `[a2aSettlement] marketplaceAssign confirmed taskId=${taskId} block=${receipt?.blockNumber} status=${receipt?.status}`,
+  );
+  if (receipt?.status !== 1) {
+    const msg = `marketplaceAssign tx ${tx.hash} reverted on chain`;
+    await safePersistAssignError(taskHash, msg);
+    return { success: false, error: msg, txHash: tx.hash };
+  }
+
+  return { success: true, txHash: tx.hash };
 }
 
 // Writing to Redis can itself fail (network blip, key missing if releaseToOpen

@@ -32,3 +32,27 @@ export const rooms = {
   disputes: (event: string, data: unknown) => emit('disputes', event, data),
   task:     (id: string | number, event: string, data: unknown) => emit(`task:${id}`, event, data),
 };
+
+/**
+ * Emit a scored offer to a specific agent.
+ * The agent's WS client should join room `agent:<address>` at connect time.
+ */
+export function emitTaskOffer(
+  agentAddress: string,
+  taskId: string,
+  meta: Record<string, unknown>,
+  score: number,
+  deadline: number,
+): void {
+  emit(`agent:${agentAddress.toLowerCase()}`, 'task:offer', {
+    taskId,
+    meta,
+    score,
+    expiresAt: deadline,
+  });
+}
+
+/** Broadcast that a task is available for CAS-race (fallback when no offer taker). */
+export function emitTaskAvailable(taskId: string, meta: Record<string, unknown>): void {
+  rooms.tasks('task:available', { taskId, meta });
+}
