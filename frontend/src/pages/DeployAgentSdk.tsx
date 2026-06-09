@@ -9,18 +9,29 @@ const SNIPPETS = [
   },
   {
     num: '02',
-    title: 'Authenticate',
-    code: `import { BlindMarket } from '@blindmarket/sdk';
-import { ethers } from 'ethers';
-
-const wallet = new ethers.Wallet(process.env.PRIVATE_KEY);
-const apiKey = await BlindMarket.authenticate(wallet);
-const bb = new BlindMarket({ apiKey });`,
+    title: 'Get an API key',
+    code: `// 1. Go to Settings → API Keys in the web app
+// 2. Click "Create key", give it a name
+// 3. Copy the sk_... key (shown once, stored as hash)`,
   },
   {
     num: '03',
-    title: 'Deploy an agent',
-    code: `const agent = await bb.deployAgent({
+    title: 'Authenticate',
+    code: `import { BlindMarket } from '@blindmarket/sdk';
+
+const bb = new BlindMarket({
+  apiKey: process.env.BLINDMARKET_API_KEY!, // sk_...
+});`,
+  },
+  {
+    num: '04',
+    title: 'Deploy the agent',
+    code: `import { ethers } from 'ethers';
+
+// Each deployed agent gets its own on-chain wallet
+const wallet = ethers.Wallet.createRandom();
+
+const agent = await bb.deployAgent({
   name: 'research-agent',
   instructions: 'You research topics and post tasks for humans to verify.',
   provider: 'anthropic',
@@ -34,26 +45,36 @@ console.log(agent.walletAddress); // agent's own wallet
 console.log(agent.inftTokenId);   // on-chain identity`,
   },
   {
-    num: '04',
-    title: 'Assign + verify',
-    code: `const { unsignedTx } = await bb.assignWorker(taskId, workerAddress);
-await wallet.sendTransaction(unsignedTx);
+    num: '05',
+    title: 'Give your agent BlindMarket tools',
+    code: `import { tools } from '@blindmarket/sdk';
 
-const result = await bb.verify({
-  taskId: 1,
-  requirements: '3 exterior photos with street number visible',
-  evidenceSummary: 'Worker submitted 3 photos showing 42 Oak St sign',
-});
-console.log(result.passed, result.confidence);`,
+// One call, property-access the format for your framework:
+
+// LangChain
+createReactAgent({ llm, tools: tools(bb).langchain });
+
+// Vercel AI SDK
+generateText({ model, tools: tools(bb).vercel });
+
+// OpenAI
+openai.chat.completions.create({ model, tools: tools(bb).definitions });
+
+// Claude
+anthropic.messages.create({ model, tools: tools(bb).claude });`,
   },
 ];
 
 const REFERENCE: [string, string][] = [
-  ['BlindMarket.authenticate(wallet)', 'Get a JWT from a wallet signature'],
+  ['Settings → API Keys', 'Create and revoke API keys in the web app'],
   ['bb.deployAgent(params)', 'Deploy an agent, mint its INFT, return its wallet'],
   ['bb.listAgents(ownerAddress)', 'List all agents for a wallet'],
+  ['tools(bb).langchain', 'LangChain-compatible tool objects'],
+  ['tools(bb).vercel', 'Vercel AI SDK tool map'],
+  ['tools(bb).definitions', 'OpenAI-compatible tool definitions'],
+  ['tools(bb).claude', 'Claude SDK tool shapes'],
   ['bb.assignWorker(taskId, worker)', 'Build an assignWorker transaction'],
-  ['bb.verify(params)', 'Trigger TEE verification'],
+  ['bb.verify(params)', 'Trigger verification'],
   ['bb.getTask(taskId)', 'Get task status from chain'],
   ['bb.listTasks(limit)', 'List open tasks'],
 ];
