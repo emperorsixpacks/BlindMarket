@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useAccount } from 'wagmi';
+import { usePrivy, useUnlinkWallet } from '@privy-io/react-auth';
 import {
   Breadcrumb,
   PageHeader,
@@ -34,6 +35,9 @@ export default function Settings() {
   const { chainId, isCorrectChain, switchChain } = useWallet();
   const { address, isConnected } = useAccount();
   const { data: reputation } = useReputation(address ?? null);
+  const { user, linkWallet } = usePrivy();
+  const { unlink } = useUnlinkWallet();
+
 
   const [notifyPayouts, setNotifyPayouts] = useState(() => loadBool(NOTIF_KEYS.payout, true));
   const [notifyAssignments, setNotifyAssignments] = useState(() => loadBool(NOTIF_KEYS.assignment, true));
@@ -42,6 +46,17 @@ export default function Settings() {
   useEffect(() => saveBool(NOTIF_KEYS.payout, notifyPayouts), [notifyPayouts]);
   useEffect(() => saveBool(NOTIF_KEYS.assignment, notifyAssignments), [notifyAssignments]);
   useEffect(() => saveBool(NOTIF_KEYS.dispute, notifyDisputes), [notifyDisputes]);
+
+  const linkedWallets = ((user as any)?.linkedAccounts ?? (user as any)?.linked_accounts ?? []).filter(
+    (a: any) => a.type === 'wallet' && a.chainType === 'ethereum' && a.address?.startsWith('0x'),
+  ) as Array<{ type: 'wallet'; address: string; chainType: string; verifiedAt?: string; connectorType?: string }>;
+
+  const handleUnlink = async (walletAddress: string) => {
+    if (!window.confirm(`Unlink ${walletAddress.slice(0, 6)}…${walletAddress.slice(-4)}?`)) return;
+    try {
+      await unlink({ address: walletAddress });
+    } catch { /* ignore */ }
+  };
 
   // ── API Keys ──────────────────────────────────────────────────────────────
 
@@ -146,9 +161,49 @@ export default function Settings() {
             </FormField>
           </div>
 
+          {/* Linked Wallets */}
+          <div className="space-y-5">
+            <SectionRule num="02" title="Linked Wallets" side="All wallets in your Privy account" />
+
+            <div className="border border-line divide-y divide-line">
+              {linkedWallets.length === 0 ? (
+                <div className="px-4 py-6 text-center text-xs text-ink-3">No wallets linked yet.</div>
+              ) : (
+                linkedWallets.map((w) => {
+                  const isPrimary = w.address.toLowerCase() === (address || '').toLowerCase();
+                  return (
+                    <div key={w.address} className="flex items-center justify-between gap-3 px-4 py-3">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="font-mono text-sm text-ink">
+                          {w.address.slice(0, 6)}…{w.address.slice(-4)}
+                        </span>
+                        {isPrimary ? <Tag tone="ok">Primary</Tag> : <Tag tone="neutral">Linked</Tag>}
+                      </div>
+                      {!isPrimary && (
+                        <button
+                          onClick={() => handleUnlink(w.address)}
+                          className="text-[10px] uppercase tracking-wider text-err hover:text-err/80 transition-colors shrink-0"
+                        >
+                          Unlink
+                        </button>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <Button
+              variant="outline"
+              label="Link wallet"
+              size="sm"
+              onClick={() => linkWallet()}
+            />
+          </div>
+
           {/* Network */}
           <div className="space-y-5">
-            <SectionRule num="02" title="Network" />
+            <SectionRule num="03" title="Network" />
 
             <FormField
               label="Supported chain"
@@ -178,7 +233,7 @@ export default function Settings() {
 
           {/* API Keys */}
           <div className="space-y-5">
-            <SectionRule num="03" title="API Keys" side="Revocable · stored as hash" />
+            <SectionRule num="04" title="API Keys" side="Revocable · stored as hash" />
 
             <div className="border border-line divide-y divide-line">
               {loadingKeys ? (
@@ -220,7 +275,7 @@ export default function Settings() {
 
           {/* Notifications */}
           <div className="space-y-5">
-            <SectionRule num="04" title="Notifications" side="Saved to this browser" />
+            <SectionRule num="05" title="Notifications" side="Saved to this browser" />
 
             <div className="border border-line">
               {notifications.map((toggle, i) => (
@@ -255,7 +310,7 @@ export default function Settings() {
         <div className="border-t lg:border-t-0 lg:border-l border-line p-6 space-y-8">
           {/* Session state */}
           <div className="space-y-4">
-            <SectionRule num="05" title="Session" />
+            <SectionRule num="06" title="Session" />
 
             <div className="space-y-2">
               {[
@@ -290,7 +345,7 @@ export default function Settings() {
 
           {/* Privacy explainer */}
           <div className="space-y-3">
-            <SectionRule num="06" title="Privacy" />
+            <SectionRule num="07" title="Privacy" />
             <div className="bg-surface-2 border border-line p-4 space-y-2.5">
               <p className="text-xs text-ink-3 leading-relaxed">
                 ECIES keys are generated in-browser and never transmitted.

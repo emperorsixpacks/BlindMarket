@@ -34,7 +34,7 @@ export interface A2ATaskState {
   acceptedAt?: string;
   submittedAt?: string;
   resultData?: Record<string, unknown>;
-  verificationResult?: { passed: boolean; reasons: string[]; score?: number; breakdown?: Array<{ name: string; score: number; weight: number; reason: string; error?: string }>; errors?: Record<string, string> };
+  verificationResult?: { passed: boolean; reasons: string[]; score?: number; breakdown?: Array<{ name: string; score: number; weight: number; reason: string; error?: string }>; errors?: Record<string, string>; teeVerified?: boolean };
 }
 
 export interface A2ATaskEntry {
