@@ -1,5 +1,6 @@
 import pg from 'pg';
 import { config } from '../config.js';
+import { Redis } from 'ioredis';
 
 const { Pool } = pg;
 
@@ -7,6 +8,8 @@ let pool: pg.Pool | null = null;
 // Cached so migrations run exactly once per process. Cleared on failure so a
 // transient error doesn't leave the schema permanently uninitialised.
 let migrationPromise: Promise<void> | null = null;
+// Data migration from Redis → PG also runs once.
+let dataMigrationPromise: Promise<void> | null = null;
 
 export async function getPool(): Promise<pg.Pool> {
   if (!config.databaseUrl) {
@@ -35,6 +38,14 @@ export async function getPool(): Promise<pg.Pool> {
     });
   }
   await migrationPromise;
+
+  // One-shot data migration: copy agents from Redis to PG.
+  if (!dataMigrationPromise) {
+    dataMigrationPromise = migrateRedisToPg(pool).catch((err) => {
+      console.warn('[neonDb] Redis → PG data migration failed (non-fatal):', (err as Error).message);
+    });
+  }
+  await dataMigrationPromise;
 
   return pool;
 }
@@ -277,5 +288,87 @@ async function runMigrations(p: pg.Pool): Promise<void> {
     }
   } finally {
     client.release();
+  }
+}
+
+// ── Redis → PG data migration ──────────────────────────────────────────────────
+//
+// Pre-migration-7 agents and executors exist only in Redis, not PG. Copy them
+// once so users see their deployed agents after page reload.
+async function migrateRedisToPg(p: pg.Pool): Promise<void> {
+  let redis: Redis | null = null;
+  try {
+    redis = new Redis(process.env.REDIS_URL ?? 'redis://localhost:6379');
+
+    const keys = await redis.keys('agent:*');
+    const agentKeys = keys.filter(k => !k.includes(':logs') && !k.includes(':heartbeat'));
+
+    for (const key of agentKeys) {
+      const raw = await redis.get(key);
+      if (!raw) continue;
+      const data = JSON.parse(raw);
+      const {
+        id, ownerAddress, name, instructions, provider, model,
+        apiKey, encryptedApiKey, capabilities, tools, status,
+        deployedAt, lastActiveAt, storageRef, platformToken,
+        walletAddress, publicKey, encryptedPrivateKey, rawPrivateKey,
+        inftTokenId, minReward, authorizedOwners,
+      } = data;
+      if (!id) continue;
+
+      await p.query(
+        `INSERT INTO deployed_agents
+           (id, owner_address, authorized_owners, name, instructions,
+            provider, model, api_key, encrypted_api_key, capabilities,
+            tools, status, deployed_at, last_active_at, storage_ref,
+            platform_token, wallet_address, public_key, encrypted_private_key,
+            raw_private_key, inft_token_id, min_reward, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+           $14, $15, $16, $17, $18, $19, $20, $21, $22, NOW())
+         ON CONFLICT (id) DO NOTHING`,
+        [id, ownerAddress, authorizedOwners ?? [], name, instructions,
+         provider, model, apiKey ?? '', encryptedApiKey, capabilities ?? [],
+         JSON.stringify(tools ?? []), status, deployedAt,
+         lastActiveAt ?? null, storageRef ?? null, platformToken ?? null,
+         walletAddress, publicKey, encryptedPrivateKey, rawPrivateKey ?? null,
+         inftTokenId ?? null, minReward ?? null],
+      );
+    }
+
+    const execRaw = await redis.get('agent:executor:all');
+    if (execRaw) {
+      const executors = JSON.parse(execRaw);
+      for (const [addr, d] of Object.entries(executors)) {
+        const data = d as Record<string, unknown>;
+        if (!addr || !data.displayName) continue;
+        await p.query(
+          `INSERT INTO agent_executors
+             (address, display_name, capabilities, public_key, reputation,
+              tasks_completed, total_earned_raw, min_reward,
+              preferred_capabilities, agent_card_url, mcp_endpoint_url,
+              registered_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+           ON CONFLICT (address) DO UPDATE SET
+             capabilities = EXCLUDED.capabilities,
+             public_key = EXCLUDED.public_key,
+             reputation = EXCLUDED.reputation,
+             tasks_completed = EXCLUDED.tasks_completed,
+             total_earned_raw = EXCLUDED.total_earned_raw,
+             min_reward = EXCLUDED.min_reward,
+             preferred_capabilities = EXCLUDED.preferred_capabilities,
+             agent_card_url = EXCLUDED.agent_card_url,
+             mcp_endpoint_url = EXCLUDED.mcp_endpoint_url,
+             updated_at = NOW()`,
+          [addr, data.displayName, data.capabilities ?? [],
+           data.publicKey ?? '', data.reputation ?? 50,
+           data.tasksCompleted ?? 0, data.totalEarnedRaw ?? '0',
+           data.minReward ?? null, data.preferredCapabilities ?? [],
+           data.agentCardUrl ?? null, data.mcpEndpointUrl ?? null,
+           data.registeredAt ?? new Date().toISOString()],
+        );
+      }
+    }
+  } finally {
+    if (redis) await redis.quit().catch(() => {});
   }
 }
