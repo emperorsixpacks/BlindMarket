@@ -275,6 +275,7 @@ export async function startAgent(id: string, opts?: { skipResume?: boolean }): P
         return; // keep status 'running' across the restart
       }
       appendLog(id, `[agentRunner] ALERT: worker crash-looped (≥${MAX_RESTARTS_IN_WINDOW} restarts within ${RESTART_WINDOW_MS / 60000}min) — auto-restart disabled. Fix the cause, then click Start to relaunch.`);
+      restartTimes.delete(id);
       a.status = 'stopped';
       await saveAgent(a);
       return;

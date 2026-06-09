@@ -1,5 +1,11 @@
 import type { SignedForensicReport, ForensicValidation, DeviceFingerprint } from '../types.js';
 
+// ── Bounds to prevent unbounded memory growth ────────────────────────────────
+
+const MAX_REPORTS = 500;
+const MAX_PHASHES = 2_000;
+const MAX_FINGERPRINTS_PER_WORKER = 20;
+
 interface StoredForensicData {
   signedReport: SignedForensicReport;
   validation: ForensicValidation;
@@ -19,7 +25,17 @@ export class ForensicStore {
   private deviceFingerprints = new Map<string, DeviceFingerprint[]>();
 
   saveReport(taskId: string, signedReport: SignedForensicReport, validation: ForensicValidation): void {
+    // Evict oldest report when at capacity
+    if (this.reports.size >= MAX_REPORTS && !this.reports.has(taskId)) {
+      const oldest = this.reports.keys().next().value!;
+      this.reports.delete(oldest);
+    }
     this.reports.set(taskId, { signedReport, validation, storedAt: Date.now() });
+
+    // Evict oldest phash when at capacity
+    if (this.phashes.length >= MAX_PHASHES) {
+      this.phashes.splice(0, this.phashes.length - MAX_PHASHES + 1);
+    }
     this.phashes.push({
       taskId,
       workerAddress: signedReport.report.workerAddress,
@@ -47,7 +63,6 @@ export class ForensicStore {
 
   recordDeviceFingerprint(workerAddress: string, fingerprint: DeviceFingerprint): void {
     const existing = this.deviceFingerprints.get(workerAddress) || [];
-    // Check if this exact fingerprint is already recorded
     const isDuplicate = existing.some(
       (fp) => fp.screenWidth === fingerprint.screenWidth &&
               fp.screenHeight === fingerprint.screenHeight &&
@@ -56,6 +71,10 @@ export class ForensicStore {
     );
     if (!isDuplicate) {
       existing.push(fingerprint);
+      // Evict oldest when per-worker limit reached
+      if (existing.length > MAX_FINGERPRINTS_PER_WORKER) {
+        existing.splice(0, existing.length - MAX_FINGERPRINTS_PER_WORKER);
+      }
       this.deviceFingerprints.set(workerAddress, existing);
     }
   }

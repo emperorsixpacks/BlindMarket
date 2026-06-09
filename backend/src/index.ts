@@ -50,7 +50,7 @@ app.use(cors({
 app.use(createRateLimiter());
 
 // Body parsing
-app.use(express.json({ limit: '15mb' }));
+app.use(express.json({ limit: '2mb' }));
 
 // Request logging
 app.use(requestLogger);
