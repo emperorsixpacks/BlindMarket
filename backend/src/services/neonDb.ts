@@ -227,6 +227,27 @@ const migrations: Array<{ id: number; name: string; sql: string }> = [
       CREATE INDEX IF NOT EXISTS idx_deployed_owner ON deployed_agents(owner_address);
     `,
   },
+  {
+    id: 9,
+    name: 'api_keys',
+    sql: `
+      CREATE TABLE IF NOT EXISTS api_keys (
+        id SERIAL PRIMARY KEY,
+        owner_address TEXT NOT NULL,
+        name TEXT NOT NULL,
+        key_prefix TEXT NOT NULL,
+        key_hash TEXT NOT NULL UNIQUE,
+        capabilities TEXT[] NOT NULL DEFAULT '{}',
+        agent_address TEXT,
+        is_active BOOLEAN NOT NULL DEFAULT true,
+        last_used_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_api_keys_owner ON api_keys(owner_address);
+      CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
+    `,
+  },
 ];
 
 async function runMigrations(p: pg.Pool): Promise<void> {

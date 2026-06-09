@@ -26,6 +26,7 @@ import { registrationRouter } from './routes/registration.js';
 import { validatorsRouter } from './routes/validators.js';
 import { statsRouter } from './routes/stats.js';
 import { analyticsRouter } from './routes/analytics.js';
+import { apiKeysRouter } from './routes/apiKeys.js';
 import { getDb } from './services/database.js';
 import { startEscrowEventLoop } from './services/escrowEvents.js';
 import { isBridgeConfigured } from './services/a2aSettlement.js';
@@ -73,6 +74,7 @@ app.use('/api/v1/registration', registrationRouter);
 app.use('/api/v1/validators', validatorsRouter);
 app.use('/api/v1/stats', statsRouter);
 app.use('/api/v1/analytics', analyticsRouter);
+app.use('/api/v1/api-keys', apiKeysRouter);
 app.use('/a2a/v1', a2aProtocolRouter);
 
 // Agent card (A2A discovery)

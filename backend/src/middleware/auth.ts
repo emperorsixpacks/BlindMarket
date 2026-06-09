@@ -5,6 +5,7 @@ import { timingSafeEqual } from 'crypto';
 import { config } from '../config.js';
 import { AppError } from './errorHandler.js';
 import type { AuthRequest } from '../types.js';
+import { lookupApiKey } from '../services/apiKeyStore.js';
 
 /** Constant-time string comparison to prevent timing attacks on API keys */
 function safeCompare(a: string, b: string): boolean {
@@ -12,8 +13,8 @@ function safeCompare(a: string, b: string): boolean {
   return timingSafeEqual(Buffer.from(a), Buffer.from(b));
 }
 
-/** Check if a string is the configured agent API key (timing-safe) */
-function isAgentApiKey(candidate: string): boolean {
+/** Check if a string is the configured legacy agent API key (timing-safe) */
+function isLegacyAgentApiKey(candidate: string): boolean {
   return !!(config.agentApiKey && safeCompare(candidate, config.agentApiKey));
 }
 
@@ -141,54 +142,64 @@ function verifyRegistrationToken(token: string): { address: string } | null {
 }
 
 /**
- * Auth middleware: accepts Privy JWT, registration-minted JWT, or X-API-Key.
+ * Auth middleware: accepts Privy JWT, registration-minted JWT, DB-backed API key,
+ * or legacy X-API-Key (AGENT_API_KEY env var).
  * Attaches `req.user = { address }` on success.
  */
 export function requireAuth(req: AuthRequest, _res: Response, next: NextFunction): void {
-  // 1. Check X-API-Key header (for agent operations)
+  // 1. Check X-API-Key header (for SDK agents)
   const apiKey = req.headers['x-api-key'] as string | undefined;
-  if (apiKey && isAgentApiKey(apiKey)) {
-    req.user = { address: 'agent' };
-    next();
-    return;
-  }
 
   // 2. Check Authorization: Bearer <token>
   const authHeader = req.headers.authorization;
-  console.log(`[Auth] Incoming Header: ${authHeader ? 'present' : 'MISSING'}`);
-  
-  if (!authHeader?.startsWith('Bearer ')) {
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : undefined;
+
+  const candidate = apiKey || token;
+  if (!candidate) {
     throw new AppError(401, 'UNAUTHORIZED', 'Authentication required');
   }
 
-  const token = authHeader.slice(7);
-
-  // 2a. Shared API key passed as Bearer
-  if (isAgentApiKey(token)) {
-    req.user = { address: 'agent' };
-    next();
-    return;
-  }
-
-  // 2b. Registration-minted JWT (CLI/SDK agents)
-  const regUser = verifyRegistrationToken(token);
-  if (regUser) {
-    req.user = regUser;
-    next();
-    return;
-  }
-
-  // 2c. Privy JWT (browser users)
-  verifyPrivyToken(token)
-    .then((user) => {
-      req.user = user;
+  // Check DB-backed API key (async)
+  lookupApiKey(candidate).then((key) => {
+    if (key) {
+      req.user = { address: key.ownerAddress, addresses: [key.ownerAddress] };
       next();
-    })
-    .catch((err) => {
-      console.error('[Auth] Privy verification failed:', err.message);
-      // Pass original error message for easier debugging
-      next(new AppError(401, 'INVALID_TOKEN', `Invalid or expired token: ${err.message}`));
-    });
+      return;
+    }
+
+    // Fall through to legacy / JWT checks
+    if (isLegacyAgentApiKey(candidate)) {
+      req.user = { address: 'agent' };
+      next();
+      return;
+    }
+
+    // Registration-minted JWT (CLI/SDK agents)
+    if (token) {
+      const regUser = verifyRegistrationToken(token);
+      if (regUser) {
+        req.user = regUser;
+        next();
+        return;
+      }
+
+      // Privy JWT (browser users)
+      verifyPrivyToken(token)
+        .then((user) => {
+          req.user = user;
+          next();
+        })
+        .catch((err) => {
+          console.error('[Auth] Privy verification failed:', err.message);
+          next(new AppError(401, 'INVALID_TOKEN', `Invalid or expired token: ${err.message}`));
+        });
+      return;
+    }
+
+    throw new AppError(401, 'UNAUTHORIZED', 'Authentication required');
+  }).catch((err) => {
+    next(new AppError(500, 'AUTH_ERROR', err.message));
+  });
 }
 
 /**
@@ -213,37 +224,52 @@ export function requireFounder(req: AuthRequest, _res: Response, next: NextFunct
 
 /**
  * Optional auth — attaches user if a valid Privy / registration-JWT /
- * API-key token is present, continues regardless.
+ * DB-backed API key / legacy API key token is present, continues regardless.
  */
 export function optionalAuth(req: AuthRequest, _res: Response, next: NextFunction): void {
   const authHeader = req.headers.authorization;
-  if (!authHeader?.startsWith('Bearer ')) {
-    next();
-    return;
-  }
-
-  const token = authHeader.slice(7);
-
-  // API key check
   const apiKey = req.headers['x-api-key'] as string | undefined;
-  if ((apiKey && isAgentApiKey(apiKey)) || isAgentApiKey(token)) {
-    req.user = { address: 'agent' };
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : undefined;
+  const candidate = apiKey || token;
+  if (!candidate) {
     next();
     return;
   }
 
-  // Registration-minted JWT
-  const regUser = verifyRegistrationToken(token);
-  if (regUser) {
-    req.user = regUser;
-    next();
-    return;
-  }
-
-  verifyPrivyToken(token)
-    .then((user) => {
-      req.user = user;
+  // Try DB-backed API key
+  lookupApiKey(candidate).then((key) => {
+    if (key) {
+      req.user = { address: key.ownerAddress, addresses: [key.ownerAddress] };
       next();
-    })
-    .catch(() => next());
+      return;
+    }
+
+    if (!token) {
+      next();
+      return;
+    }
+
+    // Legacy API key
+    if (isLegacyAgentApiKey(token)) {
+      req.user = { address: 'agent' };
+      next();
+      return;
+    }
+
+    // Registration-minted JWT
+    const regUser = verifyRegistrationToken(token);
+    if (regUser) {
+      req.user = regUser;
+      next();
+      return;
+    }
+
+    // Privy JWT
+    verifyPrivyToken(token)
+      .then((user) => {
+        req.user = user;
+        next();
+      })
+      .catch(() => next());
+  }).catch(() => next());
 }
