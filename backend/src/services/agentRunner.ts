@@ -364,7 +364,9 @@ export async function getAgent(id: string): Promise<DeployedAgent | undefined> {
 
 export async function listAgents(ownerAddress?: string): Promise<DeployedAgent[]> {
   const all = await loadAllAgents();
-  return ownerAddress ? all.filter(a => a.ownerAddress === ownerAddress) : all;
+  return ownerAddress
+    ? all.filter(a => a.ownerAddress?.toLowerCase() === ownerAddress.toLowerCase())
+    : all;
 }
 
 export async function updateAgent(id: string, patch: Partial<Pick<DeployedAgent, 'instructions' | 'model' | 'tools' | 'capabilities' | 'minReward'>>): Promise<DeployedAgent | undefined> {
