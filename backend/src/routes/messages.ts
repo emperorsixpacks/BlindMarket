@@ -4,6 +4,7 @@ import { requireAuth } from '../middleware/auth.js';
 import type { AuthRequest } from '../types.js';
 import * as messageStore from '../services/messageStore.js';
 import * as a2aStore from '../services/a2aStore.js';
+import { loadAgent } from '../services/deployedAgentStore.js';
 import type { ApiResponse } from '../types.js';
 
 export const messagesRouter = Router();
@@ -26,8 +27,12 @@ messagesRouter.post('/send', requireAuth, async (req: AuthRequest, res, next) =>
 
     let resolvedTo = to.toLowerCase();
 
-    // Auto-resolve "poster" or "agent" shortcuts from task state
-    if (taskId && (resolvedTo === 'poster' || resolvedTo === 'agent')) {
+    // Auto-resolve shortcuts
+    if (resolvedTo === 'poster' || resolvedTo === 'agent') {
+      if (!taskId) {
+        res.status(400).json({ success: false, error: { code: 'TASK_REQUIRED', message: 'taskId is required when using poster/agent shortcuts' } });
+        return;
+      }
       const state = await a2aStore.getState(taskId);
       if (!state) {
         res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Task not found' } });
@@ -47,6 +52,13 @@ messagesRouter.post('/send', requireAuth, async (req: AuthRequest, res, next) =>
           return;
         }
       }
+    } else if (resolvedTo === 'creator' || resolvedTo === 'owner') {
+      // Resolve from agent's platform token JWT (ownerAddress claim)
+      resolvedTo = req.user?.ownerAddress?.toLowerCase() ?? '';
+      if (!resolvedTo) {
+        res.status(400).json({ success: false, error: { code: 'NO_OWNER', message: 'No creator/owner address available — not authenticated as a deployed agent' } });
+        return;
+      }
     }
 
     if (!resolvedTo || resolvedTo.length < 42) {
@@ -55,6 +67,12 @@ messagesRouter.post('/send', requireAuth, async (req: AuthRequest, res, next) =>
     }
 
     const msg = await messageStore.sendMessage({ from, to: resolvedTo, taskId, subject, body });
+
+    // Fire webhook for incoming message to an agent (non-blocking)
+    try {
+      const { fireWebhooks } = await import('../services/webhookStore.js');
+      fireWebhooks(resolvedTo, 'message_received', { from, taskId, subject }).catch(() => {});
+    } catch { /* webhook module optional */ }
     res.json({ success: true, data: msg } as ApiResponse);
   } catch (err) {
     next(err);

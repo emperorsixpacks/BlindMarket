@@ -1088,6 +1088,12 @@ a2aRouter.post('/tasks/:id/submit', requireAuth, async (req: AuthRequest, res, n
     });
     console.log(`[a2a] submit: resultData stored and unsignedSubmitEvidence built for ${taskHash}`);
 
+    // Fire webhook for task submission (non-blocking)
+    try {
+      const { fireWebhooks } = await import('../services/webhookStore.js');
+      fireWebhooks(address, 'task_submitted', { taskId: taskHash }).catch(() => {});
+    } catch { /* webhook module optional */ }
+
     const body: ApiResponse = {
       success: true,
       data: {
@@ -1294,6 +1300,12 @@ a2aRouter.post('/tasks/:id/finalize', requireAuth, async (req: AuthRequest, res,
 
     // Bridge: marketplace signer calls completeVerification on chain.
     void settleVerification(taskHash, verificationResult.passed);
+
+    // Fire webhook for task completion (non-blocking)
+    try {
+      const { fireWebhooks } = await import('../services/webhookStore.js');
+      fireWebhooks(address, 'task_completed', { taskId: taskHash, passed: verificationResult.passed }).catch(() => {});
+    } catch { /* webhook module optional */ }
 
     const body: ApiResponse = {
       success: true,

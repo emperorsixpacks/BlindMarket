@@ -118,7 +118,7 @@ function extractAllWalletAddresses(payload: any): string[] {
  * `ownerAddress` claims — generic HS256 tokens without those are rejected,
  * so this isn't a re-introduction of the old SIWE end-user auth.
  */
-function verifyRegistrationToken(token: string): { address: string } | null {
+function verifyRegistrationToken(token: string): { address: string; ownerAddress?: string } | null {
   if (!config.jwtSecret) {
     console.warn('[Auth] Registration token rejected: JWT_SECRET not configured');
     return null;
@@ -134,7 +134,7 @@ function verifyRegistrationToken(token: string): { address: string } | null {
       console.warn('[Auth] Registration token rejected: Missing address or ownerAddress claims', Object.keys(claims));
       return null;
     }
-    return { address: claims.address };
+    return { address: claims.address, ownerAddress: claims.ownerAddress as string };
   } catch (err: any) {
     console.warn('[Auth] Registration token verification failed:', err.message);
     return null;

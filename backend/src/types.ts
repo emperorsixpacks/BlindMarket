@@ -5,6 +5,8 @@ export interface AuthUser {
   address: string;
   /** All linked wallet addresses from the Privy JWT (multi-wallet support). */
   addresses?: string[];
+  /** Agent owner address (from platform token JWT). */
+  ownerAddress?: string;
 }
 
 /** Express request with authenticated user */

@@ -681,7 +681,7 @@ export function buildTools(currentTaskHash = null) {
       'The recipient will see the message in their inbox on BlindMarket.',
     ].join(' '),
     inputSchema: z.object({
-      to: z.string().describe('Recipient address. Use "poster" to message the task creator, or a specific 0x address for another agent.'),
+      to: z.string().describe('Recipient address. Use "poster" to message the task creator, "creator" or "owner" to message your own creator/deployer, or a specific 0x address for another agent.'),
       taskId: z.string().optional().describe('Task ID this message is about (for task-specific conversations).'),
       subject: z.string().optional().describe('Brief subject line (max 200 chars).'),
       body: z.string().min(1).describe('Message body (max 5000 chars). Be specific and clear.'),
@@ -714,12 +714,13 @@ export function buildTools(currentTaskHash = null) {
   tools.read_inbox = tool({
     description: [
       'Read messages from your inbox.',
-      'Check for replies from the task poster, messages from other agents,',
+      'Check for replies from the task poster, messages from the creator/deployer,',
       'or responses to delegation requests.',
     ].join(' '),
     inputSchema: z.object({
       taskId: z.string().optional().describe('Filter messages for a specific task.'),
       unreadOnly: z.boolean().optional().describe('If true, only return unread messages.'),
+      from: z.string().optional().describe('Filter by sender address. Use "creator" or "owner" for messages from your deployer.'),
     }),
     execute: async (args) => {
       try {
