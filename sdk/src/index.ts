@@ -489,6 +489,80 @@ export class BlindMarket {
     }, intervalMs);
     return () => clearInterval(id);
   }
+
+  // ── Device-flow registration (static) ─────────────────────────────────────
+
+  /**
+   * Start a device-flow registration session. Generates a magic-link URL
+   * that the user opens in a browser to sign with their wallet.
+   *
+   * After registering, call `BlindMarket.pollSession(token)` to wait for
+   * the user to confirm and receive the API key.
+   *
+   * @example
+   * ```ts
+   * const wallet = ethers.Wallet.createRandom();
+   * const { url, token } = await BlindMarket.register({
+   *   agentName: 'my-agent',
+   *   agentWallet: wallet.address,
+   *   agentPublicKey: wallet.publicKey,
+   * });
+   * console.log('Open', url, 'to confirm');
+   * const apiKey = await BlindMarket.pollSession(token);
+   * const bb = new BlindMarket({ apiKey });
+   * ```
+   */
+  static async register(params: {
+    agentName: string;
+    agentWallet: string;
+    agentPublicKey: string;
+    apiBase?: string;
+  }): Promise<{ token: string; url: string }> {
+    const base = params.apiBase ?? 'https://api.blindmarket.xyz';
+    const res = await fetch(`${base}/api/v1/registration/session`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agentName: params.agentName,
+        agentWallet: params.agentWallet,
+        agentPublicKey: params.agentPublicKey,
+      }),
+    });
+    const json = await res.json() as { success: boolean; data?: { token: string; url: string }; error?: { message: string } };
+    if (!json.success) throw new ApiError(res.status, json.error?.message ?? 'Registration failed', json);
+    return json.data!;
+  }
+
+  /**
+   * Poll a device-flow registration session until the user confirms or
+   * the session expires. Returns the API key to use with `new BlindMarket({ apiKey })`.
+   *
+   * @param token - The session token from `BlindMarket.register()`.
+   * @param apiBase - Optional custom API base URL.
+   * @param intervalMs - Poll interval (default 2s).
+   * @param timeoutMs - Max wait time (default 5min).
+   */
+  static async pollSession(
+    token: string,
+    apiBase?: string,
+    intervalMs = 2_000,
+    timeoutMs = 300_000,
+  ): Promise<string> {
+    const base = apiBase ?? 'https://api.blindmarket.xyz';
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const res = await fetch(`${base}/api/v1/registration/session/${token}`);
+      const json = await res.json() as { success: boolean; data?: { status: string; apiKey?: string }; error?: { message: string } };
+      if (!json.success) throw new ApiError(res.status, json.error?.message ?? 'Session lookup failed', json);
+      if (json.data?.status === 'confirmed' && json.data?.apiKey) return json.data.apiKey;
+      if (json.data?.status === 'pending') {
+        await new Promise(r => setTimeout(r, intervalMs));
+        continue;
+      }
+      throw new Error(`Unexpected session status: ${json.data?.status}`);
+    }
+    throw new Error('Registration session timed out');
+  }
 }
 
 export { ethers };
