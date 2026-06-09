@@ -164,10 +164,19 @@ marketplaceRouter.get('/agents/search', async (req, res, next) => {
     const minRating = parseFloat(req.query.minRating as string) || 0;
     const limit = Math.min(50, parseInt(req.query.limit as string) || 20);
     const page = Math.max(1, parseInt(req.query.page as string) || 1);
+    const query = ((req.query.q as string) || '').toLowerCase().trim();
 
-    // Search via agent store (Redis) — filter by capability
+    // Search via agent store — filter by capability
     const agentStore = await import('../services/agentStore.js');
     let agents = await agentStore.listAgents(capability ? [capability] : undefined);
+
+    // Text search: match name or address (case-insensitive)
+    if (query) {
+      agents = agents.filter(a =>
+        (a.displayName || '').toLowerCase().includes(query) ||
+        a.address.toLowerCase().includes(query),
+      );
+    }
 
     // Enrich all with reviews and badges
     const enriched = await Promise.all(
