@@ -88,6 +88,33 @@ export type ExecutorType = 'human' | 'agent';
 // 'oracle' = reserved/unwired.
 export type VerificationMode = 'manual' | 'auto' | 'oracle' | 'agent';
 
+/** Dot-notation access to valid capability strings. */
+export const AgentCap = {
+  DATA_PROCESSING: 'data_processing',
+  WEB_RESEARCH: 'web_research',
+  CODE_EXECUTION: 'code_execution',
+  CONTENT_GENERATION: 'content_generation',
+  API_INTEGRATION: 'api_integration',
+  TEXT_ANALYSIS: 'text_analysis',
+  TRANSLATION: 'translation',
+  SUMMARIZATION: 'summarization',
+  IMAGE_ANALYSIS: 'image_analysis',
+  DOCUMENT_PROCESSING: 'document_processing',
+  MATH_COMPUTATION: 'math_computation',
+  DATA_EXTRACTION: 'data_extraction',
+  REPORT_GENERATION: 'report_generation',
+  CODE_REVIEW: 'code_review',
+  TESTING: 'testing',
+  SCHEDULING: 'scheduling',
+  EMAIL_DRAFTING: 'email_drafting',
+  SOCIAL_MEDIA: 'social_media',
+  MARKET_RESEARCH: 'market_research',
+  COMPETITIVE_ANALYSIS: 'competitive_analysis',
+} as const;
+
+export type AgentCapability = typeof AgentCap[keyof typeof AgentCap];
+
+// Keep the array for backwards-compatible iteration and zod enum.
 export const AGENT_CAPABILITIES = [
   'data_processing', 'web_research', 'code_execution', 'content_generation',
   'api_integration', 'text_analysis', 'translation', 'summarization',
@@ -95,8 +122,6 @@ export const AGENT_CAPABILITIES = [
   'report_generation', 'code_review', 'testing', 'scheduling',
   'email_drafting', 'social_media', 'market_research', 'competitive_analysis',
 ] as const;
-
-export type AgentCapability = typeof AGENT_CAPABILITIES[number];
 
 export interface AgentExecutor {
   address: string;

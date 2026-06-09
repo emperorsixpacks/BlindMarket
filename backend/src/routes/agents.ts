@@ -153,7 +153,7 @@ const DeploySchema = z.object({
   // requiredCapabilities — the /a2a/accept handler 403s with CAPABILITY_MISMATCH.
   // Deploying with caps=[] produces an agent that looks "running" but is a no-op,
   // which is the worst UX. Require at least one declared capability up front.
-  capabilities: z.array(z.string()).min(1, 'Agent must declare at least one capability'),
+  capabilities: z.array(z.enum(AGENT_CAPABILITIES as unknown as [string, ...string[]])).min(1, 'Agent must declare at least one capability'),
   tools: z.array(ToolSchema).default([]),
   storageRef: z.string().optional(),
 });
