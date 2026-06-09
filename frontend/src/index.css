@@ -52,6 +52,10 @@ html[data-theme="dark"] {
     font-size: 16px;
     line-height: 1.55;
     letter-spacing: 0;
+    /* Safety net against a single overflowing element scrolling the whole
+       page sideways on mobile. `clip` (not `hidden`) so it doesn't establish
+       a scroll container that would break the landing page's sticky nav. */
+    overflow-x: clip;
   }
 
   h1, h2, h3, h4, h5, h6 {

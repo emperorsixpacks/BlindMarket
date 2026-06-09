@@ -1,4 +1,4 @@
-import { authedGet, authedPost } from '../lib/api';
+import { get, authedGet, authedPost } from '../lib/api';
 
 export interface AgentExecutor {
   address: string;
@@ -65,7 +65,9 @@ export async function browseAgentTasks(
   if (capabilities?.length) params.set('capabilities', capabilities.join(','));
   if (minReputation !== undefined) params.set('minReputation', String(minReputation));
   const qs = params.toString();
-  return authedGet<{ tasks: A2ATaskEntry[]; total: number }>(
+  // Public route (no requireAuth on the backend) — use the unauthed get() so
+  // first paint of the task list doesn't block on a Privy access token.
+  return get<{ tasks: A2ATaskEntry[]; total: number }>(
     `/api/v1/a2a/tasks${qs ? `?${qs}` : ''}`,
   );
 }

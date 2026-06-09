@@ -1,10 +1,15 @@
-import { type ReactNode } from 'react';
+import { lazy, Suspense, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { motion, useReducedMotion } from 'framer-motion';
 import { LogoMark, Button } from '../components/bb';
 import { useAnalytics } from '../hooks/useAnalytics';
-import { AgentMesh } from '../components/landing/AgentMesh';
 import { LeaderboardPreview } from '../components/LeaderboardPreview';
+
+// Lazy-load the three.js WebGL globe so its (large) chunk only downloads on the
+// landing route, below the fold. It's a decorative fixed background, so a null
+// Suspense fallback is invisible — and this keeps three.js off every other
+// page's critical path.
+const AgentMesh = lazy(() => import('../components/landing/AgentMesh').then((m) => ({ default: m.AgentMesh })));
 
 /**
  * LandingV2 — lean, motion-first redesign.
@@ -68,7 +73,9 @@ export default function LandingV2() {
   return (
     <div className="relative min-h-screen bg-bg text-ink">
       {/* ── Page-wide motion background (fixed globe) ───────────────── */}
-      <AgentMesh className="fixed inset-0 z-0 pointer-events-none" />
+      <Suspense fallback={null}>
+        <AgentMesh className="fixed inset-0 z-0 pointer-events-none" />
+      </Suspense>
 
       <div className="relative z-10">
         {/* ── Navbar ──────────────────────────────────────────────── */}
@@ -97,6 +104,15 @@ export default function LandingV2() {
             >
               <Button variant="primary" label="Launch market" size="sm" />
             </Link>
+          </div>
+
+          {/* Mobile nav — the desktop center links are hidden < sm, so surface
+              them as a compact secondary row on phones (3 links don't warrant a
+              hamburger). Scrollable to stay safe on the narrowest devices. */}
+          <div className="sm:hidden flex items-center gap-5 px-4 pt-2 pb-2 text-xs overflow-x-auto whitespace-nowrap border-t border-line/60">
+            <Link to="/how-it-works" className="text-ink-2 hover:text-ink transition-colors">How it works</Link>
+            <a href="#why" className="text-ink-2 hover:text-ink transition-colors">Why us</a>
+            <Link to="/a2a" className="text-ink-2 hover:text-ink transition-colors">Agent board</Link>
           </div>
         </motion.nav>
 

@@ -1,5 +1,5 @@
+import { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { PrivyProvider } from '@privy-io/react-auth';
 import { WagmiProvider } from '@privy-io/wagmi';
 import { wagmiConfig } from './config/wagmi';
@@ -8,33 +8,47 @@ import { WalletProvider } from './context/WalletContext';
 import { AuthProvider } from './context/AuthContext';
 import { DashboardLayout } from './components/bb/DashboardLayout';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import LandingV2 from './pages/LandingV2';
-import TaskDetail from './pages/TaskDetail';
-import A2ADashboard from './pages/A2ADashboard';
-import HowItWorks from './pages/HowItWorks';
-import Earnings from './pages/Earnings';
-import Settings from './pages/Settings';
-import NotFound from './pages/NotFound';
-import RegisterAgent from './pages/RegisterAgent';
-import DeployAgent from './pages/DeployAgent';
-import AgentDetail from './pages/AgentDetail';
-import PostTask from './pages/PostTask';
-import MyTasks from './pages/MyTasks';
-import DeployAgentForm from './pages/DeployAgentForm';
-import DeployAgentSdk from './pages/DeployAgentSdk';
-import MyAgents from './pages/MyAgents';
-import Messages from './pages/Messages';
-import Metrics from './pages/Metrics';
-import AgentMarketplace from './pages/AgentMarketplace';
-import TaskTemplates from './pages/TaskTemplates';
 import { ThemeSync } from './components/ThemeSync';
+
+// Route-level code splitting. Previously every page was a static import, so the
+// entire app (all ~19 routes + the three.js globe + the web3 stacks) shipped in
+// one ~3.4 MB chunk that every first visit had to download and parse before
+// first paint — even when landing on a single page. lazy() splits each page
+// into its own chunk fetched on demand; the <Suspense> boundaries (here and
+// around the dashboard <Outlet/>) render a lightweight fallback while a chunk
+// loads. The QueryClient now lives solely in main.tsx (a second, defaults-less
+// client used to be created here and silently shadowed it — staleTime:0 →
+// refetch storms on every navigation/window-focus).
+const LandingV2 = lazy(() => import('./pages/LandingV2'));
+const TaskDetail = lazy(() => import('./pages/TaskDetail'));
+const A2ADashboard = lazy(() => import('./pages/A2ADashboard'));
+const HowItWorks = lazy(() => import('./pages/HowItWorks'));
+const Earnings = lazy(() => import('./pages/Earnings'));
+const Settings = lazy(() => import('./pages/Settings'));
+const NotFound = lazy(() => import('./pages/NotFound'));
+const RegisterAgent = lazy(() => import('./pages/RegisterAgent'));
+const DeployAgent = lazy(() => import('./pages/DeployAgent'));
+const AgentDetail = lazy(() => import('./pages/AgentDetail'));
+const PostTask = lazy(() => import('./pages/PostTask'));
+const MyTasks = lazy(() => import('./pages/MyTasks'));
+const DeployAgentForm = lazy(() => import('./pages/DeployAgentForm'));
+const DeployAgentSdk = lazy(() => import('./pages/DeployAgentSdk'));
+const MyAgents = lazy(() => import('./pages/MyAgents'));
+const Messages = lazy(() => import('./pages/Messages'));
+const Metrics = lazy(() => import('./pages/Metrics'));
+const AgentMarketplace = lazy(() => import('./pages/AgentMarketplace'));
+const TaskTemplates = lazy(() => import('./pages/TaskTemplates'));
 
 const privyAppId = import.meta.env.VITE_PRIVY_APP_ID;
 if (!privyAppId) {
   throw new Error('VITE_PRIVY_APP_ID is required — set it in frontend/.env');
 }
 
-const queryClient = new QueryClient();
+// Plain, full-height route fallback — matches the app background so a chunk
+// load reads as an instant flash rather than a jarring loading screen.
+function RouteFallback() {
+  return <div className="min-h-screen bg-bg" aria-busy="true" />;
+}
 
 export default function App() {
   return (
@@ -62,58 +76,58 @@ export default function App() {
         },
       }}
     >
-      <QueryClientProvider client={queryClient}>
-        <WagmiProvider config={wagmiConfig}>
-          <WalletProvider>
-            <AuthProvider>
-              <ThemeSync />
-              <ErrorBoundary>
-              <Routes>
-                <Route path="/" element={<LandingV2 />} />
-                {/* The redesign (formerly previewed at /v2) is now the live
-                    landing at `/`. Redirect the old preview URL so existing
-                    bookmarks/links don't 404. */}
-                <Route path="/v2" element={<Navigate to="/" replace />} />
-                <Route path="/register/:token" element={<RegisterAgent />} />
-                <Route element={<DashboardLayout />}>
-                  <Route path="/how-it-works" element={<HowItWorks />} />
-                  <Route path="/tasks/new" element={<PostTask />} />
-                  <Route path="/tasks/mine" element={<MyTasks />} />
-                  <Route path="/tasks/templates" element={<TaskTemplates />} />
-                  <Route path="/tasks/:id" element={<TaskDetail />} />
-                  <Route path="/a2a" element={<A2ADashboard />} />
-                  <Route path="/earnings" element={<Earnings />} />
-                  <Route path="/settings" element={<Settings />} />
-                  <Route path="/agents/browse" element={<AgentMarketplace />} />
-                  <Route path="/agents/deploy" element={<DeployAgent />} />
-                  <Route path="/agents/deploy/ui" element={<DeployAgentForm />} />
-                  <Route path="/agents/deploy/sdk" element={<DeployAgentSdk />} />
-                  <Route path="/agents/mine" element={<MyAgents />} />
-                  <Route path="/agents/:id" element={<AgentDetail />} />
-                  <Route path="/messages" element={<Messages />} />
-                  <Route path="/metrics" element={<Metrics />} />
+      <WagmiProvider config={wagmiConfig}>
+        <WalletProvider>
+          <AuthProvider>
+            <ThemeSync />
+            <ErrorBoundary>
+            <Suspense fallback={<RouteFallback />}>
+            <Routes>
+              <Route path="/" element={<LandingV2 />} />
+              {/* The redesign (formerly previewed at /v2) is now the live
+                  landing at `/`. Redirect the old preview URL so existing
+                  bookmarks/links don't 404. */}
+              <Route path="/v2" element={<Navigate to="/" replace />} />
+              <Route path="/register/:token" element={<RegisterAgent />} />
+              <Route element={<DashboardLayout />}>
+                <Route path="/how-it-works" element={<HowItWorks />} />
+                <Route path="/tasks/new" element={<PostTask />} />
+                <Route path="/tasks/mine" element={<MyTasks />} />
+                <Route path="/tasks/templates" element={<TaskTemplates />} />
+                <Route path="/tasks/:id" element={<TaskDetail />} />
+                <Route path="/a2a" element={<A2ADashboard />} />
+                <Route path="/earnings" element={<Earnings />} />
+                <Route path="/settings" element={<Settings />} />
+                <Route path="/agents/browse" element={<AgentMarketplace />} />
+                <Route path="/agents/deploy" element={<DeployAgent />} />
+                <Route path="/agents/deploy/ui" element={<DeployAgentForm />} />
+                <Route path="/agents/deploy/sdk" element={<DeployAgentSdk />} />
+                <Route path="/agents/mine" element={<MyAgents />} />
+                <Route path="/agents/:id" element={<AgentDetail />} />
+                <Route path="/messages" element={<Messages />} />
+                <Route path="/metrics" element={<Metrics />} />
 
-                  {/* Pure-A2A pivot: H2H/H2A/A2H surfaces removed from the IA.
-                      Old deep-links bounce to the closest A2A equivalent so we
-                      don't 404 anyone with bookmarked URLs (or copy-paste
-                      links living in older READMEs). */}
-                  <Route path="/tasks" element={<Navigate to="/a2a" replace />} />
-                  <Route path="/agents" element={<Navigate to="/a2a" replace />} />
-                  <Route path="/agent" element={<Navigate to="/tasks/new" replace />} />
-                  <Route path="/worker" element={<Navigate to="/a2a" replace />} />
-                  <Route path="/validators" element={<Navigate to="/how-it-works" replace />} />
-                  <Route path="/verification" element={<Navigate to="/a2a" replace />} />
-                  <Route path="/leaderboard" element={<Navigate to="/a2a" replace />} />
-                </Route>
-                <Route path="*" element={<DashboardLayout />}>
-                  <Route path="*" element={<NotFound />} />
-                </Route>
-              </Routes>
-              </ErrorBoundary>
-            </AuthProvider>
-          </WalletProvider>
-        </WagmiProvider>
-      </QueryClientProvider>
+                {/* Pure-A2A pivot: H2H/H2A/A2H surfaces removed from the IA.
+                    Old deep-links bounce to the closest A2A equivalent so we
+                    don't 404 anyone with bookmarked URLs (or copy-paste
+                    links living in older READMEs). */}
+                <Route path="/tasks" element={<Navigate to="/a2a" replace />} />
+                <Route path="/agents" element={<Navigate to="/a2a" replace />} />
+                <Route path="/agent" element={<Navigate to="/tasks/new" replace />} />
+                <Route path="/worker" element={<Navigate to="/a2a" replace />} />
+                <Route path="/validators" element={<Navigate to="/how-it-works" replace />} />
+                <Route path="/verification" element={<Navigate to="/a2a" replace />} />
+                <Route path="/leaderboard" element={<Navigate to="/a2a" replace />} />
+              </Route>
+              <Route path="*" element={<DashboardLayout />}>
+                <Route path="*" element={<NotFound />} />
+              </Route>
+            </Routes>
+            </Suspense>
+            </ErrorBoundary>
+          </AuthProvider>
+        </WalletProvider>
+      </WagmiProvider>
     </PrivyProvider>
   );
 }

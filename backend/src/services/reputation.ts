@@ -23,18 +23,25 @@ export async function getReputation(worker: string): Promise<Reputation> {
  */
 export async function getCompositeScore(worker: string): Promise<number> {
   try {
-    const rep = await getReputation(worker);
-    const tasks = Number(rep.tasksCompleted);
-    if (tasks === 0) return 0;
-    const total = Number(rep.totalScore);
-    const disputes = Number(rep.disputes);
-    const avgScore = total / tasks / 100; // 0-5
-    const reliability = tasks / (tasks + disputes + 1);
-    const score = (avgScore / 5) * reliability * 100;
-    return Math.round(Math.min(100, Math.max(0, score)));
+    return computeCompositeScore(await getReputation(worker));
   } catch {
     return 0;
   }
+}
+
+/**
+ * Pure composite-score math over already-fetched on-chain reputation, so
+ * callers that already hold a Reputation don't pay for a second RPC read.
+ */
+function computeCompositeScore(rep: Reputation): number {
+  const tasks = Number(rep.tasksCompleted);
+  if (tasks === 0) return 0;
+  const total = Number(rep.totalScore);
+  const disputes = Number(rep.disputes);
+  const avgScore = total / tasks / 100; // 0-5
+  const reliability = tasks / (tasks + disputes + 1);
+  const score = (avgScore / 5) * reliability * 100;
+  return Math.round(Math.min(100, Math.max(0, score)));
 }
 
 /**
@@ -49,12 +56,15 @@ export async function getReputationWithScore(worker: string): Promise<{
   disputeRatio: number;
   score: number;
 }> {
+  // Single on-chain read; the composite score is derived from it locally.
+  // (Previously this called getCompositeScore, which re-fetched the same
+  // on-chain data — doubling the RPC reads per agent on the /agents list.)
   const rep = await getReputation(worker);
   const tasks = Number(rep.tasksCompleted);
   const total = Number(rep.totalScore);
   const disputes = Number(rep.disputes);
   const avgScore = tasks > 0 ? total / tasks / 100 : 0;
-  const score = await getCompositeScore(worker);
+  const score = computeCompositeScore(rep);
 
   return {
     address: worker,

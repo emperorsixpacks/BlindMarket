@@ -29,7 +29,9 @@ const LOW_GAS_THRESHOLD = 0.005;
 function GasChip({ walletAddress }: { walletAddress: string }) {
   const { data: balance } = useBalance({
     address: walletAddress as `0x${string}`,
-    query: { enabled: !!walletAddress },
+    // Cache per-agent balance so navigating to/from this page doesn't refire an
+    // eth_getBalance per row against the rate-limited public RPC every time.
+    query: { enabled: !!walletAddress, staleTime: 60_000, gcTime: 300_000 },
   });
   if (!balance) return null;
   const ether = parseFloat(balance.formatted);

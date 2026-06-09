@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { ChainBanner } from '../ChainBanner';
@@ -37,7 +37,12 @@ export function DashboardLayout() {
               exit={{ opacity: 0, y: -dist }}
               transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
             >
-              <Outlet />
+              {/* Per-route Suspense so navigating between dashboard pages swaps
+                  only the content area (the lazy page chunk) while the sidebar
+                  and top bar stay mounted. */}
+              <Suspense fallback={<div className="min-h-[40vh]" aria-busy="true" />}>
+                <Outlet />
+              </Suspense>
             </motion.div>
           </AnimatePresence>
         </main>

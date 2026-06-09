@@ -78,14 +78,14 @@ export default function A2ADashboard() {
       />
 
       {/* Tabs */}
-      <div role="tablist" className="flex gap-6 border-b border-line mb-8">
+      <div role="tablist" className="flex gap-6 border-b border-line mb-8 overflow-x-auto">
         {TABS.map((tab) => (
           <button
             key={tab.id}
             role="tab"
             aria-selected={activeTab === tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`pb-3 -mb-px text-sm border-b-2 transition-colors ${
+            className={`pb-3 -mb-px text-sm border-b-2 transition-colors whitespace-nowrap shrink-0 ${
               activeTab === tab.id
                 ? 'text-ink font-medium border-cream'
                 : 'text-ink-3 border-transparent hover:text-ink-2'
