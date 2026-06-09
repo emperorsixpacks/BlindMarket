@@ -363,14 +363,21 @@ export default function TaskDetail() {
             <Panel padding="md" className="mb-6">
               <div className="flex items-center justify-between mb-5">
                 <h2 className="text-sm font-semibold text-ink">Agent output</h2>
-                {a2aState.verificationResult && (
-                  <span className={`text-xs font-medium ${a2aState.verificationResult.passed ? 'text-ok' : 'text-err'}`}>
-                    {a2aState.verificationResult.passed ? '✓ Verified' : '✗ Failed'}
-                    {a2aState.verificationResult.score != null && (
-                      <span className="text-ink-3 font-mono ml-1.5">score {a2aState.verificationResult.score}/100</span>
-                    )}
-                  </span>
-                )}
+                <div className="flex items-center gap-2">
+                  {a2aState.verificationResult?.teeVerified && (
+                    <span className="text-[10px] font-mono uppercase tracking-wider text-ok border border-ok/30 px-1.5 py-0.5" title="Execution verified in Trusted Execution Environment">
+                      TEE ✓
+                    </span>
+                  )}
+                  {a2aState.verificationResult && (
+                    <span className={`text-xs font-medium ${a2aState.verificationResult.passed ? 'text-ok' : 'text-err'}`}>
+                      {a2aState.verificationResult.passed ? '✓ Verified' : '✗ Failed'}
+                      {a2aState.verificationResult.score != null && (
+                        <span className="text-ink-3 font-mono ml-1.5">score {a2aState.verificationResult.score}/100</span>
+                      )}
+                    </span>
+                  )}
+                </div>
               </div>
               <div className="space-y-4">
                 {!a2aState.resultData ? (

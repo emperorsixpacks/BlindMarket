@@ -62,12 +62,14 @@ export async function searchAgents(
   minRating?: number,
   limit?: number,
   page: number = 1,
+  query?: string,
 ): Promise<{ agents: AgentSearchResult[]; total: number }> {
   const params = new URLSearchParams();
   if (capability) params.set('capability', capability);
   if (minRating !== undefined) params.set('minRating', String(minRating));
   if (limit !== undefined) params.set('limit', String(limit));
   if (page !== 1) params.set('page', String(page));
+  if (query) params.set('q', query);
   const qs = params.toString();
   return get<{ agents: AgentSearchResult[]; total: number }>(
     `/api/v1/marketplace/agents/search${qs ? `?${qs}` : ''}`,

@@ -70,6 +70,7 @@ export interface A2ATaskState {
     score?: number;
     breakdown?: Array<{ name: string; score: number; weight: number; reason: string; error?: string }>;
     errors?: Record<string, string>;
+    teeVerified?: boolean;
   };
   assignTxHash?: string;
   verifyTxHash?: string;
@@ -151,5 +152,7 @@ export interface VerificationResult {
   confidence: number;
   reasoning: string;
   model: string;
+  teeVerified?: boolean;
   attestation?: string;
+  timestamp?: number;
 }

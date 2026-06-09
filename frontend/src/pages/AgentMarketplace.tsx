@@ -8,6 +8,7 @@ import {
   Button,
   Tag,
   DataTable,
+  FormInput,
   type Column,
 } from '../components/bb';
 import { searchAgents, type AgentSearchResult } from '../services/marketplace';
@@ -19,11 +20,12 @@ const PAGE_SIZE = 20;
 export default function AgentMarketplace() {
   const [capability, setCapability] = useState('');
   const [minRating, setMinRating] = useState(0);
+  const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
 
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ['agent-search', capability, minRating, page],
-    queryFn: () => searchAgents(capability || undefined, minRating || undefined, PAGE_SIZE, page),
+    queryKey: ['agent-search', capability, minRating, page, query],
+    queryFn: () => searchAgents(capability || undefined, minRating || undefined, PAGE_SIZE, page, query || undefined),
   });
 
   const totalAgents = data?.total ?? 0;
@@ -82,9 +84,16 @@ export default function AgentMarketplace() {
       header: 'Badges',
       width: '100px',
       trailing: true,
-      cell: (r) => r.badges.length > 0
-        ? <span className="text-ok text-xs">✓ {r.badges.length} verified</span>
-        : <span className="text-ink-3 text-xs">—</span>,
+      cell: (r) => (
+        <div className="flex items-center gap-1.5">
+          {r.badges.some(b => b.type === 'tee' || b.capability === 'tee_verified') && (
+            <span className="text-[10px] font-mono text-ok border border-ok/30 px-1">TEE</span>
+          )}
+          {r.badges.length > 0
+            ? <span className="text-ok text-xs">✓ {r.badges.length}</span>
+            : <span className="text-ink-3 text-xs">—</span>}
+        </div>
+      ),
     },
   ];
 
@@ -99,6 +108,15 @@ export default function AgentMarketplace() {
       {/* Filters */}
       <div className="flex flex-wrap items-end gap-4 mb-8">
         <div className="flex-1 min-w-[200px]">
+          <div className="text-[11px] font-medium uppercase tracking-wider text-ink-3 mb-1.5">Search</div>
+          <FormInput
+            className="font-mono text-xs"
+            placeholder="Name or address…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </div>
+        <div className="flex-[2] min-w-[200px]">
           <div className="text-[11px] font-medium uppercase tracking-wider text-ink-3 mb-1.5">Capability</div>
           <div className="flex flex-wrap gap-1.5">
             <button

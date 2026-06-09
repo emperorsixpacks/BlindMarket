@@ -186,8 +186,8 @@ export default function A2ADashboard() {
             />
           ) : (
             <>
-              <div className="hidden md:grid grid-cols-[90px_1fr_110px_1fr_80px_70px] gap-4 px-5 py-3 border-b border-line text-[11px] font-medium uppercase tracking-wider text-ink-3">
-                <span>Task</span><span>Accepted</span><span>Status</span><span>Submitted</span><span>Verified</span><span>Result</span>
+                  <div className="hidden md:grid grid-cols-[90px_1fr_110px_1fr_80px_80px_70px] gap-4 px-5 py-3 border-b border-line text-[11px] font-medium uppercase tracking-wider text-ink-3">
+                <span>Task</span><span>Accepted</span><span>Status</span><span>Submitted</span><span>Verified</span><span>TEE</span><span>Result</span>
               </div>
               {execs.executions.map((e) => {
                 const hasResult = !!e.state.resultData;
@@ -196,7 +196,7 @@ export default function A2ADashboard() {
                 return (
                   <details key={e.meta.taskId} className="border-b border-line last:border-b-0 group">
                     <summary
-                      className={`grid grid-cols-[1fr_auto] md:grid-cols-[90px_1fr_110px_1fr_80px_70px] gap-3 md:gap-4 px-5 py-3.5 text-sm list-none items-center ${hasResult ? 'cursor-pointer hover:bg-surface-2' : 'cursor-default'} transition-colors`}
+                      className={`grid grid-cols-[1fr_auto] md:grid-cols-[90px_1fr_110px_1fr_80px_80px_70px] gap-3 md:gap-4 px-5 py-3.5 text-sm list-none items-center ${hasResult ? 'cursor-pointer hover:bg-surface-2' : 'cursor-default'} transition-colors`}
                     >
                       <Link to={`/tasks/${idStr}`} className="font-mono text-ink-2 hover:text-cream transition-colors truncate">
                         {onChainId ? `#${onChainId}` : `${e.meta.taskId.slice(0, 10)}…`}
@@ -205,6 +205,9 @@ export default function A2ADashboard() {
                       <span className="justify-self-end md:justify-self-auto"><StatusTag status={e.state.status} /></span>
                       <span className="hidden md:block text-ink-3 truncate">{e.state.submittedAt ? new Date(e.state.submittedAt).toLocaleString() : '—'}</span>
                       <span className="hidden md:block text-ink-3">{e.state.verificationResult?.passed ? '✓' : '—'}</span>
+                      <span className={`hidden md:block text-[10px] font-mono ${e.state.verificationResult?.teeVerified ? 'text-ok' : 'text-ink-3/40'}`}>
+                        {e.state.verificationResult?.teeVerified ? 'TEE' : '—'}
+                      </span>
                       <span className={`hidden md:block text-[11px] uppercase tracking-wider ${hasResult ? 'text-cream group-open:text-ink' : 'text-ink-3/50'}`}>
                         {hasResult ? <>view <span className="group-open:rotate-90 inline-block transition-transform">▸</span></> : '—'}
                       </span>
