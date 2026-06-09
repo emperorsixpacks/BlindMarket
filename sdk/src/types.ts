@@ -139,13 +139,13 @@ export interface A2ATaskState {
 export interface ExecutorProfile {
   address: Address;
   displayName: string;
-  capabilities: string[];
+  capabilities: AgentCapability[];
   publicKey: string;
   reputation: number;
   tasksCompleted: number;
   totalEarnedRaw: string;
   minReward?: string;
-  preferredCapabilities?: string[];
+  preferredCapabilities?: AgentCapability[];
   registeredAt: string;
   decayedScore?: number;
   disputeRatio?: number;
@@ -155,12 +155,38 @@ export interface ExecutorProfile {
 export interface RegisterExecutorInput {
   address: Address;
   displayName: string;
-  capabilities: string[];
+  capabilities: AgentCapability[];
   publicKey: string;
   agentCardUrl?: string;
   mcpEndpointUrl?: string;
   minReward?: string;
-  preferredCapabilities?: string[];
+  preferredCapabilities?: AgentCapability[];
+}
+
+/** Params for BlindMarket.createAgent() — generates wallet + registers executor in one call. */
+export interface CreateAgentParams {
+  /** Display name for the agent in the marketplace. */
+  displayName: string;
+  /** Capabilities this agent offers. Use AgentCap.DATA_PROCESSING etc. */
+  capabilities: AgentCapability[];
+  /** Which of the above the agent prefers (subset of capabilities). */
+  preferredCapabilities?: AgentCapability[];
+  /** Minimum reward per task (wei string). */
+  minReward?: string;
+  /** Agent card URL for marketplace display. */
+  agentCardUrl?: string;
+  /** MCP endpoint URL for tool-based agents. */
+  mcpEndpointUrl?: string;
+}
+
+/** Result of BlindMarket.createAgent(). */
+export interface CreateAgentResult {
+  executor: ExecutorProfile;
+  wallet: {
+    address: Address;
+    publicKey: string;
+    privateKey: string; // hex with 0x prefix — ⚠️ store securely, shown once
+  };
 }
 
 export interface DeployedAgentInfo {
@@ -172,7 +198,7 @@ export interface DeployedAgentInfo {
   status: string;
   provider: string;
   model: string;
-  capabilities: string[];
+  capabilities: AgentCapability[];
   inftTokenId?: number;
   deployedAt: string;
   lastActiveAt?: string;
@@ -240,3 +266,31 @@ export interface VerifyTaskInput {
   taskRequirements: string;
   evidenceSummary: string;
 }
+
+// ── Agent capabilities ───────────────────────────────────────────────────────
+
+/** Dot-notation access to valid capability strings. */
+export const AgentCap = {
+  DATA_PROCESSING: 'data_processing',
+  WEB_RESEARCH: 'web_research',
+  CODE_EXECUTION: 'code_execution',
+  CONTENT_GENERATION: 'content_generation',
+  API_INTEGRATION: 'api_integration',
+  TEXT_ANALYSIS: 'text_analysis',
+  TRANSLATION: 'translation',
+  SUMMARIZATION: 'summarization',
+  IMAGE_ANALYSIS: 'image_analysis',
+  DOCUMENT_PROCESSING: 'document_processing',
+  MATH_COMPUTATION: 'math_computation',
+  DATA_EXTRACTION: 'data_extraction',
+  REPORT_GENERATION: 'report_generation',
+  CODE_REVIEW: 'code_review',
+  TESTING: 'testing',
+  SCHEDULING: 'scheduling',
+  EMAIL_DRAFTING: 'email_drafting',
+  SOCIAL_MEDIA: 'social_media',
+  MARKET_RESEARCH: 'market_research',
+  COMPETITIVE_ANALYSIS: 'competitive_analysis',
+} as const;
+
+export type AgentCapability = typeof AgentCap[keyof typeof AgentCap];

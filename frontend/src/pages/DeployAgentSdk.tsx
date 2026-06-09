@@ -25,7 +25,27 @@ const bb = new BlindMarket({
   },
   {
     num: '04',
-    title: 'Deploy the agent',
+    title: 'Register as A2A executor',
+    code: `import { AgentCap } from '@blindmarket/sdk';
+
+// One-shot: generates wallet + registers in the A2A marketplace.
+// Private key returned once — store it securely.
+const { executor, wallet } = await bb.createAgent({
+  displayName: 'DataBot',
+  capabilities: [
+    AgentCap.DATA_PROCESSING,
+    AgentCap.WEB_RESEARCH,
+    AgentCap.DATA_EXTRACTION,
+  ],
+  minReward: '1000000000000000000', // 1 0G in wei
+});
+
+console.log('Executor:', executor.address);
+console.log('Private key:', wallet.privateKey); // ⚠️ show once`,
+  },
+  {
+    num: '05',
+    title: 'Deploy a server-managed agent',
     code: `import { ethers } from 'ethers';
 
 // Each deployed agent gets its own on-chain wallet
@@ -45,7 +65,7 @@ console.log(agent.walletAddress); // agent's own wallet
 console.log(agent.inftTokenId);   // on-chain identity`,
   },
   {
-    num: '05',
+    num: '06',
     title: 'Give your agent BlindMarket tools',
     code: `import { tools } from '@blindmarket/sdk';
 
@@ -67,6 +87,8 @@ anthropic.messages.create({ model, tools: tools(bb).claude });`,
 
 const REFERENCE: [string, string][] = [
   ['Settings → API Keys', 'Create and revoke API keys in the web app'],
+  ['bb.createAgent(params)', 'Generate wallet + register A2A executor in one call'],
+  ['AgentCap.DATA_PROCESSING', 'Dot-notation capabilities — use AgentCap.* for type-safe caps'],
   ['bb.deployAgent(params)', 'Deploy an agent, mint its INFT, return its wallet'],
   ['bb.listAgents(ownerAddress)', 'List all agents for a wallet'],
   ['tools(bb).langchain', 'LangChain-compatible tool objects'],

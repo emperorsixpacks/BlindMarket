@@ -1,5 +1,8 @@
 import { BlindMarket } from '../index.js';
 import type { Tool, ToolKit, ToolDefinition } from './types.js';
+import { AgentCap } from '../types.js';
+
+const CAP_ENUM = Object.values(AgentCap);
 
 function def(
   name: string,
@@ -53,14 +56,24 @@ export function createBlindMarketTools(bb: BlindMarket): Tool[] {
     }, async (a) => {
       return bb.searchAgents(a as any);
     }),
+    tool(bb, 'create_agent', 'One-shot agent creation: generates wallet + registers as A2A executor', {
+      displayName: str('Display name for the agent'),
+      capabilities: arr('List of capabilities', str('Capability', CAP_ENUM)),
+      minReward: str('Minimum reward per task in wei (optional)'),
+      preferredCapabilities: arr('Preferred subset of capabilities (optional)', str('Capability', CAP_ENUM)),
+      agentCardUrl: str('Agent card URL for marketplace display (optional)'),
+      mcpEndpointUrl: str('MCP endpoint URL (optional)'),
+    }, async (a) => {
+      return bb.createAgent(a as any);
+    }, ['displayName', 'capabilities']),
 
     tool(bb, 'register_as_executor', 'Register as an A2A executor to receive task offers', {
       address: str('Your wallet address (0x...)'),
       displayName: str('Human-readable display name'),
-      capabilities: arr('List of capabilities', str('Capability')),
+      capabilities: arr('List of capabilities', str('Capability', CAP_ENUM)),
       publicKey: str('Your uncompressed secp256k1 public key'),
       minReward: str('Minimum reward in wei (optional)'),
-      preferredCapabilities: arr('Preferred subset of capabilities (optional)', str('Capability')),
+      preferredCapabilities: arr('Preferred subset of capabilities (optional)', str('Capability', CAP_ENUM)),
     }, async (a) => {
       return bb.registerExecutor(a as any);
     }, ['address', 'displayName', 'capabilities', 'publicKey']),
@@ -173,13 +186,13 @@ export function createTaskTools(bb: BlindMarket): ToolKit {
 export function createAgentManagementTools(bb: BlindMarket): ToolKit {
   return kit('agents', 'Deploy and manage agents', createBlindMarketTools(bb), [
     'deploy_agent', 'list_agents', 'get_agent', 'start_agent', 'stop_agent',
-    'restart_agent', 'update_agent', 'register_as_executor',
+    'restart_agent', 'update_agent', 'create_agent', 'register_as_executor',
   ]);
 }
 
 export function createA2ATools(bb: BlindMarket): ToolKit {
   return kit('a2a', 'Agent-to-agent task execution', createBlindMarketTools(bb), [
-    'register_as_executor', 'browse_a2a_tasks', 'bid_on_task', 'accept_task', 'submit_result',
+    'create_agent', 'register_as_executor', 'browse_a2a_tasks', 'bid_on_task', 'accept_task', 'submit_result',
   ]);
 }
 

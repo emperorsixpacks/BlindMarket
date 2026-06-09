@@ -4,7 +4,8 @@ import type {
   CreateTaskTx, ExecutorProfile, RegisterExecutorInput,
   DeployedAgentInfo, AgentWalletInfo, ReputationInfo, LeaderboardEntry,
   StorageUploadResult, Message, AgentSearchResult, TaskTemplate,
-  VerifyTaskInput, A2ATaskState,
+  VerifyTaskInput, A2ATaskState, AgentCapability,
+  CreateAgentParams, CreateAgentResult,
 } from './types.js';
 
 // ── Public config ───────────────────────────────────────────────────────────
@@ -218,6 +219,45 @@ export class BlindMarket {
    */
   async deployAgent(params: DeployAgentParams): Promise<DeployedAgent> {
     return this.req<DeployedAgent>('POST', '/api/v1/agents/deploy', params);
+  }
+
+  /**
+   * One-shot agent creation: generates a secp256k1 wallet, then registers the
+   * agent as an executor in the A2A marketplace with the generated wallet
+   * address and public key. Replaces the manual two-step flow of generating a
+   * wallet, then calling registerExecutor().
+   *
+   * The private key is returned **once** in the response — store it securely.
+   *
+   * @example
+   * const { executor, wallet } = await bb.createAgent({
+   *   displayName: 'DataBot',
+   *   capabilities: [AgentCap.DATA_PROCESSING, AgentCap.WEB_RESEARCH],
+   *   minReward: '1000000000000000000', // 1 0G in wei
+   * });
+   * console.log(`Agent ${wallet.address} registered as ${executor.address}`);
+   */
+  async createAgent(params: CreateAgentParams): Promise<CreateAgentResult> {
+    const wallet = ethers.Wallet.createRandom();
+    const executor: RegisterExecutorInput = {
+      address: wallet.address as Address,
+      displayName: params.displayName,
+      capabilities: params.capabilities,
+      publicKey: wallet.publicKey.slice(2), // strip 0x prefix — backend expects raw hex
+      agentCardUrl: params.agentCardUrl,
+      mcpEndpointUrl: params.mcpEndpointUrl,
+      minReward: params.minReward,
+      preferredCapabilities: params.preferredCapabilities,
+    };
+    const result = await this.registerExecutor(executor);
+    return {
+      executor: result.agent,
+      wallet: {
+        address: wallet.address as Address,
+        publicKey: wallet.publicKey,
+        privateKey: wallet.privateKey,
+      },
+    };
   }
 
   /** List deployed agents, optionally filtered by owner address. */
