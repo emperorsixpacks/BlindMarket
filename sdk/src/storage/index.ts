@@ -1,3 +1,3 @@
 export * from './Storage.js';
 export * from './MemoryStorage.js';
-export * from './ZgStorage.js';
+// ZgStorage excluded — requires @0gfoundation/0g-ts-sdk optional dep

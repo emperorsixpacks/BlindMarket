@@ -21,7 +21,14 @@
     "bounty",
     "blockchain",
     "encrypted",
-    "agent-to-human"
+    "agent-to-human",
+    "mcp",
+    "model-context-protocol",
+    "openai-tools",
+    "agent-sdk",
+    "claude",
+    "langchain",
+    "vercel-ai-sdk"
   ],
   "type": "module",
   "main": "./dist/index.js",
@@ -30,6 +37,10 @@
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./tools": {
+      "import": "./dist/tools/index.js",
+      "types": "./dist/tools/index.d.ts"
     }
   },
   "scripts": {
