@@ -38,8 +38,12 @@ export async function scoreAgent(
 ): Promise<ScoredAgent> {
   const addr = agent.address.toLowerCase();
 
-  // 1. Capability overlap
-  const overlap = requiredCapabilities.filter((c) => agent.capabilities.includes(c));
+  // 1. Capability overlap — use preferredCapabilities if set, else full set.
+  // This lets agents express "I CAN do this but I'd rather not" without being
+  // excluded entirely: they still pass the eligibility filter (ALL caps must
+  // be present), but their overlap score only counts the ones they prefer.
+  const effectiveCaps = agent.preferredCapabilities ?? agent.capabilities;
+  const overlap = requiredCapabilities.filter((c) => effectiveCaps.includes(c));
   const capabilityOverlap = overlap.length;
 
   // 2. Badge bonus: +2 per required cap that has a verified badge
@@ -104,12 +108,30 @@ export async function scoreAgent(
  */
 export async function rankAgents(
   requiredCapabilities: AgentCapability[],
+  taskRewardWei?: string,
 ): Promise<ScoredAgent[]> {
   const agents = await agentStore.listAgents(requiredCapabilities);
   if (agents.length === 0) return [];
 
+  // Filter by minReward — agents that set a minimum reward floor won't be
+  // considered for tasks below it. Malformed values are silently skipped
+  // (don't block the agent from being scored).
+  const taskReward = taskRewardWei ? BigInt(taskRewardWei) : null;
+  let eligible = agents;
+  if (taskReward !== null) {
+    eligible = agents.filter((a) => {
+      if (!a.minReward) return true;
+      try {
+        return BigInt(a.minReward) <= taskReward;
+      } catch {
+        return true;
+      }
+    });
+  }
+  if (eligible.length === 0) return [];
+
   const scored = await Promise.all(
-    agents.map((a) => scoreAgent(a, requiredCapabilities)),
+    eligible.map((a) => scoreAgent(a, requiredCapabilities)),
   );
 
   scored.sort((a, b) => b.score - a.score);

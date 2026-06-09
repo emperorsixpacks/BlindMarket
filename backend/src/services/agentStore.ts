@@ -1,79 +1,105 @@
-import { redis } from './redis.js';
-import type { AgentExecutor } from '../types.js';
-
-// ── Keys ─────────────────────────────────────────────────────────────────────
-//
-// Persistence model — mirrors a2aStore's pattern so cold restarts don't wipe
-// state. Previously this was an in-memory Map; that meant every backend
-// restart wiped all A2A executor registrations, leaving worker.js processes
-// silently 403'd by /accept (NOT_REGISTERED) until each one restarted and
-// re-registered. With Redis-backed storage, registrations survive bounces.
-//
-//   agent:executor:<lowercased_addr>  → JSON of AgentExecutor
-//   agent:executor:all                → SET of lowercased addresses (size-cap check)
-//
-// Addresses are always lowercased for keys to defang case mismatches between
-// EIP-55 checksummed and lowercased forms.
-
-const KEY = {
-  executor: (addr: string) => `agent:executor:${addr.toLowerCase()}`,
-  all: 'agent:executor:all',
-};
+import { getPool } from './neonDb.js';
+import type { AgentExecutor, AgentCapability } from '../types.js';
 
 const MAX_AGENTS = 1_000;
 
+function rowToAgent(row: Record<string, unknown>): AgentExecutor {
+  return {
+    address: row.address as string,
+    displayName: row.display_name as string,
+    capabilities: (row.capabilities as AgentCapability[]) ?? [],
+    publicKey: row.public_key as string,
+    agentCardUrl: (row.agent_card_url as string) ?? undefined,
+    mcpEndpointUrl: (row.mcp_endpoint_url as string) ?? undefined,
+    minReward: (row.min_reward as string) ?? undefined,
+    preferredCapabilities: (row.preferred_capabilities as AgentCapability[]) ?? undefined,
+    reputation: (row.reputation as number) ?? 50,
+    tasksCompleted: (row.tasks_completed as number) ?? 0,
+    totalEarnedRaw: (row.total_earned_raw as string) ?? '0',
+    registeredAt: (row.registered_at as string) ?? new Date().toISOString(),
+  };
+}
+
 export async function registerAgent(agent: AgentExecutor): Promise<void> {
+  const db = await getPool();
   const addr = agent.address.toLowerCase();
-  // Check size cap only for NEW registrations — re-registers (worker.js calls
-  // this on every startup) shouldn't be blocked by the cap even at scale.
-  const exists = await redis.exists(KEY.executor(addr));
-  if (!exists) {
-    const total = await redis.scard(KEY.all);
-    if (total >= MAX_AGENTS) {
+
+  // Size cap only for NEW registrations (re-registers skip the check)
+  const { rows: existing } = await db.query<{ c: string }>(
+    'SELECT address AS c FROM agent_executors WHERE address = $1',
+    [addr],
+  );
+  if (existing.length === 0) {
+    const { rows: count } = await db.query<{ n: number }>(
+      'SELECT COUNT(*)::int AS n FROM agent_executors',
+    );
+    if (count[0].n >= MAX_AGENTS) {
       throw new Error('Agent registry full');
     }
   }
-  const pipe = redis.pipeline();
-  pipe.set(KEY.executor(addr), JSON.stringify(agent));
-  pipe.sadd(KEY.all, addr);
-  await pipe.exec();
+
+  await db.query(
+    `INSERT INTO agent_executors
+       (address, display_name, capabilities, public_key, agent_card_url,
+        mcp_endpoint_url, min_reward, preferred_capabilities,
+        reputation, tasks_completed, total_earned_raw, registered_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+       COALESCE((SELECT registered_at FROM agent_executors WHERE address = $1), NOW()), NOW())
+     ON CONFLICT (address) DO UPDATE SET
+       display_name = EXCLUDED.display_name,
+       capabilities = EXCLUDED.capabilities,
+       public_key = EXCLUDED.public_key,
+       agent_card_url = EXCLUDED.agent_card_url,
+       mcp_endpoint_url = EXCLUDED.mcp_endpoint_url,
+       min_reward = EXCLUDED.min_reward,
+       preferred_capabilities = EXCLUDED.preferred_capabilities,
+       reputation = EXCLUDED.reputation,
+       tasks_completed = EXCLUDED.tasks_completed,
+       total_earned_raw = EXCLUDED.total_earned_raw,
+       updated_at = NOW()`,
+    [
+      addr,
+      agent.displayName,
+      agent.capabilities,
+      agent.publicKey,
+      agent.agentCardUrl ?? null,
+      agent.mcpEndpointUrl ?? null,
+      agent.minReward ?? null,
+      agent.preferredCapabilities ?? null,
+      agent.reputation,
+      agent.tasksCompleted,
+      agent.totalEarnedRaw ?? '0',
+    ],
+  );
 }
 
 export async function getAgent(address: string): Promise<AgentExecutor | undefined> {
-  const raw = await redis.get(KEY.executor(address));
-  return raw ? (JSON.parse(raw) as AgentExecutor) : undefined;
+  const db = await getPool();
+  const { rows } = await db.query<Record<string, unknown>>(
+    'SELECT * FROM agent_executors WHERE address = $1',
+    [address.toLowerCase()],
+  );
+  return rows[0] ? rowToAgent(rows[0]) : undefined;
 }
 
 /**
- * List all registered executors, optionally filtered by capability match.
- *
- * Matches the /accept gate's semantics (superset: the agent's set must include
- * ALL of the required caps). Used by the frontend at task-creation time to
- * discover which pubkeys to ECIES-wrap the AES key to.
- *
- * Returns at most MAX_AGENTS entries; small enough today that we don't
- * paginate. If we ever scale past ~1k registered executors this should move
- * to a Redis SCAN cursor + capability index.
+ * List all registered executors, optionally filtered by capability match
+ * (superset: the agent's set must include ALL of the required caps).
  */
 export async function listAgents(requiredCapabilities?: string[]): Promise<AgentExecutor[]> {
-  const addrs = await redis.smembers(KEY.all);
-  if (addrs.length === 0) return [];
-
-  const pipe = redis.pipeline();
-  for (const addr of addrs) pipe.get(KEY.executor(addr));
-  const rows = await pipe.exec();
-  if (!rows) return [];
-
-  const agents: AgentExecutor[] = [];
-  for (const [, raw] of rows) {
-    if (typeof raw !== 'string') continue;
-    try {
-      agents.push(JSON.parse(raw) as AgentExecutor);
-    } catch {
-      // Skip malformed rows rather than failing the whole listing.
-    }
+  const db = await getPool();
+  let rows: Record<string, unknown>[];
+  if (requiredCapabilities && requiredCapabilities.length > 0) {
+    const { rows: r } = await db.query<Record<string, unknown>>(
+      'SELECT * FROM agent_executors WHERE capabilities @> $1::TEXT[] ORDER BY registered_at DESC',
+      [requiredCapabilities],
+    );
+    rows = r;
+  } else {
+    const { rows: r } = await db.query<Record<string, unknown>>(
+      'SELECT * FROM agent_executors ORDER BY registered_at DESC',
+    );
+    rows = r;
   }
-
-  if (!requiredCapabilities || requiredCapabilities.length === 0) return agents;
-  return agents.filter((a) => requiredCapabilities.every((c) => a.capabilities.includes(c as AgentExecutor['capabilities'][number])));
+  return rows.map(rowToAgent);
 }

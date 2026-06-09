@@ -33,6 +33,7 @@ const KEY = {
   poster: (addr: string) => `a2a:poster:${addr.toLowerCase()}`,
   verifier: (addr: string) => `a2a:verifier:${addr.toLowerCase()}`,
   offer: (taskId: string) => `a2a:offer:${taskId.toLowerCase()}`,
+  cascade: (taskId: string) => `a2a:cascade:${taskId.toLowerCase()}`,
 };
 
 export async function setMeta(meta: A2ATaskMeta): Promise<void> {
@@ -410,6 +411,79 @@ export async function checkOffer(taskId: string, callerAddress: string): Promise
 export async function clearOffer(taskId: string): Promise<void> {
   await redis.del(KEY.offer(taskId));
 }
+
+// ── Cascade: scored offer queue ───────────────────────────────────────────────
+
+export interface CascadeEntry {
+  address: string;
+  score: number;
+  displayName: string;
+}
+
+export interface TaskCascade {
+  ranked: CascadeEntry[];
+  position: number;     // index into ranked[] that is currently being offered
+  startedAt: number;    // epoch ms
+}
+
+/** How long the cascade stays alive before falling back to CAS race. */
+const CASCADE_TTL_MS = 120_000;
+
+/** Per-position offer window inside a cascade. */
+const CASCADE_OFFER_MS = 12_000;
+
+/**
+ * Store the full ranked agent list for a task and start the cascade.
+ * The caller should then offer to position 0 and schedule advancement.
+ */
+export async function setCascade(taskId: string, ranked: CascadeEntry[]): Promise<void> {
+  const tid = taskId.toLowerCase();
+  const cascade: TaskCascade = {
+    ranked,
+    position: 0,
+    startedAt: Date.now(),
+  };
+  await redis.setex(KEY.cascade(tid), Math.ceil(CASCADE_TTL_MS / 1000), JSON.stringify(cascade));
+}
+
+/**
+ * Read the current cascade for a task. Returns undefined if none or expired.
+ */
+export async function getCascade(taskId: string): Promise<TaskCascade | undefined> {
+  const raw = await redis.get(KEY.cascade(taskId));
+  if (!raw) return undefined;
+  return JSON.parse(raw) as TaskCascade;
+}
+
+/**
+ * Advance the cascade to the next position. Reads the current cascade,
+ * increments the position, and writes back. Returns the next agent entry
+ * or null if the cascade is exhausted / gone.
+ */
+export async function advanceCascade(taskId: string): Promise<CascadeEntry | null> {
+  const tid = taskId.toLowerCase();
+  const raw = await redis.get(KEY.cascade(tid));
+  if (!raw) return null;
+
+  const cascade = JSON.parse(raw) as TaskCascade;
+  const nextPos = cascade.position + 1;
+  if (nextPos >= cascade.ranked.length) {
+    await redis.del(KEY.cascade(tid));
+    return null;
+  }
+
+  cascade.position = nextPos;
+  await redis.setex(KEY.cascade(tid), Math.ceil(CASCADE_TTL_MS / 1000), JSON.stringify(cascade));
+  return cascade.ranked[nextPos];
+}
+
+/** Remove the cascade for a task (used on accept, release, or full exhaustion). */
+export async function clearCascade(taskId: string): Promise<void> {
+  await redis.del(KEY.cascade(taskId));
+}
+
+/** Per-position offer window (exported for use by a2a.ts cascade timer). */
+export { CASCADE_OFFER_MS };
 
 /** Helper used by getExecutorTasks and getPosterTasks — same shape, different
  *  index. Returns meta+state pairs for every taskId in the named set. */

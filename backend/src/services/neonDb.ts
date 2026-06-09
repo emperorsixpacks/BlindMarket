@@ -171,6 +171,62 @@ const migrations: Array<{ id: number; name: string; sql: string }> = [
       CREATE INDEX IF NOT EXISTS idx_badges_agent ON agent_badges(agent_address);
     `,
   },
+  {
+    id: 7,
+    name: 'agent_executors',
+    sql: `
+      CREATE TABLE IF NOT EXISTS agent_executors (
+        address TEXT PRIMARY KEY,
+        display_name TEXT NOT NULL,
+        capabilities TEXT[] NOT NULL DEFAULT '{}',
+        public_key TEXT NOT NULL,
+        agent_card_url TEXT,
+        mcp_endpoint_url TEXT,
+        min_reward TEXT,
+        preferred_capabilities TEXT[],
+        reputation INTEGER NOT NULL DEFAULT 50,
+        tasks_completed INTEGER NOT NULL DEFAULT 0,
+        total_earned_raw TEXT NOT NULL DEFAULT '0',
+        registered_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_executor_caps ON agent_executors USING GIN (capabilities);
+    `,
+  },
+  {
+    id: 8,
+    name: 'deployed_agents',
+    sql: `
+      CREATE TABLE IF NOT EXISTS deployed_agents (
+        id TEXT PRIMARY KEY,
+        owner_address TEXT NOT NULL,
+        authorized_owners TEXT[] NOT NULL DEFAULT '{}',
+        name TEXT NOT NULL,
+        instructions TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        model TEXT NOT NULL,
+        api_key TEXT NOT NULL,
+        encrypted_api_key TEXT NOT NULL,
+        capabilities TEXT[] NOT NULL DEFAULT '{}',
+        tools JSONB NOT NULL DEFAULT '[]',
+        status TEXT NOT NULL DEFAULT 'stopped',
+        deployed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        last_active_at TIMESTAMPTZ,
+        storage_ref TEXT,
+        platform_token TEXT,
+        wallet_address TEXT NOT NULL,
+        public_key TEXT NOT NULL,
+        encrypted_private_key TEXT NOT NULL,
+        raw_private_key TEXT,
+        inft_token_id INTEGER,
+        min_reward TEXT,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_deployed_owner ON deployed_agents(owner_address);
+    `,
+  },
 ];
 
 async function runMigrations(p: pg.Pool): Promise<void> {

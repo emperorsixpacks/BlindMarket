@@ -46,6 +46,8 @@ vi.mock('../services/a2aStore.js', () => ({
   checkOffer: vi.fn(() => Promise.resolve(false)),
   clearOffer: vi.fn(() => Promise.resolve()),
   setOffer: vi.fn(() => Promise.resolve()),
+  // Cascade ops
+  clearCascade: vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock('../services/agentStore.js', () => ({ getAgent: vi.fn() }));

@@ -482,10 +482,10 @@ agentsRouter.post('/:id/link-owner', requireAuth, async (req: AuthRequest, res) 
 agentsRouter.patch('/:id', requireAuth, async (req: AuthRequest, res) => {
   const agent = await authorizeOwner(req, res, req.params.id);
   if (!agent) return;
-  const { instructions, model, tools, capabilities } = req.body as {
-    instructions?: string; model?: string; tools?: object[]; capabilities?: string[];
+  const { instructions, model, tools, capabilities, minReward } = req.body as {
+    instructions?: string; model?: string; tools?: object[]; capabilities?: string[]; minReward?: string;
   };
-  const updated = await updateAgent(req.params.id, { instructions, model, tools: tools as any, capabilities: capabilities as any });
+  const updated = await updateAgent(req.params.id, { instructions, model, tools: tools as any, capabilities: capabilities as any, minReward });
   res.json({ success: true, data: strip(updated) });
 });
 

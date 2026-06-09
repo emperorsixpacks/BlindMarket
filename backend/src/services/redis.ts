@@ -1,5 +1,4 @@
 import { Redis } from 'ioredis';
-import type { DeployedAgent } from '../types.js';
 
 const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379';
 
@@ -12,8 +11,6 @@ redisSub.on('error', (e: Error) => console.error('[redis] sub error:', e.message
 // ── Keys ─────────────────────────────────────────────────────────────────────
 
 const KEY = {
-  agent: (id: string) => `agent:${id}`,
-  agentIds: () => 'agents:ids',
   agentLogs: (id: string) => `agent:${id}:logs`,
   agentLogChannel: (id: string) => `agent:${id}:log-stream`,
   agentHeartbeat: (id: string) => `agent:${id}:heartbeat`,
@@ -21,27 +18,6 @@ const KEY = {
 
 const HEARTBEAT_TTL_S = 90; // agent considered dead if no heartbeat for 90s
 const LOG_LIMIT = 200;
-
-// ── Agent state ───────────────────────────────────────────────────────────────
-
-export async function saveAgent(agent: DeployedAgent): Promise<void> {
-  const pipe = redis.pipeline();
-  pipe.set(KEY.agent(agent.id), JSON.stringify(agent));
-  pipe.sadd(KEY.agentIds(), agent.id);
-  await pipe.exec();
-}
-
-export async function loadAgent(id: string): Promise<DeployedAgent | null> {
-  const raw = await redis.get(KEY.agent(id));
-  return raw ? (JSON.parse(raw) as DeployedAgent) : null;
-}
-
-export async function loadAllAgents(): Promise<DeployedAgent[]> {
-  const ids = await redis.smembers(KEY.agentIds());
-  if (!ids.length) return [];
-  const raws = await redis.mget(...ids.map(KEY.agent));
-  return raws.filter(Boolean).map(r => JSON.parse(r as string) as DeployedAgent);
-}
 
 // ── Logs ──────────────────────────────────────────────────────────────────────
 

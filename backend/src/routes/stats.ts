@@ -4,7 +4,8 @@ import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { provider } from '../services/chain.js';
-import { loadAllAgents, redis } from '../services/redis.js';
+import { redis } from '../services/redis.js';
+import { loadAllAgents } from '../services/deployedAgentStore.js';
 import * as registryService from '../services/registry.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));

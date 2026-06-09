@@ -1480,6 +1480,7 @@ async function ensureRegisteredAsA2AExecutor() {
         displayName: AGENT_NAME,
         capabilities: agentCapabilities,
         publicKey: AGENT_PUBLIC_KEY,
+        minReward: (process.env.AGENT_MIN_REWARD || '').trim() || undefined,
       }),
     });
     if (res.ok) {

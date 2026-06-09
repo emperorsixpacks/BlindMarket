@@ -8,10 +8,10 @@ import { config } from '../config.js';
 import { eciesEncrypt, generateKeyPair } from './crypto.js';
 import { inft } from './chain.js';
 import {
-  saveAgent, loadAgent, loadAllAgents,
   appendLog, getLogs, subscribeAgentLogs as redisSubscribe,
   touchHeartbeat,
 } from './redis.js';
+import { saveAgent, loadAgent, loadAllAgents } from './deployedAgentStore.js';
 import type { DeployedAgent, AgentCapability, AgentStatus, LLMProvider, AgentTool } from '../types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -205,6 +205,7 @@ export async function startAgent(id: string, opts?: { skipResume?: boolean }): P
       BACKEND_URL: `http://localhost:${config.port}`,
       AGENT_TOOLS: JSON.stringify(agent.tools ?? []),
       AGENT_CAPABILITIES: JSON.stringify(agent.capabilities ?? []),
+      AGENT_MIN_REWARD: agent.minReward ?? '',
       // Set only on a post-crash auto-restart: the worker skips re-driving its
       // in-flight (accepted-but-unsubmitted) task so a poison brief can't loop
       // the crash. Empty on fresh starts and graceful boot-reconciles.
@@ -340,7 +341,7 @@ export async function reconcileAgents(): Promise<void> {
   try {
     agents = await loadAllAgents();
   } catch (e) {
-    console.error(`[agentRunner] reconcile: failed to load agents: ${(e as Error).message}`);
+    console.error(`[agentRunner] reconcile: failed to load agents`, e);
     return;
   }
   const running = agents.filter((a) => a.status === 'running' && !processes.has(a.id));
@@ -365,7 +366,7 @@ export async function listAgents(ownerAddress?: string): Promise<DeployedAgent[]
   return ownerAddress ? all.filter(a => a.ownerAddress === ownerAddress) : all;
 }
 
-export async function updateAgent(id: string, patch: Partial<Pick<DeployedAgent, 'instructions' | 'model' | 'tools' | 'capabilities'>>): Promise<DeployedAgent | undefined> {
+export async function updateAgent(id: string, patch: Partial<Pick<DeployedAgent, 'instructions' | 'model' | 'tools' | 'capabilities' | 'minReward'>>): Promise<DeployedAgent | undefined> {
   const agent = await loadAgent(id);
   if (!agent) return undefined;
   // Strip undefined values before merging. Callers can send a subset of the

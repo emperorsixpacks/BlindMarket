@@ -42,6 +42,14 @@ const registerSchema = z.object({
     .regex(/^04[0-9a-fA-F]{128}$/, 'publicKey must be uncompressed secp256k1 hex (130 chars, leading 04, no 0x prefix) — deployed agents derive this from their key; register again with it'),
   agentCardUrl: z.string().url().optional(),
   mcpEndpointUrl: z.string().url().optional(),
+  // Minimum reward in wei (numeric string). Tasks below this threshold are
+  // filtered out before scoring, so the agent never appears in the ranked list.
+  minReward: z.string().regex(/^\d+$/, 'minReward must be a non-negative integer string (wei)').optional(),
+  // Preferred capabilities subset. If set, scoring overlap only counts these
+  // (not the agent's full capability set). The agent must still have ALL
+  // requiredCapabilities to match the task (enforced by listAgents), so this
+  // only affects ranking, not eligibility.
+  preferredCapabilities: z.array(z.enum(AGENT_CAPABILITIES as unknown as [string, ...string[]])).min(1).max(20).optional(),
 });
 
 const submitSchema = z.object({
@@ -279,6 +287,8 @@ a2aRouter.post('/register', requireAuth, async (req: AuthRequest, res, next) => 
       publicKey: data.publicKey,
       agentCardUrl: data.agentCardUrl,
       mcpEndpointUrl: data.mcpEndpointUrl,
+      minReward: data.minReward,
+      preferredCapabilities: data.preferredCapabilities as AgentCapability[] | undefined,
       reputation: existing?.reputation ?? 50, // start at 50
       tasksCompleted: existing?.tasksCompleted ?? 0,
       registeredAt: existing?.registeredAt ?? new Date().toISOString(),
@@ -508,8 +518,11 @@ a2aRouter.post('/tasks/:id/accept', requireAuth, async (req: AuthRequest, res, n
       console.log(`[a2a] accept: key-custody self-heal OK for ${taskId}, agent=${address}`);
     }
 
-    // Clear the exclusive offer now that the CAS is won.
-    await a2aStore.clearOffer(taskId).catch(() => {});
+    // Clear the exclusive offer and cascade now that the CAS is won.
+    await Promise.all([
+      a2aStore.clearOffer(taskId).catch(() => {}),
+      a2aStore.clearCascade(taskId).catch(() => {}),
+    ]);
 
     // Await on-chain settlement: marketplaceAssign(taskId, executor) so the
     // contract knows who to pay. The HTTP response waits for confirmation,
@@ -751,6 +764,47 @@ a2aRouter.get('/key-custody/pubkey', async (_req, res, next) => {
   }
 });
 
+/**
+ * Advance the cascade to the next ranked agent after the per-position offer
+ * window expires. If the task has already been accepted (status !== open) or
+ * the cascade is exhausted, the task falls back to CAS-race broadcast.
+ * This uses setTimeout, so cascades are lost on server restart — the task
+ * remains in a2a:open and can be picked up via CAS race (graceful degradation).
+ */
+function scheduleCascadeAdvance(
+  taskHash: string,
+  requiredCaps: string[],
+  rootHash: string | undefined,
+): void {
+  setTimeout(async () => {
+    try {
+      const state = await a2aStore.getState(taskHash);
+      if (!state || state.status !== 'open') return;
+
+      const next = await a2aStore.advanceCascade(taskHash);
+      if (!next) {
+        emitTaskAvailable(taskHash, { requiredCapabilities: requiredCaps });
+        return;
+      }
+
+      const deadline = Date.now() + a2aStore.CASCADE_OFFER_MS;
+      await a2aStore.setOffer(taskHash, {
+        address: next.address,
+        score: next.score,
+        expiresAt: deadline,
+      });
+      emitTaskOffer(next.address, taskHash, {
+        requiredCapabilities: requiredCaps,
+        rootHash,
+      }, next.score, deadline);
+
+      scheduleCascadeAdvance(taskHash, requiredCaps, rootHash);
+    } catch (err) {
+      console.error(`[a2a] cascade advance failed for ${taskHash.slice(0, 10)}…:`, (err as Error).message);
+    }
+  }, a2aStore.CASCADE_OFFER_MS);
+}
+
 a2aRouter.post('/tasks/index', requireAuth, async (req: AuthRequest, res, next) => {
   try {
     const data = indexTaskSchema.parse(req.body);
@@ -875,17 +929,28 @@ a2aRouter.post('/tasks/index', requireAuth, async (req: AuthRequest, res, next) 
       `[a2a] indexed taskHash=${taskHash.slice(0, 10)}… → onChainId=${onChainTaskId} poster=${address}`,
     );
 
-    // Score matching agents and emit exclusive offer to the best one.
-    // Non-blocking: if scoring fails or no agents match, the task is already
-    // in a2a:open for CAS-race fallback.
+    // Score matching agents and start a cascade of exclusive offers to the
+    // best-fit agents (position 0 first, then position 1 after CASCADE_OFFER_MS,
+    // etc.). Only after ALL ranked agents have been given a chance (or scoring
+    // finds zero matches) does the task fall back to CAS-race broadcast.
+    // Non-blocking: if scoring fails, the task is already in a2a:open for
+    // CAS-race fallback.
     if (requiredCaps.length > 0) {
-      rankAgents(requiredCaps).then((ranked) => {
+      const taskRewardWei = (parsed.args.amount as bigint).toString();
+      rankAgents(requiredCaps, taskRewardWei).then((ranked) => {
         if (ranked.length === 0) {
           emitTaskAvailable(taskHash, { requiredCapabilities: requiredCaps });
           return;
         }
+        const cascadeEntries = ranked.map((r) => ({
+          address: r.address,
+          score: r.score,
+          displayName: r.displayName,
+        }));
+        a2aStore.setCascade(taskHash, cascadeEntries).catch(() => {});
+        // Offer to position 0
         const best = ranked[0];
-        const deadline = Date.now() + 15_000;
+        const deadline = Date.now() + a2aStore.CASCADE_OFFER_MS;
         a2aStore.setOffer(taskHash, {
           address: best.address,
           score: best.score,
@@ -895,6 +960,8 @@ a2aRouter.post('/tasks/index', requireAuth, async (req: AuthRequest, res, next) 
           requiredCapabilities: requiredCaps,
           rootHash: data.rootHash,
         }, best.score, deadline);
+        // Schedule advancement after the per-position window
+        scheduleCascadeAdvance(taskHash, requiredCaps, data.rootHash);
       }).catch((err) => {
         console.error(`[a2a] scoring/offer failed for ${taskHash.slice(0, 10)}…:`, (err as Error).message);
         emitTaskAvailable(taskHash, { requiredCapabilities: requiredCaps });

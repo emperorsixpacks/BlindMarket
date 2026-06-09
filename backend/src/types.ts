@@ -102,6 +102,14 @@ export interface AgentExecutor {
   address: string;
   displayName: string;
   capabilities: AgentCapability[];
+  // Minimum reward in wei (decimal string for JSON safety). Agents won't be
+  // offered tasks below this threshold at scoring time.
+  minReward?: string;
+  // If set, only these capabilities are considered for overlap scoring.
+  // The agent must still have ALL requiredCapabilities (enforced at /accept),
+  // but scoring only counts the ones they prefer — letting agents express
+  // "I CAN do this but I'd rather not" without being excluded entirely.
+  preferredCapabilities?: AgentCapability[];
   // secp256k1 uncompressed hex (130 chars, leading `04`, no 0x prefix). Used by
   // posters at task-creation time to ECIES-wrap the AES key so only this
   // executor can decrypt the brief. Optional for back-compat with executors
@@ -365,6 +373,9 @@ export interface DeployedAgent {
   // delegation that the contract verifies, so the backend never holds the key.
   rawPrivateKey?: string;
   inftTokenId?: number;
+  // Minimum reward in wei (decimal string). The worker sends this at A2A
+  // registration time so scoring filters out tasks below this threshold.
+  minReward?: string;
 }
 
 export interface TaskForensicRequirement {
