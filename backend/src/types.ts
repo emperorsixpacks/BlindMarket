@@ -191,6 +191,10 @@ export interface A2ATaskMeta {
   // re-wrap happens only AFTER a winning /accept CAS (winner-only — CAS losers
   // never see it). Present only when KEY_CUSTODY_ENABLED at post time.
   keyCustodyBlob?: { keyId: string; blob: string };
+  // Set by the operator via POST /api/v1/admin/tasks/:id/skip-wrap for
+  // tasks posted before key custody was enabled. When true, the NEEDS_WRAP
+  // gate is bypassed, allowing any agent to accept regardless of wrap state.
+  skipKeyWrap?: boolean;
 }
 
 export type A2ATaskStateStatus =
