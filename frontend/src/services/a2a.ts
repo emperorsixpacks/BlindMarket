@@ -6,6 +6,8 @@ export interface AgentExecutor {
   capabilities: string[];
   agentCardUrl?: string;
   mcpEndpointUrl?: string;
+  minReward?: string;
+  preferredCapabilities?: string[];
   reputation: number;
   tasksCompleted: number;
   registeredAt: string;
@@ -48,6 +50,9 @@ export async function registerAgent(data: {
   publicKey: string;
   agentCardUrl?: string;
   mcpEndpointUrl?: string;
+  // Minimum reward in wei (decimal string). Agents below this threshold are
+  // filtered out before scoring, so the agent never appears in the ranked list.
+  minReward?: string;
 }): Promise<{ agent: AgentExecutor }> {
   return authedPost<{ agent: AgentExecutor }>('/api/v1/a2a/register', data);
 }

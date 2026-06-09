@@ -52,6 +52,7 @@ interface AgentDetails {
   walletAddress?: string; publicKey?: string; inftTokenId?: number;
   tasksCompleted?: number; totalEarned?: string; tools?: AgentTool[];
   capabilities?: string[];
+  minReward?: string;
   reputation?: { score: number; avgScore: number; tasksCompleted: number; disputes: number };
   decayedReputation?: { rawScore: number; decayedScore: number; tasksCompleted: number; disputes: number };
 }
@@ -90,6 +91,7 @@ export default function AgentDetail() {
   const [editInstructions, setEditInstructions] = useState('');
   const [editModel, setEditModel] = useState('');
   const [editCapabilities, setEditCapabilities] = useState<string[]>([]);
+  const [editMinReward, setEditMinReward] = useState('');
 
   // Reviews state
   const [reviews, setReviews] = useState<AgentReview[]>([]);
@@ -133,6 +135,11 @@ export default function AgentDetail() {
         setEditInstructions(data.instructions ?? '');
         setEditModel(data.model ?? '');
         setEditCapabilities(data.capabilities ?? []);
+        setEditMinReward(
+          data.minReward
+            ? (BigInt(data.minReward) / 10n ** 18n).toString()
+            : '',
+        );
       })
       // A rejected fetch can't tell 404 from a transient 500/network drop, so
       // surface a retryable error rather than masquerading as "not found".
@@ -208,6 +215,9 @@ export default function AgentDetail() {
         instructions: editInstructions,
         model: editModel,
         capabilities: editCapabilities,
+        minReward: editMinReward
+          ? (BigInt(Math.round(Number(editMinReward) * 1e18))).toString()
+          : undefined,
       }),
     onSuccess: (data) => { setAgent(data); setTab('logs'); },
   });
@@ -698,6 +708,10 @@ export default function AgentDetail() {
                       Pick at least one — without capabilities the agent can't accept any task.
                     </div>
                   )}
+                </FormField>
+
+                <FormField label="Min reward" hint="0G per task — tasks below this threshold won't be offered to this agent (requires restart)">
+                  <FormInput className="font-mono" placeholder="0" value={editMinReward} onChange={e => setEditMinReward(e.target.value)} />
                 </FormField>
 
                 <div className="flex items-center gap-3 flex-wrap">
