@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAccount, useWalletClient } from 'wagmi';
 import { getIdentityToken, getAccessToken } from '@privy-io/react-auth';
@@ -111,6 +111,11 @@ export default function PostTask() {
   // can /accept immediately; zero means the task is awaiting bids. The
   // server-side key custody will re-wrap to late joiners on /accept.
   const [initialWrapCount, setInitialWrapCount] = useState<number>(0);
+  // Re-entry guard. `status` is async React state, so a fast double-click can
+  // fire handleSubmit twice before the button disables — each run burns a fresh
+  // 0G storage upload and opens a second wallet prompt. A ref flips
+  // synchronously, so the second invocation bails immediately.
+  const submittingRef = useRef(false);
 
   const toggleCap = (cap: string) =>
     setRequiredCaps(prev => (prev.includes(cap) ? prev.filter(c => c !== cap) : [...prev, cap]));
@@ -132,6 +137,8 @@ export default function PostTask() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!address || !walletClient) return;
+    if (submittingRef.current) return; // ignore a double-fire mid-post
+    submittingRef.current = true;
 
     try {
       setStatus('encrypting');
@@ -316,9 +323,12 @@ export default function PostTask() {
       // 7. Sign and send via MetaMask
       setStatus('signing');
       console.log(`[PostTask] Signing registration TX with value ${amountWei}...`);
-      const receipt = await signAndSendTx(signer, taskJson.unsignedTx, BigInt(amountWei));
-      const txHash = receipt?.hash ?? taskJson.unsignedTx?.hash ?? '';
-      console.log(`[PostTask] Task TX confirmed: hash=${txHash} block=${receipt?.blockNumber}`);
+      const sent = await signAndSendTx(signer, taskJson.unsignedTx, BigInt(amountWei));
+      // Always index by the real submitted hash. Never fall back to an empty
+      // string: the tx is on-chain and the backend now polls the receipt, so a
+      // transiently-lagging RPC must not strand a funded task.
+      const txHash = sent.hash;
+      console.log(`[PostTask] Task TX submitted: hash=${txHash} block=${sent.receipt?.blockNumber ?? 'pending'}`);
 
       // 8. Register A2A meta on the backend, gated on the receipt. Previously
       //    meta was written eagerly in step 6 — but if the createTask tx
@@ -353,6 +363,8 @@ export default function PostTask() {
       setError((err as Error).message);
       setStatus('error');
       trackEvent('task_post_error', { message: (err as Error).message });
+    } finally {
+      submittingRef.current = false;
     }
   }
 

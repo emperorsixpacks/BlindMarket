@@ -811,7 +811,19 @@ a2aRouter.post('/tasks/index', requireAuth, async (req: AuthRequest, res, next) 
     const address = req.user!.address;
     const taskHash = data.taskHash.toLowerCase();
 
-    const receipt = await provider.getTransactionReceipt(data.txHash);
+    // Poll for the receipt rather than taking a single shot. The createTask tx
+    // is already confirmed by the time the frontend calls us (its signer waited
+    // for the receipt before posting here), but 0G mainnet RPC is
+    // eventually-consistent: the replica the backend hits can lag the one the
+    // browser saw by a few blocks. A single getTransactionReceipt here would
+    // then 404 a tx that is genuinely on-chain — funding the escrow but leaving
+    // the task un-indexed (no rootHash/wrappedKeys meta → invisible to
+    // executors). Retry across ~24s to ride out that replica lag.
+    let receipt = await provider.getTransactionReceipt(data.txHash);
+    for (let i = 0; i < 8 && !receipt; i++) {
+      await new Promise((r) => setTimeout(r, 3000));
+      receipt = await provider.getTransactionReceipt(data.txHash);
+    }
     if (!receipt) {
       throw new AppError(
         404,
