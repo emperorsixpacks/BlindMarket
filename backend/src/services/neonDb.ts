@@ -335,42 +335,46 @@ async function migrateRedisToPg(p: pg.Pool): Promise<void> {
       );
     }
 
-    const execRaw = await redis.get('agent:executor:all');
-    if (execRaw) {
-      const executors = JSON.parse(execRaw);
-      for (const [addr, d] of Object.entries(executors)) {
-        const data = d as Record<string, unknown>;
-        if (!addr || !data.displayName) continue;
-        await p.query(
-          `INSERT INTO agent_executors
-             (address, display_name, capabilities, public_key, reputation,
-              tasks_completed, total_earned_raw, min_reward,
-              preferred_capabilities, agent_card_url, mcp_endpoint_url,
-              registered_at, updated_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
-           ON CONFLICT (address) DO UPDATE SET
-             capabilities = EXCLUDED.capabilities,
-             public_key = EXCLUDED.public_key,
-             reputation = EXCLUDED.reputation,
-             tasks_completed = EXCLUDED.tasks_completed,
-             total_earned_raw = EXCLUDED.total_earned_raw,
-             min_reward = EXCLUDED.min_reward,
-             preferred_capabilities = EXCLUDED.preferred_capabilities,
-             agent_card_url = EXCLUDED.agent_card_url,
-             mcp_endpoint_url = EXCLUDED.mcp_endpoint_url,
-             updated_at = NOW()`,
-          [addr, data.displayName, data.capabilities ?? [],
-           data.publicKey ?? '', data.reputation ?? 50,
-           data.tasksCompleted ?? 0, data.totalEarnedRaw ?? '0',
-           data.minReward ?? null, data.preferredCapabilities ?? [],
-           data.agentCardUrl ?? null, data.mcpEndpointUrl ?? null,
-           data.registeredAt ?? new Date().toISOString()],
-        );
+    // agent:executor:all may be a string (JSON map) or a SET (old format).
+    // Check the type so we don't throw WRONGTYPE on redis.get().
+    const keyType = await redis.type('agent:executor:all');
+    if (keyType === 'string') {
+      const execRaw = await redis.get('agent:executor:all');
+      if (execRaw) {
+        const executors = JSON.parse(execRaw);
+        if (Object.keys(executors).length > 0) {
+          for (const [addr, d] of Object.entries(executors)) {
+            const data = d as Record<string, unknown>;
+            if (!addr || !data.displayName) continue;
+            await p.query(
+              `INSERT INTO agent_executors
+                 (address, display_name, capabilities, public_key, reputation,
+                  tasks_completed, total_earned_raw, min_reward,
+                  preferred_capabilities, agent_card_url, mcp_endpoint_url,
+                  registered_at, updated_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+               ON CONFLICT (address) DO UPDATE SET
+                 capabilities = EXCLUDED.capabilities,
+                 public_key = EXCLUDED.public_key,
+                 reputation = EXCLUDED.reputation,
+                 tasks_completed = EXCLUDED.tasks_completed,
+                 total_earned_raw = EXCLUDED.total_earned_raw,
+                 min_reward = EXCLUDED.min_reward,
+                 preferred_capabilities = EXCLUDED.preferred_capabilities,
+                 agent_card_url = EXCLUDED.agent_card_url,
+                 mcp_endpoint_url = EXCLUDED.mcp_endpoint_url,
+                 updated_at = NOW()`,
+              [addr, data.displayName, data.capabilities ?? [],
+               data.publicKey ?? '', data.reputation ?? 50,
+               data.tasksCompleted ?? 0, data.totalEarnedRaw ?? '0',
+               data.minReward ?? null, data.preferredCapabilities ?? [],
+               data.agentCardUrl ?? null, data.mcpEndpointUrl ?? null,
+               data.registeredAt ?? new Date().toISOString()],
+            );
+          }
+        }
       }
-    }
-    // Fallback: try reading as a SET (old format — each member is an address,
-    // individual executor data lives at agent:executor:<addr>)
-    if (!execRaw || Object.keys(JSON.parse(execRaw)).length === 0) {
+    } else if (keyType === 'set') {
       const members = await redis.smembers('agent:executor:all');
       for (const addr of members) {
         const raw = await redis.get(`agent:executor:${addr}`);

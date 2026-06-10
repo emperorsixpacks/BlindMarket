@@ -27,6 +27,7 @@ import { validatorsRouter } from './routes/validators.js';
 import { statsRouter } from './routes/stats.js';
 import { analyticsRouter } from './routes/analytics.js';
 import { apiKeysRouter } from './routes/apiKeys.js';
+import { adminRouter } from './routes/admin.js';
 import { getDb } from './services/database.js';
 import { startEscrowEventLoop } from './services/escrowEvents.js';
 import { auditCustodySealedTasks } from './services/keyCustodyService.js';
@@ -77,6 +78,7 @@ app.use('/api/v1/validators', validatorsRouter);
 app.use('/api/v1/stats', statsRouter);
 app.use('/api/v1/analytics', analyticsRouter);
 app.use('/api/v1/api-keys', apiKeysRouter);
+app.use('/api/v1/admin', adminRouter);
 app.use('/a2a/v1', a2aProtocolRouter);
 
 // Agent card (A2A discovery)

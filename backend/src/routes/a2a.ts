@@ -317,7 +317,7 @@ a2aRouter.post('/tasks/:id/accept', requireAuth, async (req: AuthRequest, res, n
     // the key-custody blob (below). Otherwise the caller must /bid and wait for
     // the poster's browser (or the posting agent's wrap loop) to ship a slice.
     // Tasks with no rootHash (legacy / unencrypted) skip this entirely.
-    if (meta.rootHash && !hasOwnSlice && !canSelfHeal) {
+    if (meta.rootHash && !hasOwnSlice && !canSelfHeal && !meta.skipKeyWrap) {
       console.log(`[a2a] accept: needs wrap for ${taskId}, agent=${address}`);
       throw new AppError(
         403,
@@ -329,7 +329,7 @@ a2aRouter.post('/tasks/:id/accept', requireAuth, async (req: AuthRequest, res, n
     // A keyless agent can never be re-wrapped to — refuse before the CAS. New
     // registrations always carry a pubkey (enforced at /register), so this only
     // guards pre-guardrail Redis rows.
-    if (canSelfHeal && !agent.publicKey) {
+    if (canSelfHeal && !agent.publicKey && !meta.skipKeyWrap) {
       console.warn(`[a2a] accept: self-heal blocked — agent ${address} has no public key`);
       throw new AppError(
         403,
