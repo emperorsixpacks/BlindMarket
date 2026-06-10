@@ -21,13 +21,24 @@ const LOG_LIMIT = 200;
 
 // ── Logs ──────────────────────────────────────────────────────────────────────
 
+function formatLogTs(): string {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
 export async function appendLog(id: string, line: string): Promise<void> {
+  // Worker logs already carry ISO timestamps from nowStamp(). Lines from
+  // agentRunner (crash logs, watchdog warnings) usually don't — prepend one
+  // so the frontend's regex always has a timestamp to parse.
+  const hasTs = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}/.test(line);
+  const stamped = hasTs ? line : `${formatLogTs()} ${line}`;
   const pipe = redis.pipeline();
-  pipe.rpush(KEY.agentLogs(id), line);
+  pipe.rpush(KEY.agentLogs(id), stamped);
   pipe.ltrim(KEY.agentLogs(id), -LOG_LIMIT, -1);
   await pipe.exec();
   // Publish to channel for live SSE subscribers
-  await redis.publish(KEY.agentLogChannel(id), line);
+  await redis.publish(KEY.agentLogChannel(id), stamped);
 }
 
 export async function getLogs(id: string): Promise<string[]> {

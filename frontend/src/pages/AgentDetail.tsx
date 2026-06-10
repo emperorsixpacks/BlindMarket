@@ -507,11 +507,11 @@ export default function AgentDetail() {
                 // Redis may still hold pre-fix entries until the ring rotates).
                 const clean = line.replace(/\x1b\[[0-9;]*m/g, '');
 
-                // Worker emits each line as `YYYY-MM-DDTHH:MM:SSZ ...`. Pull
+                // Worker emits each line as `YYYY-MM-DD HH:MM:SS ...`. Pull
                 // out the timestamp so we can render it dimmed and aligned,
                 // making the actual message easier to scan. Lines without a
                 // timestamp (startup errors, legacy entries) just render whole.
-                const tsMatch = clean.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)\s+(.*)$/);
+                const tsMatch = clean.match(/^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:Z|))\s+(.*)$/);
                 const isErr = clean.includes('[err]');
                 return (
                   <div key={i} className={`px-3 py-1.5 text-xs font-mono flex gap-3 ${isErr ? 'text-err bg-err/10' : 'text-ink-3 hover:bg-surface-2'}`}>
@@ -522,7 +522,7 @@ export default function AgentDetail() {
                             at. We keep the iso form in the title for the
                             "what time was this in UTC?" power use case. */}
                         <span className="text-ink-3/60 shrink-0" title={tsMatch[1]}>
-                          {new Date(tsMatch[1]).toLocaleTimeString([], { hour12: false })}
+                          {new Date(tsMatch[1].replace('Z', '').replace(' ', 'T') + 'Z').toLocaleTimeString([], { hour12: false })}
                         </span>
                         <span className="break-all">{tsMatch[2]}</span>
                       </>

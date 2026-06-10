@@ -221,7 +221,9 @@ const ogComputeFetch = async (input, init) => {
 // ── Logging helpers ──────────────────────────────────────────────────────
 
 function nowStamp() {
-  return new Date().toISOString().slice(0, 19) + 'Z';
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
 const COLORED = !!process.stdout.isTTY;
