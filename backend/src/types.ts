@@ -213,6 +213,12 @@ export interface A2ATaskState {
   executorAddress?: string;
   acceptedAt?: string;
   submittedAt?: string;
+  // Which on-chain submission round this state's evidence belongs to
+  // (contract submissionAttempts AFTER the pending broadcast = attempts at
+  // /submit time + 1). Lets /verdict reject a stale verdict from a PREVIOUS
+  // round during a failed-verification retry — without it, a delayed round-1
+  // verdict could re-fail a task whose round-2 evidence is mid-broadcast.
+  submissionRound?: number;
   resultData?: Record<string, unknown>;
   verificationResult?: { passed: boolean; reasons: string[]; score?: number; breakdown?: Array<{ name: string; score: number; weight: number; reason: string; error?: string }>; errors?: Record<string, string> };
   // Settlement-bridge bookkeeping. Existence of these hashes means the

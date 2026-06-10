@@ -1194,22 +1194,29 @@ async function finalizeAcceptedTask(taskHash) {
   const FINALIZE_API_RETRY_DELAY_MS = 8_000;
   try {
     for (let attempt = 1; attempt <= FINALIZE_API_MAX_ATTEMPTS; attempt++) {
+      // 90s: /finalize now AWAITS the completeVerification tx (broadcast +
+      // confirmation) before responding — settle-then-credit ordering — so the
+      // 30s fetch default would abort mid-settlement under chain congestion.
       const finalizeRes = await fetchWithTimeout(`${BACKEND_URL}/api/v1/a2a/tasks/${taskHash}/finalize`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${AGENT_PLATFORM_TOKEN}`,
         },
-      });
+      }, 90_000);
       if (finalizeRes.ok) {
         const finalizeJson = await finalizeRes.json();
         log(`finalize result for ${taskHash.slice(0, 10)}…: ${JSON.stringify(finalizeJson.data)}`);
         return finalizeJson.data ?? {};
       }
       const errText = await finalizeRes.text();
-      const isTransient = finalizeRes.status === 503 && /NOT_INDEXED|NOT_SUBMITTED_ON_CHAIN/.test(errText);
+      // SETTLEMENT_FAILED is retryable too: /finalize leaves state 'submitted'
+      // when the completeVerification bridge fails, exactly so a retry re-runs
+      // the settle (and resume re-drives it later if we exhaust attempts here).
+      const isTransient = finalizeRes.status === 503 && /NOT_INDEXED|NOT_SUBMITTED_ON_CHAIN|SETTLEMENT_FAILED/.test(errText);
       if (isTransient && attempt < FINALIZE_API_MAX_ATTEMPTS) {
-        const code = /NOT_SUBMITTED_ON_CHAIN/.test(errText) ? 'NOT_SUBMITTED_ON_CHAIN' : 'NOT_INDEXED';
+        const code = /NOT_SUBMITTED_ON_CHAIN/.test(errText) ? 'NOT_SUBMITTED_ON_CHAIN'
+          : /SETTLEMENT_FAILED/.test(errText) ? 'SETTLEMENT_FAILED' : 'NOT_INDEXED';
         log(`finalize attempt ${attempt}/${FINALIZE_API_MAX_ATTEMPTS} for ${taskHash.slice(0, 10)}…: 503 ${code} — retrying in ${FINALIZE_API_RETRY_DELAY_MS / 1000}s`);
         await sleep(FINALIZE_API_RETRY_DELAY_MS);
         continue;
@@ -1506,6 +1513,13 @@ async function pollAndVerify() {
         } else {
           const t = await vRes.text().catch(() => '');
           log(`verify: /verdict record ${vRes.status} for ${taskHash.slice(0, 10)}…: ${t.slice(0, 140)} — will retry`);
+          // A 4xx is a DETERMINISTIC rejection (STALE_VERDICT, VERDICT_MISMATCH,
+          // INVALID_STATE, …) — without counting it toward the attempt cap, a
+          // permanently-rejected verdict re-runs decrypt + the LLM judge on
+          // every poll forever. 5xx stays uncounted (transient backend state).
+          if (vRes.status >= 400 && vRes.status < 500) {
+            bumpVerifyFailure(taskHash);
+          }
         }
       } catch (e) {
         log(`verify: /verdict record error for ${taskHash.slice(0, 10)}…: ${e.message}`);

@@ -8,9 +8,9 @@ import * as bidsStore from '../services/bidsStore.js';
 import * as keyCustody from '../services/keyCustodyService.js';
 import { autoVerify } from '../services/autoVerify.js';
 import { settleAssignment, settleVerification } from '../services/a2aSettlement.js';
+import { recordWorkerPayout, recordWorkerDispute } from '../services/workerPayout.js';
 import { getTaskIdByHash } from '../services/escrowEvents.js';
 import * as escrowService from '../services/escrow.js';
-import * as accountingService from '../services/accountingService.js';
 import * as reputationService from '../services/reputation.js';
 import * as reputationDecay from '../services/reputationDecay.js';
 import { provider, escrow } from '../services/chain.js';
@@ -131,124 +131,6 @@ const verifySchema = z.object({
   passed: z.boolean(),
   reasons: z.array(z.string()).max(20).optional(),
 });
-
-// Cache the on-chain feeBps for the duration of the process. Fee changes are
-// admin-gated and rare; one stale read per restart is fine. Falls back to 1500
-// (15%) — the documented default in CLAUDE.md — if the RPC is unreachable.
-let cachedFeeBps: number | null = null;
-async function getFeeBps(): Promise<number> {
-  if (cachedFeeBps !== null) return cachedFeeBps;
-  try {
-    cachedFeeBps = await escrowService.feeBps();
-  } catch (err) {
-    console.warn('[a2a] feeBps RPC read failed, falling back to 1500:', (err as Error).message);
-    cachedFeeBps = 1500;
-  }
-  return cachedFeeBps;
-}
-
-/**
- * Record a successful task completion on the executor's record: bump
- * tasksCompleted, reputation, and totalEarnedRaw TOGETHER by the worker's share
- * of the escrow (gross amount minus platform fee).
- *
- * The on-chain id and gross amount are resolved by the CALLER (which has already
- * confirmed the task is indexed + on-chain Submitted/Completed) and passed in —
- * this function never does its own getTaskIdByHash lookup. That closes the
- * "3 tasks · 0 0G" drift: previously tasksCompleted was bumped unconditionally
- * while totalEarnedRaw was only written if a SECOND, internal getTaskIdByHash
- * happened to resolve. Under indexing lag that lookup returned null (even though
- * the caller's own lookup resolved a moment later and settlement still fired),
- * so the task counter advanced while the earnings credit was silently dropped,
- * and the route's state guard then blocked any retry from repairing it.
- *
- * Persists to Redis (agentStore) so the /agents endpoint can surface these
- * stats to the UI without re-deriving from on-chain history. If anything in
- * here fails we log + continue: settleVerification still fires and the worker
- * still gets paid on chain — only the UI counter is at risk.
- */
-async function recordWorkerPayout(
-  taskHash: string,
-  executorAddr: string,
-  onChainId: string,
-  grossAmount: bigint,
-): Promise<void> {
-  try {
-    const agent = await agentStore.getAgent(executorAddr);
-    if (!agent) return;
-
-    const feeBps = await getFeeBps();
-    const workerShare = (grossAmount * (10_000n - BigInt(feeBps))) / 10_000n;
-    const platformFee = grossAmount - workerShare;
-
-    // tasksCompleted, reputation, and totalEarnedRaw move as one unit — the task
-    // counter is never advanced without crediting the matching earnings.
-    agent.tasksCompleted += 1;
-    agent.reputation = Math.min(100, agent.reputation + 1);
-    const prev = BigInt(agent.totalEarnedRaw ?? '0');
-    agent.totalEarnedRaw = (prev + workerShare).toString();
-    await agentStore.registerAgent(agent);
-
-    // Mirror the payout into the accounting ledger so the Earnings page can
-    // surface it. Native 0G has 18 decimals.
-    try {
-      // Ledger convention (must match submissions.ts /verify):
-      //   amount = GROSS escrow (worker share + platform fee)
-      //   fee    = platform fee
-      //   net    = worker take-home = amount − fee = workerShare
-      // Passing `net` explicitly avoids recordTransaction's default of
-      // `amount − fee`, which — when amount was the already-net workerShare —
-      // subtracted the fee a second time and zeroed out Net revenue.
-      accountingService.recordTransaction({
-        address: executorAddr.toLowerCase(),
-        role: 'worker',
-        taskId: onChainId,
-        type: 'payment',
-        amount: Number(grossAmount) / 1e18,
-        fee: Number(platformFee) / 1e18,
-        net: Number(workerShare) / 1e18,
-        status: 'confirmed',
-      });
-    } catch (acctErr) {
-      console.warn(`[a2a] accounting recordTransaction failed for ${taskHash.slice(0, 10)}…:`, (acctErr as Error).message);
-    }
-
-    // Off-chain decay-based reputation (Neon PostgreSQL)
-    try {
-      await reputationDecay.recordTaskCompletion(executorAddr, taskHash, 10);
-    } catch (decayErr) {
-      console.warn(`[a2a] recordWorkerPayout: reputationDecay.recordTaskCompletion failed for ${taskHash.slice(0, 10)}…:`, (decayErr as Error).message);
-    }
-
-    // On-chain reputation is updated by BlindEscrow internally when
-    // settleVerification fires completeVerification → BlindReputation.rate().
-  } catch (err) {
-    console.error(`[a2a] recordWorkerPayout failed for ${taskHash.slice(0, 10)}… executor=${executorAddr}:`, (err as Error).message);
-  }
-}
-
-/**
- * Record a dispute against an executor. Decrements the Redis reputation counter
- * and records the dispute in the Neon PostgreSQL reputation system. On-chain
- * dispute is also recorded by BlindEscrow when settleVerification fires
- * completeVerification → BlindReputation.recordDispute().
- * Non-blocking — logged on failure, caller continues.
- */
-async function recordWorkerDispute(taskHash: string, executorAddr: string): Promise<void> {
-  try {
-    const agent = await agentStore.getAgent(executorAddr);
-    if (agent) {
-      agent.reputation = Math.max(0, agent.reputation - 10);
-      await agentStore.registerAgent(agent);
-    }
-    await reputationDecay.recordDispute(executorAddr, taskHash);
-  } catch (err) {
-    console.warn(
-      `[a2a] recordWorkerDispute failed for ${taskHash.slice(0, 10)}… executor=${executorAddr}:`,
-      (err as Error).message,
-    );
-  }
-}
 
 // POST /tasks/:id/wrap-to — poster pushes ECIES-wrapped AES slices to new
 // bidders that registered after the task was posted. Address keys are EOA
@@ -530,6 +412,26 @@ a2aRouter.post('/tasks/:id/accept', requireAuth, async (req: AuthRequest, res, n
     console.log(`[a2a] accept: CAS won for ${taskId}, awaiting on-chain settlement`);
     const settleResult = await settleAssignment(taskId, address);
     if (!settleResult.success) {
+      // Deadline passed while the task was still Funded: TERMINAL. Do NOT
+      // releaseToOpen — that would re-list the task for the next /accept to
+      // hit the same DeadlineReached revert, bouncing it open↔accepted
+      // forever. Close it off-chain instead ('failed' leaves the a2a:open
+      // index via the CAS that already removed it) and tell the agent it's
+      // gone for good. The poster reclaims escrow via cancelTask (still
+      // Funded) — claimTimeout reverts on Funded tasks.
+      if (settleResult.expired) {
+        console.warn(`[a2a] accept: task ${taskId} expired while Funded — closing instead of re-opening`);
+        try {
+          await a2aStore.updateState(taskId, { status: 'failed' });
+        } catch (closeErr) {
+          console.error(`[a2a] accept: could not close expired task ${taskId}:`, (closeErr as Error).message);
+        }
+        throw new AppError(
+          409,
+          'TASK_EXPIRED',
+          'Task deadline has passed — it can no longer be assigned. The poster can reclaim escrow via cancelTask.',
+        );
+      }
       console.error(`[a2a] accept: settlement failed for ${taskId}: ${settleResult.error}`);
       // Release task back to open so another agent can retry.
       try { await a2aStore.releaseToOpen(taskId); } catch { /* best-effort */ }
@@ -1026,7 +928,14 @@ a2aRouter.post('/tasks/:id/submit', requireAuth, async (req: AuthRequest, res, n
       console.warn(`[a2a] submit: forbidden for ${taskHash}: executor in state is ${state?.executorAddress}, caller is ${address}`);
       throw new AppError(403, 'FORBIDDEN', 'Only the accepted executor can submit');
     }
-    if (state.status !== 'accepted' && state.status !== 'in_progress') {
+    // 'failed' is allowed back in: the contract explicitly supports a
+    // Verified→Submitted retry (submitEvidence from Verified, up to
+    // MAX_SUBMISSION_ATTEMPTS). Without this, a worker whose output scored
+    // just under the rubric was dead-ended — /submit, /finalize, and /release
+    // all rejected state 'failed' and the escrow froze until claimTimeout.
+    // The retry is gated on the on-chain facts below (status 3, attempts
+    // remaining, before deadline) so we never hand out a tx that reverts.
+    if (state.status !== 'accepted' && state.status !== 'in_progress' && state.status !== 'failed') {
       console.warn(`[a2a] submit: invalid state for ${taskHash}: ${state.status}`);
       throw new AppError(409, 'INVALID_STATE', `Cannot submit in state: ${state.status}`);
     }
@@ -1062,13 +971,18 @@ a2aRouter.post('/tasks/:id/submit', requireAuth, async (req: AuthRequest, res, n
 
     // Single on-chain assignment check. /accept now awaits settleAssignment,
     // so the assignment should already be confirmed. This is just a defensive
-    // sanity check with one retry in case of RPC lag.
+    // sanity check with one retry in case of RPC lag. Also captures the
+    // current on-chain submissionAttempts so the state below can record which
+    // round the pending evidence broadcast will become.
+    let chainAttempts = 0;
     {
       const onChainTask = await escrowService.getTask(Number(onChainId));
+      chainAttempts = onChainTask.submissionAttempts;
       if (onChainTask.worker.toLowerCase() !== address.toLowerCase()) {
         // One retry after 2s — covers edge cases like reorgs.
         await new Promise((r) => setTimeout(r, 2_000));
         const retryTask = await escrowService.getTask(Number(onChainId));
+        chainAttempts = retryTask.submissionAttempts;
         if (retryTask.worker.toLowerCase() !== address.toLowerCase()) {
           const freshState = await a2aStore.getState(taskHash);
           if (freshState?.assignError) {
@@ -1078,6 +992,42 @@ a2aRouter.post('/tasks/:id/submit', requireAuth, async (req: AuthRequest, res, n
           throw new AppError(503, 'NOT_ASSIGNED_YET', `On-chain assignment not yet confirmed — task.worker=${retryTask.worker}, caller=${address}. Retry shortly.`);
         }
       }
+    }
+
+    // Failed-verification retry gates. The contract permits Verified(3) →
+    // Submitted via submitEvidence while attempts remain and the deadline
+    // hasn't passed (BlindEscrow.sol submitEvidence). Check all three here so
+    // a worker is never handed a signable tx that's guaranteed to revert.
+    if (state.status === 'failed') {
+      const t = await escrowService.getTask(Number(onChainId));
+      if (t.status !== 3) { // 3 = Verified (failed verification)
+        throw new AppError(
+          409,
+          'NOT_RETRYABLE',
+          `Cannot retry: on-chain status is ${t.status}, expected 3 (Verified). ` +
+            'The task either settled differently or the verdict has not confirmed yet.',
+        );
+      }
+      // MAX_SUBMISSION_ATTEMPTS is a contract constant (= 3); submitEvidence
+      // reverts MaxSubmissionAttemptsReached at the cap.
+      if (t.submissionAttempts >= 3) {
+        throw new AppError(
+          409,
+          'MAX_ATTEMPTS_REACHED',
+          `No submission attempts left (${t.submissionAttempts}/3). The poster can reclaim escrow via claimTimeout after the deadline.`,
+        );
+      }
+      if (BigInt(Math.floor(Date.now() / 1000)) >= t.deadline) {
+        throw new AppError(
+          409,
+          'DEADLINE_REACHED',
+          'The task deadline has passed — the contract would revert DeadlineReached. The poster can reclaim escrow via claimTimeout.',
+        );
+      }
+      chainAttempts = t.submissionAttempts; // freshest read wins
+      console.log(
+        `[a2a] submit: retry after failed verification for ${taskHash} (attempt ${t.submissionAttempts + 1}/3)`,
+      );
     }
 
     // Deterministic evidence hash = keccak256(JSON.stringify(resultData)).
@@ -1097,6 +1047,13 @@ a2aRouter.post('/tasks/:id/submit', requireAuth, async (req: AuthRequest, res, n
       status: 'submitted',
       resultData,
       submittedAt: new Date().toISOString(),
+      // Clear the previous round's verdict on a failed-verification retry so
+      // /finalize and the verifier judge the NEW output, not a stale failure.
+      verificationResult: undefined,
+      // The round this evidence becomes once broadcast (the contract
+      // increments submissionAttempts in submitEvidence). /verdict uses it to
+      // reject verdicts that target a previous round.
+      submissionRound: chainAttempts + 1,
     });
     console.log(`[a2a] submit: resultData stored and unsignedSubmitEvidence built for ${taskHash}`);
 
@@ -1250,6 +1207,28 @@ a2aRouter.post('/tasks/:id/finalize', requireAuth, async (req: AuthRequest, res,
       if (!meta.verifierAddress) {
         throw new AppError(409, 'NO_VERIFIER', 'agent-verify task has no designated verifier');
       }
+      // Don't park evidence the chain hasn't seen. If this round's
+      // submitEvidence was never broadcast (worker died in the gap, or the
+      // broadcast permanently fails), parking would re-queue the verifier to
+      // judge output whose verdict can never be recorded (/verdict rejects it
+      // as STALE_VERDICT) — burning the verifier's LLM spend every poll.
+      // 503 keeps the worker's finalize retry/resume loop driving instead.
+      {
+        const ocIdA = await getTaskIdByHash(taskHash);
+        if (!ocIdA) {
+          throw new AppError(503, 'NOT_INDEXED', 'On-chain taskId not yet indexed — wait a few seconds and retry');
+        }
+        const tA = await escrowService.getTask(Number(ocIdA));
+        const broadcastPending =
+          state.submissionRound !== undefined && tA.submissionAttempts < state.submissionRound;
+        if (broadcastPending || (tA.status !== 2 && tA.status !== 3 && tA.status !== 4)) {
+          throw new AppError(
+            503,
+            'NOT_SUBMITTED_ON_CHAIN',
+            `SubmitEvidence not yet confirmed on-chain (status=${tA.status}, attempts=${tA.submissionAttempts}). Wait for the tx to confirm and retry.`,
+          );
+        }
+      }
       await a2aStore.updateState(taskHash, { status: 'awaiting_verification' });
       const body: ApiResponse = {
         success: true,
@@ -1291,11 +1270,56 @@ a2aRouter.post('/tasks/:id/finalize', requireAuth, async (req: AuthRequest, res,
       );
     }
     const onChainTask = await escrowService.getTask(Number(ocId));
+
+    // Reconcile path: on-chain already settled (3=Verified/failed,
+    // 4=Completed/passed) while a2a state is still 'submitted' — a previous
+    // finalize crashed/deployed between the settle tx confirming and the state
+    // write. The chain is the truth; adopt its outcome, credit via the
+    // at-most-once guard, and DON'T touch the bridge. Without this branch the
+    // status!==2 gate below would 503 NOT_SUBMITTED_ON_CHAIN forever and the
+    // worker would be paid on-chain yet never credited off-chain.
+    if (onChainTask.status === 3 || onChainTask.status === 4) {
+      const settledPass = onChainTask.status === 4;
+      const reconciled =
+        verificationResult.passed === settledPass
+          ? verificationResult
+          : { passed: settledPass, reasons: ['Reconciled from on-chain settlement'] };
+      const reconciledStatus: 'verified' | 'failed' = settledPass ? 'verified' : 'failed';
+      await a2aStore.updateState(taskHash, { status: reconciledStatus, verificationResult: reconciled });
+      if (settledPass) {
+        await recordWorkerPayout(taskHash, address, ocId, onChainTask.amount);
+      } else {
+        await recordWorkerDispute(taskHash, address);
+      }
+      const body: ApiResponse = {
+        success: true,
+        data: { taskId: taskHash, status: reconciledStatus, verificationResult: reconciled, reconciled: true },
+      };
+      res.json(body);
+      return;
+    }
+
     if (onChainTask.status !== 2) { // 2 = Submitted
       throw new AppError(
         503,
         'NOT_SUBMITTED_ON_CHAIN',
         `SubmitEvidence not yet confirmed on-chain (status=${onChainTask.status}). Wait for the tx to confirm and retry.`,
+      );
+    }
+
+    // Bridge FIRST, credit AFTER: completeVerification must confirm on-chain
+    // before we advance a2a state or touch executor stats. The old order
+    // (credit, then fire-and-forget settle) produced the inverse drift —
+    // "N tasks credited · 0 0G received" — whenever the swallowed settle
+    // reverted. On settle failure state stays 'submitted' and we 503; the
+    // executor's retry either re-runs the settle or — if the tx actually
+    // landed — takes the reconcile branch above. Both converge.
+    const settle = await settleVerification(taskHash, verificationResult.passed);
+    if (!settle.success) {
+      throw new AppError(
+        503,
+        'SETTLEMENT_FAILED',
+        `On-chain completeVerification failed: ${settle.error}. State unchanged — retry.`,
       );
     }
 
@@ -1309,9 +1333,6 @@ a2aRouter.post('/tasks/:id/finalize', requireAuth, async (req: AuthRequest, res,
     } else {
       await recordWorkerDispute(taskHash, address);
     }
-
-    // Bridge: marketplace signer calls completeVerification on chain.
-    void settleVerification(taskHash, verificationResult.passed);
 
     // Fire webhook for task completion (non-blocking)
     try {
@@ -1381,11 +1402,40 @@ a2aRouter.post('/tasks/:id/verify', requireAuth, async (req: AuthRequest, res, n
       );
     }
     const onChainTask = await escrowService.getTask(Number(ocId));
-    if (onChainTask.status !== 2) { // 2 = Submitted
+
+    // Reconcile path — same as /finalize: a previous verify crashed between
+    // the settle confirming (status now 3/4) and the state write. Adopt the
+    // on-chain outcome; refuse a poster verdict that CONTRADICTS it (the
+    // chain can't be re-settled, so honoring the new verdict is impossible).
+    const settledAlready = onChainTask.status === 3 || onChainTask.status === 4;
+    if (settledAlready && passed !== (onChainTask.status === 4)) {
+      throw new AppError(
+        409,
+        'ALREADY_SETTLED',
+        `Task already settled on-chain with the opposite outcome (status=${onChainTask.status}) — the verdict cannot be changed.`,
+      );
+    }
+
+    if (!settledAlready && onChainTask.status !== 2) { // 2 = Submitted
       throw new AppError(
         503,
         'NOT_SUBMITTED_ON_CHAIN',
         `SubmitEvidence not yet confirmed on-chain (status=${onChainTask.status}). Wait for the tx to confirm and retry.`,
+      );
+    }
+
+    // Bridge FIRST, credit AFTER — same ordering as /finalize. Skipped when
+    // the chain already settled (reconcile). On settle failure state stays
+    // 'submitted' (a clean retry for the poster's re-approval); the
+    // at-most-once guard in recordWorkerPayout dedups the credit on retries.
+    const settle = settledAlready
+      ? { success: true as const, alreadySettled: true }
+      : await settleVerification(taskHash, passed);
+    if (!settle.success) {
+      throw new AppError(
+        503,
+        'SETTLEMENT_FAILED',
+        `On-chain completeVerification failed: ${(settle as { error?: string }).error}. State unchanged — retry.`,
       );
     }
 
@@ -1399,9 +1449,6 @@ a2aRouter.post('/tasks/:id/verify', requireAuth, async (req: AuthRequest, res, n
     } else if (!passed && state.executorAddress) {
       await recordWorkerDispute(taskHash, state.executorAddress);
     }
-
-    // Bridge: marketplace signer calls completeVerification on chain.
-    void settleVerification(taskHash, passed);
 
     const body: ApiResponse = {
       success: true,
@@ -1500,6 +1547,23 @@ a2aRouter.post('/tasks/:id/verdict', requireAuth, async (req: AuthRequest, res, 
         409,
         'NOT_SETTLED_ON_CHAIN',
         `completeVerification not yet confirmed on-chain (status=${onChainTask.status}). Broadcast it before recording the verdict.`,
+      );
+    }
+    // Round binding: during a failed-verification retry there is a window
+    // where on-chain status is still 3 from ROUND 1 while the worker's
+    // round-2 evidence is mid-broadcast (state already 'submitted' with a
+    // bumped submissionRound). A delayed/duplicate round-1 verdict would pass
+    // the settled gate and re-fail the fresh round — reject it as stale.
+    // submitEvidence increments submissionAttempts, so attempts >= round
+    // means the evidence for the recorded round has actually been broadcast.
+    if (
+      state.submissionRound !== undefined &&
+      onChainTask.submissionAttempts < state.submissionRound
+    ) {
+      throw new AppError(
+        409,
+        'STALE_VERDICT',
+        `Verdict targets a previous submission round — the latest evidence (round ${state.submissionRound}) has not been broadcast/settled yet.`,
       );
     }
     if (passed !== settledPass) {

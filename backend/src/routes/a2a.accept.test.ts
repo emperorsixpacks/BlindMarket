@@ -59,7 +59,9 @@ vi.mock('../services/keyCustodyService.js', () => ({
 
 vi.mock('../services/a2aSettlement.js', () => ({
   settleAssignment: vi.fn(() => Promise.resolve({ success: true, txHash: '0xtx' })),
-  settleVerification: vi.fn(() => Promise.resolve()),
+  // settleVerification now returns a SettleResult that /finalize and /verify
+  // gate on — an undefined resolution would TypeError inside the route.
+  settleVerification: vi.fn(() => Promise.resolve({ success: true, txHash: '0xtx' })),
 }));
 
 // Import-side-effect-heavy modules (Redis / chain / DB). Mock so importing the

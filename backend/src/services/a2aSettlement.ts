@@ -11,9 +11,11 @@
  *   - settleVerification(taskHash, passed)  → completeVerification(taskId, passed)
  *
  * Both use the marketplace signer (which holds the verifier role on the
- * contract — see contracts/scripts/rotate-verifier.ts). Both are designed to
- * be called fire-and-forget from route handlers: errors are logged, never
- * thrown. The HTTP response should never block on chain confirmation.
+ * contract — see contracts/scripts/rotate-verifier.ts). Both return a
+ * SettleResult and never throw; route handlers AWAIT them and gate state
+ * transitions / worker credit on `success` — crediting before the chain
+ * confirms is how the inverse earnings drift ("N tasks credited · 0 0G
+ * received") happened.
  *
  * Idempotency: the contract reverts with InvalidStatus if you try to assign
  * an already-Assigned task or verify an already-Verified one. The bridge
@@ -89,11 +91,23 @@ function isAlreadySettled(err: unknown): boolean {
   return msg.includes('InvalidStatus');
 }
 
+function isDeadlineReached(err: unknown): boolean {
+  // marketplaceAssign reverts DeadlineReached() once block.timestamp passes
+  // the task deadline. Unlike InvalidStatus this is TERMINAL for assignment —
+  // the task can never be assigned again, only reclaimed by the poster. It
+  // must NOT be classed as a retryable failure: releaseToOpen would re-list
+  // the task for the next /accept to hit the exact same revert, forever.
+  const msg = (err as Error).message || '';
+  return msg.includes('DeadlineReached');
+}
+
 export interface SettleResult {
   success: boolean;
   error?: string;
   txHash?: string;
   alreadySettled?: boolean;
+  /** Terminal: the on-chain deadline has passed — do not release/retry. */
+  expired?: boolean;
 }
 
 /**
@@ -129,6 +143,10 @@ export async function settleAssignment(taskHash: string, executor: string): Prom
         console.log(`[a2aSettlement] assignment skipped — task ${taskId} already past Funded state`);
         return { success: true, alreadySettled: true };
       }
+      if (isDeadlineReached(staticErr)) {
+        console.warn(`[a2aSettlement] assignment refused — task ${taskId} deadline has passed (terminal)`);
+        return { success: false, expired: true, error: 'Task deadline has passed' };
+      }
       console.error(`[a2aSettlement] staticCall failed for taskId=${taskId}: ${(staticErr as Error).message}`);
       throw staticErr;
     }
@@ -140,6 +158,10 @@ export async function settleAssignment(taskHash: string, executor: string): Prom
     if (isAlreadySettled(err)) {
       console.log(`[a2aSettlement] assignment skipped — task ${taskId} already past Funded state`);
       return { success: true, alreadySettled: true };
+    }
+    if (isDeadlineReached(err)) {
+      console.warn(`[a2aSettlement] assignment refused — task ${taskId} deadline has passed (terminal)`);
+      return { success: false, expired: true, error: 'Task deadline has passed' };
     }
     const msg = (err as Error).message;
     console.error(`[a2aSettlement] assignment failed for hash=${taskHash.slice(0, 10)}…:`, msg);
@@ -205,10 +227,11 @@ function truncate(s: string): string {
  * records a dispute). After a terminal failure the only exits are the poster's
  * claimTimeout (post-deadline refund) or an admin resolveDispute.
  */
-export async function settleVerification(taskHash: string, passed: boolean): Promise<void> {
+export async function settleVerification(taskHash: string, passed: boolean): Promise<SettleResult> {
   if (!bridgeReady()) {
-    await safePersistVerifyError(taskHash, 'Bridge disabled: MARKETPLACE_SIGNER_PRIVATE_KEY not set');
-    return;
+    const msg = 'Bridge disabled: MARKETPLACE_SIGNER_PRIVATE_KEY not set';
+    await safePersistVerifyError(taskHash, msg);
+    return { success: false, error: msg };
   }
 
   try {
@@ -217,7 +240,7 @@ export async function settleVerification(taskHash: string, passed: boolean): Pro
       const msg = `hash2id lookup timed out — createTask event never seen by indexer (taskHash=${taskHash.slice(0, 10)}…)`;
       console.error(`[a2aSettlement] ${msg}`);
       await safePersistVerifyError(taskHash, msg);
-      return;
+      return { success: false, error: msg };
     }
 
     let tx: ContractTransactionResponse;
@@ -228,10 +251,31 @@ export async function settleVerification(taskHash: string, passed: boolean): Pro
       );
     } catch (err) {
       if (isAlreadySettled(err)) {
-        console.log(
-          `[a2aSettlement] verification skipped — task ${taskId} already past expected status`,
-        );
-        return;
+        // InvalidStatus means the task is no longer Submitted — but that
+        // covers MORE than "this verdict already settled": Disputed,
+        // Cancelled, and a racing settlement with the OPPOSITE verdict all
+        // revert the same way. Only report success when the on-chain outcome
+        // actually matches `passed`; otherwise crediting would mirror a
+        // settlement that never happened. (The caller's retry converges via
+        // the routes' reconcile-from-chain branch.)
+        try {
+          const t = await escrowAsMarketplace!.getTask(BigInt(taskId));
+          const status = Number(t.status);
+          if (status === (passed ? 4 : 3)) {
+            console.log(
+              `[a2aSettlement] verification skipped — task ${taskId} already settled with matching outcome (status=${status})`,
+            );
+            return { success: true, alreadySettled: true };
+          }
+          const msg = `task ${taskId} already settled with status=${status}, which does not match passed=${passed}`;
+          console.error(`[a2aSettlement] ${msg}`);
+          await safePersistVerifyError(taskHash, msg);
+          return { success: false, error: msg };
+        } catch (readErr) {
+          const msg = `task ${taskId} reverted InvalidStatus and the follow-up status read failed: ${(readErr as Error).message}`;
+          await safePersistVerifyError(taskHash, msg);
+          return { success: false, error: msg };
+        }
       }
       throw err;
     }
@@ -241,19 +285,27 @@ export async function settleVerification(taskHash: string, passed: boolean): Pro
       `[a2aSettlement] completeVerification broadcast taskId=${taskId} passed=${passed} tx=${tx.hash}`,
     );
 
-    const receipt = await tx.wait();
+    // Bounded wait: routes now AWAIT this inside the HTTP handler, so a tx
+    // stuck in the mempool must surface as a retryable failure, not hold the
+    // request open indefinitely. ethers v6 wait(confirms, timeoutMs) throws
+    // a timeout error → caught below → success:false → the route 503s and
+    // the retry converges (settle re-runs or the reconcile branch adopts the
+    // landed tx).
+    const receipt = await tx.wait(1, 60_000);
     console.log(
       `[a2aSettlement] completeVerification confirmed taskId=${taskId} passed=${passed} block=${receipt?.blockNumber} status=${receipt?.status}`,
     );
     if (receipt?.status !== 1) {
-      await safePersistVerifyError(taskHash, `completeVerification tx ${tx.hash} reverted on chain`);
-      return;
+      const msg = `completeVerification tx ${tx.hash} reverted on chain`;
+      await safePersistVerifyError(taskHash, msg);
+      return { success: false, error: msg, txHash: tx.hash };
     }
 
     if (passed) {
       rooms.tasks('task:completed', { taskId });
       rooms.task(taskId, 'task:completed', { taskId });
     }
+    return { success: true, txHash: tx.hash };
   } catch (err) {
     const msg = (err as Error).message;
     console.error(
@@ -261,6 +313,7 @@ export async function settleVerification(taskHash: string, passed: boolean): Pro
       msg,
     );
     await safePersistVerifyError(taskHash, msg);
+    return { success: false, error: msg };
   }
 }
 

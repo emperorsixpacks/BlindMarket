@@ -182,6 +182,19 @@ export async function updateState(
       if (meta.verifierAddress) pipe.srem(KEY.verifier(meta.verifierAddress), finalTid);
     }
   }
+  // Mirror: RE-ADD on any transition INTO awaiting_verification. setMeta only
+  // SADDs at creation, so without this a failed-verification RETRY round
+  // (failed → submitted → awaiting_verification) never re-enters the
+  // verifier's GET /verifications queue — the verifier would never see or
+  // settle round 2 and the task would wedge until claimTimeout. SADD is
+  // idempotent, so the round-1 path (where setMeta already added it) is safe.
+  if (existing.status !== 'awaiting_verification' && updated.status === 'awaiting_verification') {
+    const metaRaw = (await redis.get(KEY.meta(finalTid))) ?? (await redis.get(`a2a:meta:${taskId}`));
+    if (metaRaw) {
+      const meta = JSON.parse(metaRaw) as A2ATaskMeta;
+      if (meta.verifierAddress) pipe.sadd(KEY.verifier(meta.verifierAddress), finalTid);
+    }
+  }
   await pipe.exec();
   return updated;
 }
