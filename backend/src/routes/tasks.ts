@@ -350,10 +350,14 @@ tasksRouter.post('/:id/assign', requireAuth, async (req: AuthRequest, res, next)
     const { worker } = assignSchema.parse(req.body);
     const from = req.user!.address;
 
-    // Verify caller is the task agent (on-chain check will also enforce, but fail early)
+    // Verify caller is the task agent (on-chain check will also enforce, but
+    // fail early). The legacy AGENT_API_KEY principal resolves to the literal
+    // string 'agent' — it has no EOA, so ethers.getAddress('agent') would throw
+    // a 500 inside buildAssignWorker; assignWorker is onlyAgent on-chain and
+    // must be signed by the task agent's real wallet. Refuse it cleanly.
     const task = await escrowService.getTask(taskId);
-    if (task.agent.toLowerCase() !== from.toLowerCase() && from !== 'agent') {
-      throw new AppError(403, 'FORBIDDEN', 'Only the task agent can assign workers');
+    if (from === 'agent' || task.agent.toLowerCase() !== from.toLowerCase()) {
+      throw new AppError(403, 'FORBIDDEN', 'Only the task agent (wallet-authenticated) can assign workers');
     }
 
     const tx = await escrowService.buildAssignWorker(from, taskId, worker);
@@ -362,8 +366,10 @@ tasksRouter.post('/:id/assign', requireAuth, async (req: AuthRequest, res, next)
       success: true,
       data: { unsignedTx: tx },
     };
-    rooms.task(taskId, 'task:assigned', { taskId, worker });
-    rooms.tasks('task:assigned', { taskId, worker });
+    // NOTE: no task:assigned emit here — this route only BUILDS the unsigned
+    // tx. The poster may never sign it; emitting at build time made dashboards
+    // refetch a still-Funded task. Listeners learn of the real assignment from
+    // on-chain state after the signed tx confirms.
     const replacer = (key: string, value: any) => typeof value === 'bigint' ? value.toString() : value;
     res.json(JSON.parse(JSON.stringify(body, replacer)));
   } catch (err) {
@@ -387,7 +393,10 @@ tasksRouter.post('/:id/cancel', requireAuth, async (req: AuthRequest, res, next)
 
     // Verify caller is the task agent
     const task = await escrowService.getTask(taskId);
-    if (task.agent.toLowerCase() !== from.toLowerCase() && from !== 'agent') {
+    // The legacy 'agent' API-key principal has no EOA — buildUnsignedTx would
+    // 500 on ethers.getAddress('agent'); this tx must be signed by the task
+    // agent's real wallet (onlyAgent on-chain). Refuse it cleanly.
+    if (from === 'agent' || task.agent.toLowerCase() !== from.toLowerCase()) {
       throw new AppError(403, 'FORBIDDEN', 'Only the task agent can cancel tasks');
     }
 
@@ -435,7 +444,10 @@ tasksRouter.post('/:id/timeout', requireAuth, async (req: AuthRequest, res, next
 
     // Verify caller is the task agent
     const task = await escrowService.getTask(taskId);
-    if (task.agent.toLowerCase() !== from.toLowerCase() && from !== 'agent') {
+    // The legacy 'agent' API-key principal has no EOA — buildUnsignedTx would
+    // 500 on ethers.getAddress('agent'); this tx must be signed by the task
+    // agent's real wallet (onlyAgent on-chain). Refuse it cleanly.
+    if (from === 'agent' || task.agent.toLowerCase() !== from.toLowerCase()) {
       throw new AppError(403, 'FORBIDDEN', 'Only the task agent can reclaim funds');
     }
 

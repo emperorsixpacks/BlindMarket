@@ -143,7 +143,9 @@ export default function MyTasks() {
 
   useSocket('tasks', {
     'task:created': () => qc.invalidateQueries({ queryKey: ['my-tasks-posted', address] }),
-    'task:assigned': () => qc.invalidateQueries({ queryKey: ['my-tasks-posted', address] }),
+    // No 'task:assigned' listener: nothing emits it anymore — the only emitter
+    // fired at unsigned-tx BUILD time (before the poster signed) and was
+    // removed as misleading. Assignment shows up via staleTime/refocus refetch.
     'task:completed': () => qc.invalidateQueries({ queryKey: ['my-tasks-posted', address] }),
   });
 

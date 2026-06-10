@@ -928,6 +928,15 @@ async function pollAndWork() {
         continue;
       }
 
+      // OFFER_HELD is TRANSIENT: another agent holds a short exclusive-offer
+      // window (CASCADE_OFFER_MS). It expires, then the task falls back to the
+      // open CAS race — so do NOT blacklist, or every agent that polled during
+      // someone else's window permanently skips a task it could later win.
+      // The poll cadence naturally rate-limits the retry.
+      if (acceptRes.status === 409 && err.error?.code === 'OFFER_HELD') {
+        continue;
+      }
+
       if (acceptRes.status === 403 || acceptRes.status === 409) {
         appliedTasks.add(taskHash);
         continue;
@@ -964,9 +973,12 @@ async function pollAndWork() {
 // (runAcceptedTask) and the verifier path (pollAndVerify). Throws on failure.
 async function downloadAndDecryptBrief(rootHash, wrappedKeyHex) {
   const aesKey = eciesDecryptK1(Buffer.from(wrappedKeyHex, 'hex'), AGENT_PRIVATE_KEY);
+  // Generous timeout: 0G storage indexer reads routinely exceed the 30s
+  // fetchWithTimeout default under load, and an abort here burns one of only
+  // MAX_RESUME_ATTEMPTS self-recovery tries on a brief that was fetchable.
   const dlRes = await fetchWithTimeout(`${BACKEND_URL}/api/v1/storage/${rootHash}`, {
     headers: { 'Authorization': `Bearer ${AGENT_PLATFORM_TOKEN}` },
-  });
+  }, 120_000);
   if (!dlRes.ok) throw new Error(`storage download ${dlRes.status}`);
   const dlJson = await dlRes.json();
   const b64 = dlJson.data?.blob;
@@ -1155,26 +1167,62 @@ async function runAcceptedTask(acceptedTaskHash, acceptedRootHash, acceptedWrapp
     }
 
     log(`finalizing task ${acceptedTaskHash.slice(0, 10)}…`);
-    const finalizeRes = await fetchWithTimeout(`${BACKEND_URL}/api/v1/a2a/tasks/${acceptedTaskHash}/finalize`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${AGENT_PLATFORM_TOKEN}`,
-      },
-    });
-    if (!finalizeRes.ok) {
-      const errText = await finalizeRes.text();
-      log(`finalize failed: ${finalizeRes.status} ${errText.slice(0, 160)}`);
-      return;
-    }
-    const finalizeJson = await finalizeRes.json();
-    log(`finalize result for ${acceptedTaskHash.slice(0, 10)}…: ${JSON.stringify(finalizeJson.data)}`);
+    const finalized = await finalizeAcceptedTask(acceptedTaskHash);
+    if (!finalized) return;
 
     const totalElapsed = ((Date.now() - taskStartedAt) / 1000).toFixed(1);
     log(`task ${acceptedTaskHash.slice(0, 10)}… done in ${totalElapsed}s (LLM ${llmElapsed}s)`);
   } catch (err) {
     log(`error: ${err.message}`);
   }
+}
+
+// Finalize a task whose submitEvidence is already confirmed on-chain: triggers
+// backend verification + settlement. Retries the transient 503 gates the
+// backend raises while its RPC catches up to the just-confirmed tx:
+//   - 503 NOT_INDEXED            → TaskCreated event not indexed yet
+//   - 503 NOT_SUBMITTED_ON_CHAIN → submitEvidence tx not visible to backend yet
+// Both heal within tens of seconds (the backend keeps state 'submitted' on
+// these exactly so a retry re-runs cleanly). Bailing on the first 503 used to
+// strand the task: gas already paid for submitEvidence, but verification and
+// payout never fired, and resume didn't re-drive 'submitted' state. Returns
+// the backend's response data (truthy — e.g. may carry awaitingPosterApproval
+// for manual-verification tasks) on success, false on terminal failure. Never
+// throws: a network error is a terminal failure for this attempt.
+async function finalizeAcceptedTask(taskHash) {
+  const FINALIZE_API_MAX_ATTEMPTS = 6;
+  const FINALIZE_API_RETRY_DELAY_MS = 8_000;
+  try {
+    for (let attempt = 1; attempt <= FINALIZE_API_MAX_ATTEMPTS; attempt++) {
+      const finalizeRes = await fetchWithTimeout(`${BACKEND_URL}/api/v1/a2a/tasks/${taskHash}/finalize`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${AGENT_PLATFORM_TOKEN}`,
+        },
+      });
+      if (finalizeRes.ok) {
+        const finalizeJson = await finalizeRes.json();
+        log(`finalize result for ${taskHash.slice(0, 10)}…: ${JSON.stringify(finalizeJson.data)}`);
+        return finalizeJson.data ?? {};
+      }
+      const errText = await finalizeRes.text();
+      const isTransient = finalizeRes.status === 503 && /NOT_INDEXED|NOT_SUBMITTED_ON_CHAIN/.test(errText);
+      if (isTransient && attempt < FINALIZE_API_MAX_ATTEMPTS) {
+        const code = /NOT_SUBMITTED_ON_CHAIN/.test(errText) ? 'NOT_SUBMITTED_ON_CHAIN' : 'NOT_INDEXED';
+        log(`finalize attempt ${attempt}/${FINALIZE_API_MAX_ATTEMPTS} for ${taskHash.slice(0, 10)}…: 503 ${code} — retrying in ${FINALIZE_API_RETRY_DELAY_MS / 1000}s`);
+        await sleep(FINALIZE_API_RETRY_DELAY_MS);
+        continue;
+      }
+      log(`finalize failed for ${taskHash.slice(0, 10)}… after ${attempt} attempt(s): ${finalizeRes.status} ${errText.slice(0, 160)}`);
+      return false;
+    }
+  } catch (e) {
+    // Don't let a fetch abort/network throw propagate — in the resume path it
+    // would abort the remaining executions and skip pollAndVerify this cycle.
+    log(`finalize network error for ${taskHash.slice(0, 10)}…: ${e.message || e}`);
+  }
+  return false;
 }
 
 // Resume tasks this worker already accepted (assigned on-chain to us) but never
@@ -1204,14 +1252,22 @@ async function resumeAssignedTasks() {
     const meta = item?.meta;
     const state = item?.state;
     if (!meta || !state) continue;
-    // Only tasks we still owe work on: accepted/in_progress, not yet submitted.
-    if (state.status !== 'accepted' && state.status !== 'in_progress') continue;
+    // Tasks we still owe work on: accepted/in_progress (re-run the full task)
+    // or submitted (evidence tx likely on-chain — only /finalize is owed, e.g.
+    // the process died or /finalize 503'd right after submitEvidence). Caveat:
+    // 'submitted' is set by /submit at unsigned-tx-build time, BEFORE we
+    // broadcast — a worker that died in that gap can't be healed here (finalize
+    // 503s NOT_SUBMITTED_ON_CHAIN until the attempt cap; same terminal state
+    // as before this path existed, since /submit refuses 'submitted' re-runs).
+    const finalizeOnly = state.status === 'submitted';
+    if (!finalizeOnly && state.status !== 'accepted' && state.status !== 'in_progress') continue;
 
     const taskHash = meta.taskId;
     if (!taskHash || resumingTasks.has(taskHash)) continue;
 
     const wrappedKey = meta.wrappedKeys?.[myAddr];
-    if (!meta.rootHash || !wrappedKey) continue; // no decryptable slice for us
+    // finalize-only needs no brief; a full re-run needs a decryptable slice.
+    if (!finalizeOnly && (!meta.rootHash || !wrappedKey)) continue;
 
     const attempts = resumeFailures.get(taskHash) ?? 0;
     if (attempts >= MAX_RESUME_ATTEMPTS) {
@@ -1228,8 +1284,24 @@ async function resumeAssignedTasks() {
 
     resumingTasks.add(taskHash);
     try {
-      log(`resuming assigned task ${taskHash.slice(0, 10)}… (status=${state.status}, attempt ${attempts + 1}/${MAX_RESUME_ATTEMPTS})`);
-      await runAcceptedTask(taskHash, meta.rootHash, wrappedKey);
+      if (finalizeOnly) {
+        // Do NOT route through runAcceptedTask: it would re-run the LLM and
+        // then 409 INVALID_STATE at /submit ('submitted' is past that gate).
+        log(`resuming submitted task ${taskHash.slice(0, 10)}… (finalize only, attempt ${attempts + 1}/${MAX_RESUME_ATTEMPTS})`);
+        const result = await finalizeAcceptedTask(taskHash);
+        if (result && result.awaitingPosterApproval) {
+          // Manual-verification task: /finalize 200-noops and state stays
+          // 'submitted' until the POSTER approves via /verify — the worker
+          // owes nothing more. Park it past the cap (silently — skipping the
+          // give-up log) so we don't re-poll a healthy task every cycle and
+          // then falsely report it as stuck.
+          resumeFailures.set(taskHash, MAX_RESUME_ATTEMPTS + 1);
+          log(`task ${taskHash.slice(0, 10)}… awaits poster approval — worker side complete`);
+        }
+      } else {
+        log(`resuming assigned task ${taskHash.slice(0, 10)}… (status=${state.status}, attempt ${attempts + 1}/${MAX_RESUME_ATTEMPTS})`);
+        await runAcceptedTask(taskHash, meta.rootHash, wrappedKey);
+      }
     } finally {
       resumingTasks.delete(taskHash);
     }
@@ -1607,6 +1679,11 @@ async function tryAcceptTask(taskHash) {
         }
       } catch { /* network error */ }
     }
+  } else if (acceptRes.status === 409 && err.error?.code === 'OFFER_HELD') {
+    // Transient: another agent holds the short exclusive-offer window. Do NOT
+    // blacklist — when the offer expires the task falls back to the open CAS
+    // race and this agent should still be willing to take it (the poll loop
+    // will retry it naturally).
   } else if (acceptRes.status === 403 || acceptRes.status === 409) {
     appliedTasks.add(taskHash);
   }
