@@ -20,6 +20,7 @@ import type { AuthRequest, ApiResponse, AgentCapability } from '../types.js';
 import { AGENT_CAPABILITIES } from '../types.js';
 import { rankAgents } from '../services/agentScorer.js';
 import { emitTaskOffer, emitTaskAvailable } from '../services/socket.js';
+import { EXPIRY_GRACE_SEC } from '../services/a2aExpirySweep.js';
 
 export const a2aRouter = Router();
 
@@ -268,6 +269,30 @@ a2aRouter.post('/tasks/:id/accept', requireAuth, async (req: AuthRequest, res, n
       throw new AppError(404, 'NOT_FOUND', 'Task not found or not A2A-enabled');
     }
 
+    // Deadline pre-check. The authoritative gate stays on-chain
+    // (marketplaceAssign reverts DeadlineReached), but when meta carries the
+    // deadline we can refuse before burning the CAS + a settle round-trip.
+    // The refusal is cheap and reversible, so it uses no grace margin — but
+    // the terminal off-chain close only happens once clearly past the
+    // boundary (same grace as the sweep), so a server clock running a few
+    // seconds ahead of block.timestamp can never close a task the contract
+    // would still assign. Inside the grace window the worst case is the
+    // pre-batch-4 behaviour: the on-chain revert decides.
+    if (meta.deadline) {
+      const nowSec = Math.floor(Date.now() / 1000);
+      if (nowSec >= meta.deadline) {
+        console.warn(`[a2a] accept: task ${taskId} is past its deadline — refusing pre-CAS`);
+        if (nowSec >= meta.deadline + EXPIRY_GRACE_SEC) {
+          try { await a2aStore.tryExpire(taskId, 'expired'); } catch { /* best-effort */ }
+        }
+        throw new AppError(
+          409,
+          'TASK_EXPIRED',
+          'Task deadline has passed — it can no longer be assigned. The poster can reclaim escrow via cancelTask.',
+        );
+      }
+    }
+
     // Check agent is registered + capability match BEFORE the CAS, so we don't
     // burn the open→accepted transition on a caller who'd be 403'd anyway.
     const agent = await agentStore.getAgent(address);
@@ -306,10 +331,26 @@ a2aRouter.post('/tasks/:id/accept', requireAuth, async (req: AuthRequest, res, n
     const addrLc = address.toLowerCase();
     const hasOwnSlice = !!meta.wrappedKeys?.[addrLc];
     // Self-heal is possible when the task is encrypted, this caller has no slice
-    // yet, the poster sealed the key to custody, and a custody backend is live.
-    // This is what lets a late joiner pick up the task with no poster present.
+    // yet, the poster sealed the key to custody, a custody backend is live, AND
+    // the blob is sealed to the key that backend actually holds. rewrap()
+    // hard-throws on any non-active keyId, so without the keyId check a task
+    // sealed to a rotated custody key passes this gate, wins the CAS, fails
+    // rewrap, gets released, and bounces open↔accepted forever. This is what
+    // lets a late joiner pick up the task with no poster present.
     const custodySvc = keyCustody.getKeyCustodyService();
-    const canSelfHeal = !!meta.rootHash && !hasOwnSlice && !!meta.keyCustodyBlob && !!custodySvc;
+    let activeCustodyKeyId: string | null = null;
+    if (meta.keyCustodyBlob && custodySvc) {
+      // catch → null: a transient custody-backend error must read as
+      // "self-heal unavailable right now" (generic NEEDS_WRAP, retryable),
+      // NOT as a rotated key — the rotated diagnosis below tells the poster
+      // to re-wrap or cancel, and requires a successful key read to claim.
+      activeCustodyKeyId = await custodySvc.getActiveKey().then((k) => k.keyId).catch(() => null);
+    }
+    const custodyKeyIsActive =
+      !!meta.keyCustodyBlob &&
+      activeCustodyKeyId !== null &&
+      meta.keyCustodyBlob.keyId === activeCustodyKeyId;
+    const canSelfHeal = !!meta.rootHash && !hasOwnSlice && custodyKeyIsActive;
 
     // NEEDS_WRAP gate — refuse BEFORE the CAS so the open→accepted transition
     // isn't burned on a caller who can't decrypt the brief. An encrypted task
@@ -318,11 +359,20 @@ a2aRouter.post('/tasks/:id/accept', requireAuth, async (req: AuthRequest, res, n
     // the poster's browser (or the posting agent's wrap loop) to ship a slice.
     // Tasks with no rootHash (legacy / unencrypted) skip this entirely.
     if (meta.rootHash && !hasOwnSlice && !canSelfHeal && !meta.skipKeyWrap) {
-      console.log(`[a2a] accept: needs wrap for ${taskId}, agent=${address}`);
+      const custodyRotated =
+        !!meta.keyCustodyBlob &&
+        activeCustodyKeyId !== null &&
+        meta.keyCustodyBlob.keyId !== activeCustodyKeyId;
+      console.log(
+        `[a2a] accept: needs wrap for ${taskId}, agent=${address}` +
+          (custodyRotated ? ` (custody blob keyId=${meta.keyCustodyBlob!.keyId} != active ${activeCustodyKeyId} — server-side re-wrap impossible)` : ''),
+      );
       throw new AppError(
         403,
         'NEEDS_WRAP',
-        'Task brief is not yet wrapped to your pubkey — POST /a2a/tasks/:id/bid to register intent; the poster will wrap on their next polling cycle.',
+        custodyRotated
+          ? 'Task brief is sealed to a rotated custody key — the platform cannot re-wrap it. POST /a2a/tasks/:id/bid to register intent; only the poster can wrap a slice to your pubkey (or cancel and repost).'
+          : 'Task brief is not yet wrapped to your pubkey — POST /a2a/tasks/:id/bid to register intent; the poster will wrap on their next polling cycle.',
       );
     }
 
@@ -422,7 +472,7 @@ a2aRouter.post('/tasks/:id/accept', requireAuth, async (req: AuthRequest, res, n
       if (settleResult.expired) {
         console.warn(`[a2a] accept: task ${taskId} expired while Funded — closing instead of re-opening`);
         try {
-          await a2aStore.updateState(taskId, { status: 'failed' });
+          await a2aStore.updateState(taskId, { status: 'failed', failedReason: 'expired' });
         } catch (closeErr) {
           console.error(`[a2a] accept: could not close expired task ${taskId}:`, (closeErr as Error).message);
         }
@@ -853,6 +903,10 @@ a2aRouter.post('/tasks/index', requireAuth, async (req: AuthRequest, res, next) 
       rootHash: data.rootHash,
       wrappedKeys: wrappedKeysNormalized,
       keyCustodyBlob: data.keyCustodyBlob,
+      // Absolute on-chain deadline (epoch seconds) from the verified
+      // TaskCreated event — lets browse hide expired tasks, /accept refuse
+      // them pre-CAS, and the expiry sweep close them with no chain read.
+      deadline: Number(parsed.args.deadline),
     });
 
     console.log(

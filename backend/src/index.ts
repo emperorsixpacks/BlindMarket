@@ -30,6 +30,7 @@ import { apiKeysRouter } from './routes/apiKeys.js';
 import { adminRouter } from './routes/admin.js';
 import { getDb } from './services/database.js';
 import { startEscrowEventLoop } from './services/escrowEvents.js';
+import { startExpirySweepLoop } from './services/a2aExpirySweep.js';
 import { auditCustodySealedTasks } from './services/keyCustodyService.js';
 import { isBridgeConfigured } from './services/a2aSettlement.js';
 import { marketplaceSigner, escrow } from './services/chain.js';
@@ -125,6 +126,10 @@ httpServer.listen(config.port, () => {
   // mapping that the A2A settlement bridge needs to call assignWorker /
   // completeVerification by on-chain id.
   startEscrowEventLoop();
+
+  // Proactively close open tasks whose on-chain deadline has passed, instead
+  // of leaving them listed until some agent burns an /accept on them.
+  startExpirySweepLoop();
 
   // Tripwire for custody-key rotation/disable while custody-sealed tasks are
   // still open (their late-joiner self-heal silently breaks). Loud log only.

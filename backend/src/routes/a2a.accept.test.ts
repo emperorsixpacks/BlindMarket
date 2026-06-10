@@ -16,6 +16,10 @@ import request from 'supertest';
  *   3. self-heal win (custody on)                → 200, rewrap → slice, merge + settle
  *   4. CAS loser (custody on)                    → 409, NO key, no rewrap, no settle
  *   5. rewrap failure (custody on)               → 503, task released, no settle
+ *
+ * Plus the batch-4 gates: rotated custody key (403 NEEDS_WRAP before the CAS,
+ * never reaches rewrap) and the pre-CAS deadline check (409 TASK_EXPIRED;
+ * terminal tryExpire only past the grace window).
  */
 
 // ── Mocks (hoisted by vitest above the imports below) ────────────────────────
@@ -48,6 +52,11 @@ vi.mock('../services/a2aStore.js', () => ({
   setOffer: vi.fn(() => Promise.resolve()),
   // Cascade ops
   clearCascade: vi.fn(() => Promise.resolve()),
+  // Expiry ops (batch-4)
+  tryExpire: vi.fn(() => Promise.resolve({ ok: true })),
+  listOpenTasks: vi.fn(() => Promise.resolve([])),
+  cacheDeadline: vi.fn(() => Promise.resolve()),
+  getCachedDeadline: vi.fn(() => Promise.resolve(null)),
 }));
 
 vi.mock('../services/agentStore.js', () => ({ getAgent: vi.fn() }));
@@ -74,7 +83,10 @@ vi.mock('../services/chain.js', () => ({
   escrow: { interface: {}, getAddress: vi.fn() },
 }));
 vi.mock('../services/escrow.js', () => ({ getTask: vi.fn(), feeBps: vi.fn(), getTaskVerifier: vi.fn() }));
-vi.mock('../services/escrowEvents.js', () => ({ getTaskIdByHash: vi.fn() }));
+vi.mock('../services/escrowEvents.js', () => ({
+  getTaskIdByHash: vi.fn(),
+  getCachedTaskIdByHash: vi.fn(() => Promise.resolve(null)),
+}));
 vi.mock('../services/autoVerify.js', () => ({ autoVerify: vi.fn() }));
 vi.mock('../services/accountingService.js', () => ({}));
 vi.mock('../services/reputation.js', () => ({}));
@@ -117,10 +129,14 @@ function meta(overrides: Partial<any> = {}) {
   return { taskId: TASK, requiredCapabilities: [], ...overrides };
 }
 
-/** A mock custody service whose rewrap returns `slice` (or throws if `fail`). */
-function custody(slice: string, fail = false) {
+/**
+ * A mock custody service whose rewrap returns `slice` (or throws if `fail`).
+ * activeKeyId defaults to the fixtures' blob keyId ('kid') so canSelfHeal's
+ * active-key check passes; pass a different id to simulate a rotated key.
+ */
+function custody(slice: string, fail = false, activeKeyId = 'kid') {
   return {
-    getActiveKey: vi.fn(),
+    getActiveKey: vi.fn(() => Promise.resolve({ keyId: activeKeyId, publicKey: '04' + '00'.repeat(64) })),
     getAttestation: vi.fn(),
     rewrap: fail
       ? vi.fn(() => Promise.reject(new Error('boom')))
@@ -228,6 +244,92 @@ describe('POST /accept — key custody', () => {
     expect(res.body.error.code).toBe('NEEDS_WRAP');
     expect(a2aStore.tryAccept).not.toHaveBeenCalled();
     expect(svc.rewrap).not.toHaveBeenCalled();
+  });
+
+  it('rotated custody key: 403 NEEDS_WRAP before the CAS — never wins the CAS just to fail rewrap', async () => {
+    // Blob sealed to 'kid', but the live custody key is 'newkid'. Pre-batch-4
+    // this passed canSelfHeal, won the CAS, threw inside rewrap, released, and
+    // bounced open↔accepted forever.
+    const svc = custody('reslice', false, 'newkid');
+    vi.mocked(keyCustody.getKeyCustodyService).mockReturnValue(svc as any);
+    vi.mocked(a2aStore.getMeta).mockResolvedValue(
+      meta({ rootHash: ROOT, wrappedKeys: {}, keyCustodyBlob: { keyId: 'kid', blob: 'abcd' } }) as any,
+    );
+
+    const res = await accept();
+
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('NEEDS_WRAP');
+    expect(res.body.error.message).toContain('rotated');
+    expect(a2aStore.tryAccept).not.toHaveBeenCalled();
+    expect(svc.rewrap).not.toHaveBeenCalled();
+    expect(a2aStore.releaseToOpen).not.toHaveBeenCalled();
+  });
+
+  it('custody backend read failure is NOT diagnosed as rotation: generic NEEDS_WRAP message', async () => {
+    const svc = custody('reslice');
+    svc.getActiveKey = vi.fn(() => Promise.reject(new Error('custody backend down')));
+    vi.mocked(keyCustody.getKeyCustodyService).mockReturnValue(svc as any);
+    vi.mocked(a2aStore.getMeta).mockResolvedValue(
+      meta({ rootHash: ROOT, wrappedKeys: {}, keyCustodyBlob: { keyId: 'kid', blob: 'abcd' } }) as any,
+    );
+
+    const res = await accept();
+
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('NEEDS_WRAP');
+    expect(res.body.error.message).not.toContain('rotated'); // don't tell the poster to cancel/repost on a blip
+    expect(a2aStore.tryAccept).not.toHaveBeenCalled();
+  });
+});
+
+// ── Deadline pre-check (batch-4) ─────────────────────────────────────────────
+//
+// The authoritative deadline gate is on-chain (marketplaceAssign reverts
+// DeadlineReached); this pre-CAS check just refuses early so expired tasks
+// don't burn the open→accepted CAS plus a settle round-trip. The terminal
+// off-chain close (tryExpire) only fires past the grace window so server-clock
+// drift can never close a task the contract would still assign.
+describe('POST /accept — deadline pre-check', () => {
+  it('expired beyond grace: 409 TASK_EXPIRED, task closed, CAS never runs', async () => {
+    vi.mocked(a2aStore.getMeta).mockResolvedValue(
+      meta({ deadline: Math.floor(Date.now() / 1000) - 120 }) as any, // grace is 60s
+    );
+
+    const res = await accept();
+
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('TASK_EXPIRED');
+    expect(a2aStore.tryExpire).toHaveBeenCalledWith(TASK, 'expired');
+    expect(a2aStore.tryAccept).not.toHaveBeenCalled();
+    expect(settleAssignment).not.toHaveBeenCalled();
+  });
+
+  it('expired but inside grace: 409 refusal WITHOUT the terminal close (clock-drift safety)', async () => {
+    vi.mocked(a2aStore.getMeta).mockResolvedValue(
+      meta({ deadline: Math.floor(Date.now() / 1000) - 10 }) as any,
+    );
+
+    const res = await accept();
+
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('TASK_EXPIRED');
+    expect(a2aStore.tryExpire).not.toHaveBeenCalled();
+    expect(a2aStore.tryAccept).not.toHaveBeenCalled();
+  });
+
+  it('future deadline: flows through to a normal 200 accept', async () => {
+    vi.mocked(a2aStore.getMeta).mockResolvedValue(
+      meta({ deadline: Math.floor(Date.now() / 1000) + 3600 }) as any,
+    );
+    vi.mocked(a2aStore.tryAccept).mockResolvedValue({ ok: true, state: {} } as any);
+
+    const res = await accept();
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.status).toBe('accepted');
+    expect(a2aStore.tryExpire).not.toHaveBeenCalled();
+    expect(settleAssignment).toHaveBeenCalledWith(TASK, AGENT);
   });
 });
 

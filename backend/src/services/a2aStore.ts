@@ -34,6 +34,7 @@ const KEY = {
   verifier: (addr: string) => `a2a:verifier:${addr.toLowerCase()}`,
   offer: (taskId: string) => `a2a:offer:${taskId.toLowerCase()}`,
   cascade: (taskId: string) => `a2a:cascade:${taskId.toLowerCase()}`,
+  deadline: (taskId: string) => `a2a:deadline:${taskId.toLowerCase()}`,
 };
 
 export async function setMeta(meta: A2ATaskMeta): Promise<void> {
@@ -106,6 +107,29 @@ export async function mergeWrappedKeys(
   meta.wrappedKeys = merged;
   await redis.set(`a2a:meta:${finalTid}`, JSON.stringify(meta));
   return meta;
+}
+
+/**
+ * Cache the on-chain deadline (epoch seconds) for a task under its OWN key —
+ * deliberately NOT inside the meta blob. The meta blob is rewritten by
+ * unguarded read-modify-write cycles (mergeWrappedKeys at /wrap-to and the
+ * accept self-heal); a concurrent deadline write into the same JSON could
+ * silently drop a just-merged wrap slice, which for the /wrap-to path is a
+ * permanently lost brief key. A side key has no contention. Used by the
+ * expiry sweep to backfill tasks indexed before meta.deadline existed, so the
+ * chain is consulted at most once per legacy task. TTL: the key is only
+ * needed until shortly after the deadline passes (the sweep then closes the
+ * task), so let it expire a day later rather than leak forever.
+ */
+export async function cacheDeadline(taskId: string, deadline: number): Promise<void> {
+  const ttlSec = Math.max(deadline - Math.floor(Date.now() / 1000), 0) + 24 * 3600;
+  await redis.setex(KEY.deadline(taskId), ttlSec, String(deadline));
+}
+
+/** Read a deadline cached by the expiry sweep. Null if never cached/expired. */
+export async function getCachedDeadline(taskId: string): Promise<number | null> {
+  const raw = await redis.get(KEY.deadline(taskId));
+  return raw ? Number(raw) : null;
 }
 
 /**
@@ -277,14 +301,74 @@ export async function tryAccept(
   return { ok: false, currentStatus: result[1] ?? 'unknown' };
 }
 
-/** Browse open agent-targeted tasks, optionally filtered by capabilities. */
-export async function browseAgentTasks(
-  capabilities?: AgentCapability[],
-  // Reserved for future reputation gating; matches old signature so callers
-  // (routes/a2a.ts:69) don't have to change. Currently unused — reputation
-  // gating happens at /accept time, not at browse.
-  _minReputation?: number,
-): Promise<Array<{ meta: A2ATaskMeta; state: A2ATaskState }>> {
+/**
+ * Atomic open→failed transition for a task that can never be assigned again
+ * (reason 'expired': on-chain deadline passed; reason 'unindexed': no
+ * TaskCreated event exists for the hash in the chain's entire history, i.e. a
+ * phantom meta from a reverted createTask). Same Lua-CAS rationale as
+ * tryAccept: the expiry sweep's read of 'open' can race a concurrent /accept,
+ * and a blind updateState would clobber the CAS winner's 'accepted' state —
+ * so expiry must lose that race gracefully. failedReason distinguishes these
+ * closes from verification failures. Returns ok:false (never throws) on
+ * missing state so the sweep can skip stale index entries without crashing
+ * the tick.
+ */
+export async function tryExpire(
+  taskId: string,
+  reason: 'expired' | 'unindexed' = 'expired',
+): Promise<{ ok: true } | { ok: false; currentStatus: string }> {
+  const tid = taskId.toLowerCase();
+  const lua = `
+    local stateKey = KEYS[1]
+    local openSetKey = KEYS[2]
+    local tid = ARGV[1]
+    local originalTaskId = ARGV[2]
+    local reason = ARGV[3]
+
+    local raw = redis.call('GET', stateKey)
+    if not raw and originalTaskId ~= tid then
+        -- Fallback for legacy mixed-case keys
+        raw = redis.call('GET', 'a2a:state:' .. originalTaskId)
+        if raw then stateKey = 'a2a:state:' .. originalTaskId end
+    end
+
+    if not raw then return {'missing'} end
+
+    local s = cjson.decode(raw)
+    if s.status ~= 'open' then return {'lost', s.status} end
+
+    s.status = 'failed'
+    s.failedReason = reason
+    redis.call('SET', stateKey, cjson.encode(s))
+    redis.call('SREM', openSetKey, tid)
+    if tid ~= originalTaskId then
+        redis.call('SREM', openSetKey, originalTaskId)
+    end
+    return {'ok'}
+  `;
+
+  const result = (await redis.eval(
+    lua,
+    2,
+    KEY.state(tid),
+    KEY.open,
+    tid,
+    taskId, // original taskId for fallback
+    reason,
+  )) as [string, string?];
+
+  if (result[0] === 'ok') return { ok: true };
+  if (result[0] === 'missing') return { ok: false, currentStatus: 'missing' };
+  return { ok: false, currentStatus: result[1] ?? 'unknown' };
+}
+
+/**
+ * Load every task in the open index with its meta+state, unfiltered beyond the
+ * defensive invariant checks. Agent-facing callers should use browseAgentTasks
+ * (which additionally hides expired tasks); the expiry sweep uses this
+ * directly BECAUSE it needs to see the expired ones to close them.
+ */
+export async function listOpenTasks(): Promise<Array<{ meta: A2ATaskMeta; state: A2ATaskState }>> {
   const ids = await redis.smembers(KEY.open);
   if (ids.length === 0) return [];
 
@@ -310,17 +394,39 @@ export async function browseAgentTasks(
     if (meta.targetExecutorType !== 'agent') continue;
     if (state.status !== 'open') continue;
 
+    out.push({ meta, state });
+  }
+  return out;
+}
+
+/** Browse open agent-targeted tasks, optionally filtered by capabilities. */
+export async function browseAgentTasks(
+  capabilities?: AgentCapability[],
+  // Reserved for future reputation gating; matches old signature so callers
+  // (routes/a2a.ts:69) don't have to change. Currently unused — reputation
+  // gating happens at /accept time, not at browse.
+  _minReputation?: number,
+): Promise<Array<{ meta: A2ATaskMeta; state: A2ATaskState }>> {
+  const open = await listOpenTasks();
+  const nowSec = Math.floor(Date.now() / 1000);
+
+  return open.filter(({ meta }) => {
+    // Hide tasks past their on-chain deadline: assignment would revert
+    // DeadlineReached anyway, so listing them only costs some agent a wasted
+    // /accept. Tasks indexed before meta.deadline existed stay listed until
+    // the expiry sweep backfills the field from chain.
+    if (meta.deadline && nowSec >= meta.deadline) return false;
+
     if (capabilities && capabilities.length > 0 && meta.requiredCapabilities.length > 0) {
       // Superset match against /accept: the browsing agent's caps must include
       // ALL of the task's required caps, so browse only lists tasks the agent
       // could actually accept (no partial-overlap teasers it would be 403'd on).
       const hasAll = meta.requiredCapabilities.every((c) => capabilities.includes(c));
-      if (!hasAll) continue;
+      if (!hasAll) return false;
     }
 
-    out.push({ meta, state });
-  }
-  return out;
+    return true;
+  });
 }
 
 /** Get all tasks accepted (currently or historically) by a specific executor. */

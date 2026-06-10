@@ -195,6 +195,12 @@ export interface A2ATaskMeta {
   // tasks posted before key custody was enabled. When true, the NEEDS_WRAP
   // gate is bypassed, allowing any agent to accept regardless of wrap state.
   skipKeyWrap?: boolean;
+  // Absolute on-chain deadline (unix epoch SECONDS), captured from the
+  // TaskCreated event at /tasks/index time. Lets browse hide tasks the
+  // contract would refuse to assign (DeadlineReached) and lets the expiry
+  // sweep close them without a per-task chain read. Optional for tasks
+  // indexed before this field existed — the sweep backfills it from chain.
+  deadline?: number;
 }
 
 export type A2ATaskStateStatus =
@@ -210,6 +216,12 @@ export type A2ATaskStateStatus =
 export interface A2ATaskState {
   taskId: string;
   status: A2ATaskStateStatus;
+  // Why a 'failed' task failed. 'expired' = the on-chain deadline passed while
+  // the task was still open/Funded (closed by the expiry sweep or an /accept
+  // that hit DeadlineReached); 'unindexed' = phantom meta with no TaskCreated
+  // event in the chain's history (reverted createTask). Distinguishes these
+  // from verification failures so dashboards/agents don't read them as bad work.
+  failedReason?: string;
   executorAddress?: string;
   acceptedAt?: string;
   submittedAt?: string;

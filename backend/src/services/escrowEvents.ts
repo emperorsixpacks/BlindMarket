@@ -248,6 +248,16 @@ export function stopEscrowEventLoop(): void {
 
 // ── Lookup helpers (used by the settlement bridge) ──────────────────────────
 
+/**
+ * Cache-only variant of getTaskIdByHash: one Redis GET, no forced indexer
+ * ticks, no retry sleeps, no deployment-scan backfill. For callers that poll
+ * periodically anyway (the expiry sweep) and must not pay ~6s per unresolved
+ * hash per tick.
+ */
+export async function getCachedTaskIdByHash(taskHash: string): Promise<string | null> {
+  return redis.get(KEY.hash2id(taskHash));
+}
+
 /** Resolve a taskHash to its on-chain uint256 taskId, or null if not yet seen. */
 export async function getTaskIdByHash(taskHash: string): Promise<string | null> {
   // Try immediate lookup first
