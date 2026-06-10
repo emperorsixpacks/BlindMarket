@@ -245,7 +245,7 @@ export async function startAgent(id: string, opts?: { skipResume?: boolean }): P
   // or other agents. Without this the forked child inherits the parent's default
   // 2 GB heap limit, which on a 512 MB Render box means 9 agents = guaranteed OOM.
   const child = fork(WORKER_PATH, [], {
-    execArgv: ['--max-old-space-size=128'],
+    execArgv: ['--max-old-space-size=128', '--import', 'tsx/esm'],
     env: {
       ...process.env,
       AGENT_ID: agent.id,
