@@ -39,6 +39,7 @@ import { config as appConfig } from './config.js';
 assertBootConfig();
 
 const app = express();
+app.set('trust proxy', 1);
 
 // Security
 app.use(helmet());

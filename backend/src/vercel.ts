@@ -26,6 +26,7 @@ import { analyticsRouter } from './routes/analytics.js';
 import { getDb } from './services/database.js';
 
 const app = express();
+app.set('trust proxy', 1);
 
 app.use(helmet());
 app.use(cors({
