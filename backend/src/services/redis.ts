@@ -63,3 +63,8 @@ export async function touchHeartbeat(id: string): Promise<void> {
 export async function isAlive(id: string): Promise<boolean> {
   return (await redis.exists(KEY.agentHeartbeat(id))) === 1;
 }
+
+export async function getHeartbeat(id: string): Promise<number> {
+  const raw = await redis.get(KEY.agentHeartbeat(id));
+  return raw ? Number(raw) : 0;
+}

@@ -57,7 +57,9 @@ interface AgentDetails {
   decayedReputation?: { rawScore: number; decayedScore: number; tasksCompleted: number; disputes: number };
 }
 
-type Tab = 'logs' | 'tools' | 'tasks' | 'reviews' | 'webhooks' | 'edit';
+import AgentMetricsPanel from '../components/AgentMetricsPanel';
+
+type Tab = 'logs' | 'tools' | 'tasks' | 'reviews' | 'webhooks' | 'edit' | 'metrics';
 
 const TAB_LABELS: Record<Tab, string> = {
   logs: 'Logs',
@@ -66,6 +68,7 @@ const TAB_LABELS: Record<Tab, string> = {
   reviews: 'Reviews',
   webhooks: 'Webhooks',
   edit: 'Edit',
+  metrics: 'Metrics',
 };
 
 const ACTION_LABELS: Record<'start' | 'pause' | 'stop' | 'restart', string> = {
@@ -292,7 +295,7 @@ export default function AgentDetail() {
   }
 
   const isOwner = address?.toLowerCase() === agent.ownerAddress?.toLowerCase();
-  const tabs: Tab[] = ['logs', 'tools', 'tasks', 'reviews', ...(isOwner ? (['webhooks', 'edit'] as Tab[]) : [])];
+  const tabs: Tab[] = ['logs', 'tools', 'tasks', 'reviews', 'metrics', ...(isOwner ? (['webhooks', 'edit'] as Tab[]) : [])];
 
   return (
     <div>
@@ -725,6 +728,8 @@ export default function AgentDetail() {
                 </div>
               </div>
             )}
+
+            {tab === 'metrics' && <AgentMetricsPanel agentId={id!} />}
           </div>
         </div>
       </div>

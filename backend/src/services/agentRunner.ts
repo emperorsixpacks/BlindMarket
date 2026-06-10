@@ -4,12 +4,13 @@ import { fileURLToPath } from 'url';
 import { join, dirname } from 'path';
 import { Wallet } from 'ethers';
 import jwt from 'jsonwebtoken';
+import pidusage from 'pidusage';
 import { config } from '../config.js';
 import { eciesEncrypt, generateKeyPair } from './crypto.js';
 import { inft } from './chain.js';
 import {
   appendLog, getLogs, subscribeAgentLogs as redisSubscribe,
-  touchHeartbeat,
+  touchHeartbeat, isAlive, getHeartbeat,
 } from './redis.js';
 import { saveAgent, loadAgent, loadAllAgents } from './deployedAgentStore.js';
 import type { DeployedAgent, AgentCapability, AgentStatus, LLMProvider, AgentTool } from '../types.js';
@@ -37,6 +38,56 @@ const restartTimes = new Map<string, number[]>();
 // ChildProcess so it can never be misattributed; a WeakSet drops the entry when
 // the child is GC'd after exit.
 const intentionalStops = new WeakSet<ChildProcess>();
+
+// ── Resource limits ────────────────────────────────────────────────────────────
+// Max concurrent forked agent processes. On a 512 MB Render box each Node worker
+// needs ~50 MB baseline; cap at 5 to leave headroom for the API server + Redis.
+const MAX_CONCURRENT_AGENTS = Number(process.env.MAX_CONCURRENT_AGENTS ?? 5);
+
+// ── Zombie reaper ──────────────────────────────────────────────────────────────
+// Every 60 s, sweep the processes map and kill any agent whose Redis heartbeat
+// key has expired (stale >90 s). This catches workers that exit without triggering
+// the 'exit' event (e.g. SIGKILL from the OOM killer on low-memory instances).
+export function startZombieReaper(): void {
+  setInterval(async () => {
+    // ── Heartbeat watchdog ───────────────────────────────────────────
+    // Scan ALL running agents (not just the processes map) so we catch
+    // workers where the child process died but the PG status wasn't flipped.
+    try {
+      const all = await loadAllAgents();
+      for (const a of all.filter(a => a.status === 'running')) {
+        const lastBeat = await getHeartbeat(a.id);
+        if (lastBeat === 0 || Date.now() - lastBeat > 120_000) {
+          appendLog(a.id, '[agentRunner] heartbeat timeout — worker appears hung');
+        }
+      }
+    } catch { /* non-fatal */ }
+
+    // ── Zombie reaper ────────────────────────────────────────────────
+    // Kill forked processes whose Redis heartbeat TTL has fully expired.
+    for (const [id, child] of processes) {
+      try {
+        if (!(await isAlive(id))) {
+          console.warn(`[agentRunner] reaper: agent ${id} heartbeat expired — killing stale process`);
+          const a = await loadAgent(id);
+          intentionalStops.add(child);
+          child.kill('SIGTERM');
+          processes.delete(id);
+          if (a && a.status === 'running') {
+            a.status = 'stopped';
+            await saveAgent(a);
+          }
+        }
+      } catch {
+        try {
+          intentionalStops.add(child);
+          child.kill('SIGTERM');
+          processes.delete(id);
+        } catch { /* best-effort */ }
+      }
+    }
+  }, 60_000).unref();
+}
 
 // Record an auto-restart attempt and report whether it's within the rolling cap.
 // Returns false (and does NOT record) once the agent has crash-looped past the cap.
@@ -166,6 +217,15 @@ export async function startAgent(id: string, opts?: { skipResume?: boolean }): P
   if (!agent) throw new Error(`Agent ${id} not found`);
   if (processes.has(id)) return;
 
+  // Enforce max concurrent agents so a reconcile storm can't OOM the instance.
+  // Checked AFTER the already-running dedup so an in-flight agent is never
+  // counted against the cap twice.
+  if (processes.size >= MAX_CONCURRENT_AGENTS) {
+    throw new Error(
+      `Max concurrent agents (${MAX_CONCURRENT_AGENTS}) reached — stop an agent first or increase MAX_CONCURRENT_AGENTS`,
+    );
+  }
+
   // Migration: Generate platform token if missing
   if (!agent.platformToken) {
     if (!config.jwtSecret) {
@@ -181,7 +241,11 @@ export async function startAgent(id: string, opts?: { skipResume?: boolean }): P
     console.log(`[agentRunner] Generated missing platform token for agent ${id}`);
   }
 
+  // Cap each agent worker at 128 MB so a leaky LLM call never OOMs the backend
+  // or other agents. Without this the forked child inherits the parent's default
+  // 2 GB heap limit, which on a 512 MB Render box means 9 agents = guaranteed OOM.
   const child = fork(WORKER_PATH, [], {
+    execArgv: ['--max-old-space-size=128'],
     env: {
       ...process.env,
       AGENT_ID: agent.id,
@@ -206,6 +270,8 @@ export async function startAgent(id: string, opts?: { skipResume?: boolean }): P
       AGENT_TOOLS: JSON.stringify(agent.tools ?? []),
       AGENT_CAPABILITIES: JSON.stringify(agent.capabilities ?? []),
       AGENT_MIN_REWARD: agent.minReward ?? '',
+      AGENT_MEMORY_NS: `agent:${agent.id}`,
+      AGENT_FILES_DIR: `/data/agents/${agent.id}`,
       // Set only on a post-crash auto-restart: the worker skips re-driving its
       // in-flight (accepted-but-unsubmitted) task so a poison brief can't loop
       // the crash. Empty on fresh starts and graceful boot-reconciles.
@@ -323,6 +389,32 @@ export async function stopAgent(id: string): Promise<void> {
   if (agent) { agent.status = 'stopped'; await saveAgent(agent); }
 }
 
+export async function resumeAgent(id: string): Promise<void> {
+  const child = processes.get(id);
+  if (!child) throw new Error(`Agent ${id} is not running`);
+  child.kill('SIGCONT');
+  const agent = await loadAgent(id);
+  if (agent) { agent.status = 'running'; await saveAgent(agent); }
+}
+
+/**
+ * Poll the OS for live CPU and RSS memory of a forked agent process using
+ * the pidusage library. Returns null if the agent isn't currently running.
+ */
+export async function getAgentStats(id: string): Promise<{ cpu: number; ramMb: number } | null> {
+  const child = processes.get(id);
+  if (!child?.pid) return null;
+  try {
+    const stats = await pidusage(child.pid);
+    return {
+      cpu: stats.cpu,
+      ramMb: stats.memory / 1024 / 1024,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Re-fork agents that were 'running' when the backend last stopped. The
  * `processes` map lives only in this process's memory, so a backend restart
@@ -347,14 +439,30 @@ export async function reconcileAgents(): Promise<void> {
   }
   const running = agents.filter((a) => a.status === 'running' && !processes.has(a.id));
   if (running.length === 0) return;
-  console.log(`[agentRunner] reconcile: re-forking ${running.length} agent(s) that were running before the last restart`);
-  for (const a of running) {
+
+  const available = Math.max(0, MAX_CONCURRENT_AGENTS - processes.size);
+  const toStart = running.slice(0, available);
+  const excess = running.length - toStart.length;
+
+  console.log(
+    `[agentRunner] reconcile: re-forking ${toStart.length}/${running.length} agent(s)` +
+    (excess > 0 ? ` (${excess} deferred — MAX_CONCURRENT_AGENTS=${MAX_CONCURRENT_AGENTS})` : ''),
+  );
+
+  for (const a of toStart) {
     try {
       await startAgent(a.id);
       console.log(`[agentRunner] reconcile: restarted agent ${a.id} (${a.name})`);
     } catch (e) {
       console.error(`[agentRunner] reconcile: failed to restart agent ${a.id} (${a.name}): ${(e as Error).message}`);
     }
+  }
+
+  if (excess > 0) {
+    console.warn(
+      `[agentRunner] reconcile: ${excess} running agent(s) not re-forked due to MAX_CONCURRENT_AGENTS=${MAX_CONCURRENT_AGENTS}. ` +
+      `Increase the env var or start them manually.`,
+    );
   }
 }
 

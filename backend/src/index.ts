@@ -33,7 +33,7 @@ import { startEscrowEventLoop } from './services/escrowEvents.js';
 import { auditCustodySealedTasks } from './services/keyCustodyService.js';
 import { isBridgeConfigured } from './services/a2aSettlement.js';
 import { marketplaceSigner, escrow } from './services/chain.js';
-import { reconcileAgents } from './services/agentRunner.js';
+import { reconcileAgents, startZombieReaper } from './services/agentRunner.js';
 import { config as appConfig } from './config.js';
 
 // Fail fast on a misconfigured (esp. production) deploy before binding the port.
@@ -138,6 +138,10 @@ httpServer.listen(config.port, () => {
   if (process.env.AGENT_RECONCILE_ON_BOOT !== 'false') {
     void reconcileAgents();
   }
+  // Background reaper: every 60s, kill forked agents whose Redis heartbeat
+  // expired (stale >90s). Catches SIGKILL'd workers the auto-restart handler
+  // never saw. Always runs, even when reconcile is off.
+  startZombieReaper();
   // Visibility into whether the A2A settlement bridge will actually fire
   // when an agent accepts/submits. Off-by-default if MARKETPLACE_SIGNER_PRIVATE_KEY
   // is unset; when on, log the signer address so it's clear which key is signing.

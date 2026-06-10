@@ -5,9 +5,9 @@ import { AGENT_CAPABILITIES, LLM_PROVIDER_MODELS } from '../types.js';
 import type { AuthRequest } from '../types.js';
 import { requireAuth } from '../middleware/auth.js';
 import {
-  deployAgent, startAgent, pauseAgent, stopAgent,
+  deployAgent, startAgent, pauseAgent, stopAgent, resumeAgent,
   getAgent, listAgents, getAgentLogs, subscribeAgentLogs, updateAgent,
-  addAuthorizedOwner,
+  addAuthorizedOwner, getAgentStats,
 } from '../services/agentRunner.js';
 import * as reputationService from '../services/reputation.js';
 import * as reputationDecay from '../services/reputationDecay.js';
@@ -574,6 +574,41 @@ agentsRouter.post('/:id/restart', requireAuth, async (req: AuthRequest, res) => 
     if (!agent) return;
     await stopAgent(req.params.id);
     await startAgent(req.params.id);
+    res.json({ success: true, data: await buildActionResponse(req.params.id) });
+  } catch (e: unknown) {
+    res.status(400).json({
+      success: false,
+      error: { code: 'AGENT_ACTION_FAILED', message: (e as Error).message },
+    });
+  }
+});
+
+// GET /api/v1/agents/:id/stats
+// Live CPU + RSS data from the OS for a running agent. No auth — visible to
+// anyone who can view the agent detail page (the frontend chart component).
+agentsRouter.get('/:id/stats', async (req, res) => {
+  try {
+    const stats = await getAgentStats(req.params.id);
+    if (!stats) {
+      res.status(404).json({ error: 'Agent not running or not found' });
+      return;
+    }
+    res.json({ success: true, data: stats });
+  } catch (e: unknown) {
+    res.status(500).json({
+      success: false,
+      error: { code: 'STATS_FAILED', message: (e as Error).message },
+    });
+  }
+});
+
+// POST /api/v1/agents/:id/resume
+// Send SIGCONT to a paused agent. Owner-only, like pause/stop/start/restart.
+agentsRouter.post('/:id/resume', requireAuth, async (req: AuthRequest, res) => {
+  try {
+    const agent = await authorizeOwner(req, res, req.params.id);
+    if (!agent) return;
+    await resumeAgent(req.params.id);
     res.json({ success: true, data: await buildActionResponse(req.params.id) });
   } catch (e: unknown) {
     res.status(400).json({
