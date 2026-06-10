@@ -132,3 +132,45 @@ export function isKeyCustodyEnabled(): boolean {
 export function getKeyCustodyService(): KeyCustodyService | null {
   return service;
 }
+
+/**
+ * Boot-time consistency audit: every OPEN task whose brief was sealed to
+ * key-custody must be unwrappable by the CURRENTLY active custody key.
+ * rewrap() throws on any keyId other than the active one, so a custody key
+ * that was rotated (or custody disabled) after tasks were posted silently
+ * breaks the late-joiner self-heal those posters relied on — their browsers
+ * may be long gone, making the briefs permanently undecryptable. Custody is
+ * append-only operational state; this alarm is the tripwire for dropping it.
+ *
+ * Loud alarm, not fail-fast: the rest of the marketplace (already-wrapped
+ * executors, non-custody tasks) still works, so killing the boot would
+ * punish everyone for an operator key mistake. Non-fatal on any error.
+ */
+export async function auditCustodySealedTasks(): Promise<void> {
+  try {
+    // Deferred import: a2aStore is independent of this module (no cycle), but
+    // keep the audit self-contained so module-load order can't bite at boot.
+    const a2aStore = await import('./a2aStore.js');
+    const open = await a2aStore.browseAgentTasks();
+    const sealed = open.filter((t) => t.meta.keyCustodyBlob);
+    if (sealed.length === 0) return;
+
+    const activeKeyId = service ? (await service.getActiveKey()).keyId : null;
+    const orphaned = sealed.filter((t) => t.meta.keyCustodyBlob!.keyId !== activeKeyId);
+    if (orphaned.length === 0) {
+      console.log(`[key-custody] audit OK: ${sealed.length} custody-sealed open task(s) match the active key`);
+      return;
+    }
+    console.error(
+      `🚨 [key-custody] ${orphaned.length}/${sealed.length} custody-sealed OPEN task(s) are sealed to a ` +
+        (activeKeyId === null
+          ? 'custody key that is NO LONGER CONFIGURED (custody disabled).'
+          : `keyId that does not match the active custody key (${activeKeyId}).`) +
+        ' Late-joining agents CANNOT be served these briefs (403 NEEDS_WRAP dead-end). ' +
+        `Restore the original KEY_CUSTODY_PRIVATE_KEY or have posters re-wrap/cancel. Affected: ` +
+        orphaned.map((t) => `${t.meta.taskId.slice(0, 10)}…(keyId=${t.meta.keyCustodyBlob!.keyId})`).join(', '),
+    );
+  } catch (err) {
+    console.error('[key-custody] audit failed (non-fatal):', (err as Error).message);
+  }
+}

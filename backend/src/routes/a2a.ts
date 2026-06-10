@@ -823,6 +823,22 @@ a2aRouter.post('/tasks/index', requireAuth, async (req: AuthRequest, res, next) 
           'The brief AES key must be ECIES-wrapped to verifierAddress (include it in wrappedKeys) so the verifier can decrypt the task',
         );
       }
+      // The off-chain designation must match the ON-CHAIN settlement authority.
+      // completeVerification is gated on taskVerifier[taskId]; if the poster
+      // funded via plain createTask (taskVerifier = 0x0) or committed a
+      // different verifier, the designated agent's settlement tx reverts
+      // NotVerifier and the task sticks in awaiting_verification until
+      // claimTimeout. Refuse the index up front instead.
+      const onChainVerifier = await escrowService.getTaskVerifier(Number(onChainTaskId));
+      if (onChainVerifier.toLowerCase() !== data.verifierAddress.toLowerCase()) {
+        throw new AppError(
+          409,
+          'VERIFIER_MISMATCH',
+          onChainVerifier === ethers.ZeroAddress
+            ? "On-chain taskVerifier is unset — agent-verify tasks must be funded via createTaskWithVerifier, not plain createTask"
+            : `On-chain taskVerifier (${onChainVerifier}) does not match the designated verifier (${data.verifierAddress})`,
+        );
+      }
     }
 
     const requiredCaps = (data.requiredCapabilities ?? []) as AgentCapability[];
@@ -1543,6 +1559,21 @@ a2aRouter.post('/tasks/:id/verdict', requireAuth, async (req: AuthRequest, res, 
     const settledPass = onChainTask.status === 4;
     const settledFail = onChainTask.status === 3;
     if (!settledPass && !settledFail) {
+      // Disambiguate the dead-end case from plain lag: if the on-chain
+      // taskVerifier is unset (funded via plain createTask), this verifier's
+      // settlement tx reverts NotVerifier FOREVER — an opaque
+      // NOT_SETTLED_ON_CHAIN here would have the verifier retrying a
+      // permanently un-settleable task. (New indexes refuse this combination
+      // up front via VERIFIER_MISMATCH; this catches pre-existing tasks.)
+      const onChainVerifier = await escrowService.getTaskVerifier(Number(ocId));
+      if (onChainVerifier === ethers.ZeroAddress) {
+        throw new AppError(
+          409,
+          'NO_ONCHAIN_VERIFIER',
+          'Task was funded without an on-chain verifier (plain createTask) — the designated verifier cannot settle it. ' +
+            'The poster must reclaim escrow via claimTimeout after the deadline.',
+        );
+      }
       throw new AppError(
         409,
         'NOT_SETTLED_ON_CHAIN',
@@ -1650,6 +1681,17 @@ a2aRouter.get('/tasks/posted', requireAuth, async (req: AuthRequest, res, next) 
     const address = req.user!.address;
     const tasks = await a2aStore.getPosterTasks(address);
 
+    // The custody key the backend can ACTUALLY unwrap right now. A task sealed
+    // to a rotated/disabled custody key is NOT recoverable server-side —
+    // rewrap() throws on any keyId other than the active one — so reporting
+    // hasCustody from the blob's mere existence falsely showed at-risk tasks
+    // as safe. One read for the whole list.
+    const activeCustodyKeyId = await keyCustody
+      .getKeyCustodyService()
+      ?.getActiveKey()
+      .then((k) => k.keyId)
+      .catch(() => null) ?? null;
+
     // Enrich each task with its on-chain record so the UI doesn't need a
     // second per-task fetch. Wrapped in try/catch per task — a missing
     // on-chain task (e.g. createTask never confirmed) shouldn't blank out
@@ -1664,10 +1706,14 @@ a2aRouter.get('/tasks/posted', requireAuth, async (req: AuthRequest, res, next) 
         // undecryptable (the platform never sees the key). The frontend
         // surfaces this as a "key at risk" warning on /tasks/mine.
         const wrapCount = Object.keys(t.meta.wrappedKeys ?? {}).length;
-        // Whether the brief AES key is sealed to key-custody. A custody-sealed
-        // task is recoverable server-side via re-wrap even at wrapCount 0, so
-        // the frontend treats it as NOT "key at risk" (docs/TEE-REWRAP-SPEC.md §8).
-        const hasCustody = !!t.meta.keyCustodyBlob;
+        // Whether the brief AES key is sealed to key-custody AND that custody
+        // key is the live one — only then is the task recoverable server-side
+        // via re-wrap at wrapCount 0 (docs/TEE-REWRAP-SPEC.md §8). A blob
+        // sealed to a rotated key is treated as no custody at all.
+        const hasCustody =
+          !!t.meta.keyCustodyBlob &&
+          !!activeCustodyKeyId &&
+          t.meta.keyCustodyBlob.keyId === activeCustodyKeyId;
         try {
           const onChainId = await getTaskIdByHash(t.meta.taskId);
           if (!onChainId) return { ...t, wrapCount, hasCustody, onChain: null };

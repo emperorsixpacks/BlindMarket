@@ -29,6 +29,7 @@ import { analyticsRouter } from './routes/analytics.js';
 import { apiKeysRouter } from './routes/apiKeys.js';
 import { getDb } from './services/database.js';
 import { startEscrowEventLoop } from './services/escrowEvents.js';
+import { auditCustodySealedTasks } from './services/keyCustodyService.js';
 import { isBridgeConfigured } from './services/a2aSettlement.js';
 import { marketplaceSigner, escrow } from './services/chain.js';
 import { reconcileAgents } from './services/agentRunner.js';
@@ -121,6 +122,10 @@ httpServer.listen(config.port, () => {
   // mapping that the A2A settlement bridge needs to call assignWorker /
   // completeVerification by on-chain id.
   startEscrowEventLoop();
+
+  // Tripwire for custody-key rotation/disable while custody-sealed tasks are
+  // still open (their late-joiner self-heal silently breaks). Loud log only.
+  void auditCustodySealedTasks();
 
   // Re-fork agents that were 'running' before this restart — the in-memory
   // process map doesn't survive a deploy/crash, so without this they show

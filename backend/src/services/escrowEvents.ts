@@ -1,6 +1,8 @@
 import type { EventLog } from 'ethers';
 import { escrow, provider } from './chain.js';
 import { redis } from './redis.js';
+import { recordWorkerPayout, recordWorkerDispute } from './workerPayout.js';
+import * as a2aStore from './a2aStore.js';
 
 // ── Keys ─────────────────────────────────────────────────────────────────────
 //
@@ -116,6 +118,26 @@ async function tick(): Promise<void> {
         console.log(`[escrowEvents] empty chunk ${from}..${to} (${lagBlocks} blocks behind)`);
       }
 
+      // DisputeResolved: an admin resolveDispute pays the worker (or refunds
+      // the poster) ON-CHAIN, entirely outside the /finalize|/verify|/verdict
+      // routes — without this listener the worker was paid on-chain but
+      // tasksCompleted/totalEarnedRaw/the Earnings ledger never moved (the
+      // "paid but 0 earnings" drift on a new trigger). Failures here THROW so
+      // the tick aborts BEFORE the checkpoint write below — the chunk is
+      // retried next tick and the event is re-observed. That's safe by this
+      // file's own design (all TaskCreated writes are idempotent SETs, and
+      // recordWorkerPayout has an at-most-once guard); swallowing the error
+      // would advance the checkpoint past a never-processed dispute and
+      // permanently drop the very accounting this listener exists to mirror.
+      const disputeEvents = await escrow.queryFilter(escrow.filters.DisputeResolved(), from, to);
+      for (const ev of disputeEvents) {
+        const args = (ev as EventLog).args;
+        if (!args) continue;
+        const taskId = args.taskId as bigint;
+        const workerFavored = args.workerFavored as boolean;
+        await processDisputeResolved(taskId, workerFavored);
+      }
+
       // Advance checkpoint to the end of the chunk we successfully processed.
       // On error this line is skipped (we throw before getting here), so the
       // next tick retries from the same `from`.
@@ -157,11 +179,66 @@ async function tick(): Promise<void> {
 
   return inFlightPromise;
 }
+/**
+ * Mirror an on-chain dispute resolution into the off-chain accounting.
+ * workerFavored=true → the contract already paid the worker (85/15 split) and
+ * emitted TaskCompleted; credit tasksCompleted/totalEarnedRaw/the Earnings
+ * ledger. workerFavored=false → the poster was refunded; record the dispute.
+ * Also flips the a2a state out of any active status so worker resume loops
+ * and verifier queues stop touching a task the admin has already closed.
+ */
+async function processDisputeResolved(taskId: bigint, workerFavored: boolean): Promise<void> {
+  const taskHash = await redis.get(KEY.id2hash(taskId));
+  if (!taskHash) {
+    // Pre-A2A task or mapping never captured — nothing off-chain to reconcile.
+    console.warn(`[escrowEvents] DisputeResolved for unmapped taskId=${taskId} — skipping`);
+    return;
+  }
+
+  // The on-chain worker is the authoritative executor (Redis state can lag or
+  // be missing); the gross escrow amount feeds recordWorkerPayout, which
+  // recomputes the same worker/fee split the contract paid out.
+  const t = await escrow.getTask(taskId);
+  const worker = (t.worker as string) ?? '';
+  console.log(
+    `[escrowEvents] DisputeResolved taskId=${taskId} workerFavored=${workerFavored} worker=${worker}`,
+  );
+
+  if (workerFavored && worker && worker !== '0x0000000000000000000000000000000000000000') {
+    await recordWorkerPayout(taskHash, worker, String(taskId), t.amount as bigint);
+  } else if (!workerFavored && worker && worker !== '0x0000000000000000000000000000000000000000') {
+    // At-most-once for THIS listener only (chunk retries re-observe events;
+    // recordWorkerDispute itself has no guard because the routes legitimately
+    // record one dispute per failed round). Released on failure so a
+    // transient blip stays retryable — mirrors the a2a:credited marker.
+    const disputedKey = `a2a:dispute-recorded:${taskHash.toLowerCase()}`;
+    const first = await redis.set(disputedKey, worker.toLowerCase(), 'NX');
+    if (first !== null) {
+      try {
+        await recordWorkerDispute(taskHash, worker);
+      } catch (err) {
+        await redis.del(disputedKey).catch(() => {});
+        throw err;
+      }
+    }
+  }
+
+  // Close the off-chain state so resume/verifier loops drop the task.
+  try {
+    await a2aStore.updateState(taskHash, { status: workerFavored ? 'verified' : 'failed' });
+  } catch (err) {
+    // Missing state (task created pre-A2A) is expected — accounting above
+    // still ran. Anything else (Redis blip) must THROW so the tick aborts
+    // before the checkpoint and the event is re-observed.
+    if (!(err as Error).message?.includes('No A2A state')) throw err;
+  }
+}
+
 export function startEscrowEventLoop(): void {
   if (timer) return; // idempotent — safe to call from multiple boot paths
   void tick(); // run immediately so we don't wait 5s for the first capture
   timer = setInterval(tick, POLL_INTERVAL_MS);
-  console.log(`[escrowEvents] polling TaskCreated every ${POLL_INTERVAL_MS / 1000}s`);
+  console.log(`[escrowEvents] polling TaskCreated + DisputeResolved every ${POLL_INTERVAL_MS / 1000}s`);
 }
 
 export function stopEscrowEventLoop(): void {

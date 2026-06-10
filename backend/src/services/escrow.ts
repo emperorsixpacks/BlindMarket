@@ -30,6 +30,16 @@ export async function feeBps(): Promise<number> {
   return Number(await escrow.feeBps());
 }
 
+/**
+ * Read the per-task verifier (taskVerifier mapping). ZeroAddress means the
+ * task was funded via plain createTask — completeVerification is then gated
+ * on the GLOBAL marketplace verifier, and a poster-designated verifier agent
+ * can never settle it (its tx reverts NotVerifier).
+ */
+export async function getTaskVerifier(taskId: number): Promise<string> {
+  return await escrow.taskVerifier(taskId);
+}
+
 /** Build unsigned createTask transaction */
 export async function buildCreateTask(
   from: string,

@@ -73,7 +73,7 @@ vi.mock('../services/chain.js', () => ({
   provider: {},
   escrow: { interface: {}, getAddress: vi.fn() },
 }));
-vi.mock('../services/escrow.js', () => ({ getTask: vi.fn(), feeBps: vi.fn() }));
+vi.mock('../services/escrow.js', () => ({ getTask: vi.fn(), feeBps: vi.fn(), getTaskVerifier: vi.fn() }));
 vi.mock('../services/escrowEvents.js', () => ({ getTaskIdByHash: vi.fn() }));
 vi.mock('../services/autoVerify.js', () => ({ autoVerify: vi.fn() }));
 vi.mock('../services/accountingService.js', () => ({}));
