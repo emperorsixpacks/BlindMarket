@@ -144,9 +144,11 @@ export default function PostTask() {
       setStatus('encrypting');
       setError('');
 
-      if (requiredCaps.length === 0) {
-        throw new Error('Pick at least one required capability so executor agents can match your task.');
-      }
+      // Capabilities are OPTIONAL at post time. Matching ("does this agent have
+      // all required caps?") is enforced server-side at accept/bid time, not
+      // here — a task with no caps is simply broadcast to every agent. So we
+      // don't gate posting on a capability being picked or on a matching agent
+      // existing right now.
 
       if (form.verificationMode === 'agent') {
         if (!form.verifierAddress || !form.verifierPublicKey) {
@@ -527,12 +529,15 @@ export default function PostTask() {
               </div>
 
               <FormField
-                label="Required capabilities"
-                required
-                hint="Pick every skill your task needs. An executor agent matches only if it has ALL of them."
+                label="Capabilities (optional)"
+                hint="Tag the skills this task needs to route it to matching agents first. Leave empty to open it to every agent."
               >
                 <div className="mb-2 text-xs text-ink-3">
-                  <span className="font-mono text-ink-2">{requiredCaps.length}</span> selected — executor must have all selected
+                  {requiredCaps.length > 0 ? (
+                    <><span className="font-mono text-ink-2">{requiredCaps.length}</span> selected — offered first to agents that have all of these</>
+                  ) : (
+                    <>None selected — open to all agents</>
+                  )}
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   {AGENT_CAPABILITIES.map((cap) => {
@@ -552,29 +557,6 @@ export default function PostTask() {
                     );
                   })}
                 </div>
-                {/* Live superset-match preview. `verifiers` is the full
-                    registered-executor pool (fetched without a caps filter);
-                    an agent matches only if it has ALL selected caps — the same
-                    rule the backend /accept gate now enforces. Surfacing a zero
-                    count here stops over-tagged tasks from being silently
-                    stranded (no agent can ever accept them). */}
-                {requiredCaps.length > 0 && (() => {
-                  const matches = verifiers.filter(
-                    (e) => requiredCaps.every((c) => e.capabilities.includes(c)),
-                  ).length;
-                  return matches === 0 ? (
-                    <div className="mt-2 px-3 py-2 border border-warn/40 bg-warn/10 text-xs text-warn">
-                      No registered agent currently has <span className="font-mono">all {requiredCaps.length}</span>{' '}
-                      of these capabilities. The task would still post (encrypted), but may sit unaccepted until a
-                      matching agent registers. Consider removing a requirement, or post anyway if you expect one soon.
-                    </div>
-                  ) : (
-                    <div className="mt-2 text-xs text-ink-3">
-                      <span className="font-mono text-ok">{matches}</span> registered agent{matches === 1 ? '' : 's'}{' '}
-                      match all selected capabilities.
-                    </div>
-                  );
-                })()}
               </FormField>
 
               {/* Verification: 'auto' = backend rubric; 'agent' = a
@@ -724,8 +706,7 @@ export default function PostTask() {
                 variant="primary"
                 type="submit"
                 label={submitLabel}
-                disabled={busy || requiredCaps.length === 0}
-                title={requiredCaps.length === 0 ? 'Select at least one required capability above' : undefined}
+                disabled={busy}
               />
             )}
             {status === 'error' && (
