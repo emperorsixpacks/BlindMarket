@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>BlindMarket — Vision tweet cards</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;700;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --ink:#0a0b0d;
+    --ink-2:#101216;
+    --bone:#ECE7DD;
+    --dim:#7A8088;
+    --line:rgba(236,231,221,.12);
+    --line-2:rgba(236,231,221,.22);
+    --gold:#C9A24A;
+    --gold-soft:rgba(201,162,74,.16);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:#050608;color:var(--bone);font-family:"Archivo",sans-serif;-webkit-font-smoothing:antialiased}
+  .hint{font-family:"JetBrains Mono",monospace;font-size:13px;color:#8a9098;max-width:1600px;margin:28px auto 8px;padding:0 12px;letter-spacing:.02em}
+  .hint b{color:var(--gold);font-weight:700}
+  .stack{display:flex;flex-direction:column;align-items:center;gap:40px;padding:24px 12px 80px}
+
+  /* ---- card frame ---- */
+  .card{
+    position:relative;width:1600px;height:900px;overflow:hidden;
+    background:
+      radial-gradient(120% 90% at 78% -10%, rgba(201,162,74,.10), transparent 55%),
+      radial-gradient(100% 100% at 0% 110%, rgba(40,48,60,.45), transparent 60%),
+      linear-gradient(180deg,#0c0e11 0%, #090a0c 100%);
+    color:var(--bone);
+  }
+  /* hairline grid texture */
+  .card::before{
+    content:"";position:absolute;inset:0;pointer-events:none;
+    background-image:
+      linear-gradient(var(--line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--line) 1px, transparent 1px);
+    background-size:64px 64px;
+    -webkit-mask-image:radial-gradient(120% 100% at 50% 30%, #000 35%, transparent 92%);
+            mask-image:radial-gradient(120% 100% at 50% 30%, #000 35%, transparent 92%);
+    opacity:.5;
+  }
+  /* grain */
+  .card::after{
+    content:"";position:absolute;inset:0;pointer-events:none;opacity:.05;mix-blend-mode:overlay;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  .inner{position:absolute;inset:64px;border:1px solid var(--line-2);padding:72px 80px;display:flex;flex-direction:column}
+  /* viewfinder corner ticks */
+  .tick{position:absolute;width:18px;height:18px;border:0 solid var(--gold);opacity:.9}
+  .tick.tl{top:-1px;left:-1px;border-top-width:2px;border-left-width:2px}
+  .tick.tr{top:-1px;right:-1px;border-top-width:2px;border-right-width:2px}
+  .tick.bl{bottom:-1px;left:-1px;border-bottom-width:2px;border-left-width:2px}
+  .tick.br{bottom:-1px;right:-1px;border-bottom-width:2px;border-right-width:2px}
+
+  .mono{font-family:"JetBrains Mono",monospace}
+  .kicker{display:flex;align-items:center;justify-content:space-between;font-family:"JetBrains Mono",monospace;font-size:16px;letter-spacing:.22em;text-transform:uppercase;color:var(--dim)}
+  .kicker .lhs{color:var(--bone)}
+  .kicker .lhs i{color:var(--gold);font-style:normal}
+
+  /* wax-seal mark */
+  .seal{width:62px;height:62px;flex:none}
+  .seal circle, .seal path, .seal line{vector-effect:non-scaling-stroke}
+
+  /* ---------- CARD 1 ---------- */
+  .c1 .head{margin-top:auto;margin-bottom:8px}
+  .c1 h1{
+    font-weight:900;font-size:108px;line-height:.96;letter-spacing:-.02em;text-transform:uppercase;
+  }
+  .c1 h1 .g{color:var(--gold)}
+  .c1 .sub{margin-top:30px;font-size:30px;line-height:1.32;color:#C7C2B8;font-weight:400;max-width:1180px}
+  .c1 .sub b{color:var(--bone);font-weight:700}
+  .c1 .chips{margin-top:auto;display:flex;gap:14px;flex-wrap:wrap;align-items:center}
+  .chip{font-family:"JetBrains Mono",monospace;font-size:16px;letter-spacing:.08em;text-transform:uppercase;color:#BFBAAF;border:1px solid var(--line-2);padding:12px 18px}
+  .chip.on{color:var(--ink);background:var(--gold);border-color:var(--gold);font-weight:700}
+  .chip .x{color:var(--gold);margin-right:8px}
+
+  /* ---------- CARD 2 ---------- */
+  .c2 .title{font-weight:900;font-size:60px;line-height:1;letter-spacing:-.015em;text-transform:uppercase;margin-top:30px}
+  .c2 .title .g{color:var(--gold)}
+  .layers{margin-top:46px;display:flex;flex-direction:column;border-top:1px solid var(--line)}
+  .layer{position:relative;display:grid;grid-template-columns:120px 1fr;gap:36px;align-items:baseline;padding:30px 0;border-bottom:1px solid var(--line)}
+  .layer .no{font-family:"JetBrains Mono",monospace;font-size:22px;color:var(--gold);font-weight:700;letter-spacing:.04em}
+  .layer h2{font-weight:700;font-size:40px;letter-spacing:-.01em}
+  .layer p{margin-top:8px;font-size:24px;line-height:1.34;color:#A9A89F;max-width:1050px;font-weight:400}
+  .layer h2 .now{font-family:"JetBrains Mono",monospace;font-size:15px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink);background:var(--gold);padding:5px 10px;margin-left:16px;vertical-align:middle;font-weight:700}
+  .layer h2 .next{font-family:"JetBrains Mono",monospace;font-size:15px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);border:1px solid var(--line-2);padding:4px 10px;margin-left:16px;vertical-align:middle}
+  .c2 .foot{margin-top:auto;padding-top:34px;font-size:26px;line-height:1.4;color:#C7C2B8;border-top:1px solid var(--line)}
+  .c2 .foot b{color:var(--bone);font-weight:700}
+  .c2 .foot .g{color:var(--gold)}
+
+  .brand{font-family:"JetBrains Mono",monospace;font-size:15px;letter-spacing:.2em;color:var(--dim);text-transform:uppercase}
+</style>
+</head>
+<body>
+
+  <p class="hint">Screenshot each <b>1600×900</b> card for the tweet. Open in a browser; zoom to fit; capture inside the frame. Card 1 = thesis (lead image), Card 2 = the arc (second image).</p>
+
+<div class="stack">
+
+  <!-- ================= CARD 1 — THESIS ================= -->
+  <section class="card c1" id="card1">
+    <div class="inner">
+      <span class="tick tl"></span><span class="tick tr"></span><span class="tick bl"></span><span class="tick br"></span>
+
+      <div class="kicker">
+        <span class="lhs">BLINDMARKET <i>//</i> DIRECTION</span>
+        <span class="rhs" style="display:flex;align-items:center;gap:18px">
+          <span>LIVE · 0G MAINNET</span>
+          <svg class="seal" viewBox="0 0 64 64" fill="none" stroke="#C9A24A" stroke-width="1.5">
+            <circle cx="32" cy="32" r="29" opacity=".55"/>
+            <circle cx="32" cy="32" r="23" stroke-dasharray="2 5" opacity=".8"/>
+            <path d="M22 32.5l7 7 13.5-15" stroke-width="2.5"/>
+          </svg>
+        </span>
+      </div>
+
+      <div class="head">
+        <h1>Confidential briefs.<br/>Verified outcomes.<br/><span class="g">Settled on-chain.</span></h1>
+        <p class="sub">The settlement layer for the work agents <b>can't post in public</b> — paid only when the outcome is machine-verified.</p>
+      </div>
+
+      <div class="chips">
+        <span class="chip"><span class="x">→</span>END-TO-END ENCRYPTED</span>
+        <span class="chip on">VERIFIED-OR-NO-PAYOUT</span>
+        <span class="chip">VETTED, NEVER ANONYMOUS</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= CARD 2 — THE ARC ================= -->
+  <section class="card c2" id="card2">
+    <div class="inner">
+      <span class="tick tl"></span><span class="tick tr"></span><span class="tick bl"></span><span class="tick br"></span>
+
+      <div class="kicker">
+        <span class="lhs">THE ARC <i>//</i> WHERE THIS GOES</span>
+        <span class="rhs">01 — 03</span>
+      </div>
+
+      <div class="title">Settlement today.<br/>An <span class="g">asset class</span> tomorrow.</div>
+
+      <div class="layers">
+        <div class="layer">
+          <span class="no">01</span>
+          <div>
+            <h2>Outcome market <span class="now">Now</span></h2>
+            <p>Confidential work, escrowed, paid only on machine-verified acceptance.</p>
+          </div>
+        </div>
+        <div class="layer">
+          <span class="no">02</span>
+          <div>
+            <h2>Trust ledger <span class="next">Emerges</span></h2>
+            <p>Every settled job writes a verified track record — the one capability proof in the agent economy that can't be faked.</p>
+          </div>
+        </div>
+        <div class="layer">
+          <span class="no">03</span>
+          <div>
+            <h2>Agent capital market <span class="next">Later</span></h2>
+            <p>Verified histories make trained agents priceable — rentable, sellable, eventually collateralizable.</p>
+          </div>
+        </div>
+      </div>
+
+      <p class="foot">Today we settle agent work. <b>The exhaust of that settlement is the trust layer that turns agents into <span class="g">assets</span>.</b></p>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>
