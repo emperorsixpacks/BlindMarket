@@ -240,12 +240,22 @@ a2aRouter.get('/tasks', async (req, res, next) => {
       ? (req.query.capabilities as string).split(',').filter(Boolean) as AgentCapability[]
       : undefined;
     const minRep = req.query.minReputation ? parseInt(req.query.minReputation as string) : undefined;
+    // Bounded pagination so the public surface can't be asked for the world in
+    // one call. Response keeps the { tasks, total } shape (total = full match
+    // count) so existing consumers page without breaking; the default window
+    // covers every realistic board size today.
+    const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 100, 1), 200);
+    const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
 
-    const tasks = await a2aStore.browseAgentTasks(caps, minRep);
+    const matches = await a2aStore.browseAgentTasks(caps, minRep);
+    // Public projection: this route has no auth, so key material (wrappedKeys,
+    // keyCustodyBlob, rootHash) must never appear here — the accepting
+    // executor gets its slice from the authenticated /accept response.
+    const tasks = matches.slice(offset, offset + limit).map(a2aStore.projectPublicEntry);
 
     const body: ApiResponse = {
       success: true,
-      data: { tasks, total: tasks.length },
+      data: { tasks, total: matches.length, offset, limit },
     };
     res.json(body);
   } catch (err) {
@@ -326,6 +336,14 @@ a2aRouter.post('/tasks/:id/accept', requireAuth, async (req: AuthRequest, res, n
         'IS_VERIFIER',
         'You are the designated verifier for this task and cannot also execute it',
       );
+    }
+
+    // A poster cannot execute their own task. Self-acceptance lets one wallet
+    // wash-trade reputation (rating itself per completed task) and recycle its
+    // own escrow minus the platform fee — marketplace numbers must stay net of
+    // self-dealing. posterAddress is absent only on pre-pivot legacy rows.
+    if (meta.posterAddress && meta.posterAddress.toLowerCase() === address.toLowerCase()) {
+      throw new AppError(403, 'SELF_ACCEPT', 'You posted this task — a poster cannot also execute it');
     }
 
     const addrLc = address.toLowerCase();
@@ -482,6 +500,45 @@ a2aRouter.post('/tasks/:id/accept', requireAuth, async (req: AuthRequest, res, n
           'Task deadline has passed — it can no longer be assigned. The poster can reclaim escrow via cancelTask.',
         );
       }
+      // Chain truth says a DIFFERENT executor owns this task (cross-deployment
+      // poaching on shared Redis, a restored snapshot, or a manual on-chain
+      // assignWorker the indexer never saw). TERMINAL for this caller: do NOT
+      // releaseToOpen — re-listing bounces every future /accept off the same
+      // revert — and do NOT return key material. Point Redis at the on-chain
+      // executor so poster views reconcile with the contract.
+      // Task was cancelled/refunded on-chain while this accept raced (no worker
+      // on chain). TERMINAL: close off-chain and tell the caller it's gone — do
+      // NOT reconcile executorAddress to the zero address or re-open it.
+      if (settleResult.cancelled) {
+        console.warn(`[a2a] accept: task ${taskId} cancelled on-chain — closing off-chain`);
+        try {
+          await a2aStore.updateState(taskId, { status: 'failed', failedReason: 'cancelled', executorAddress: undefined });
+        } catch (closeErr) {
+          console.error(`[a2a] accept: could not close cancelled task ${taskId}:`, (closeErr as Error).message);
+        }
+        throw new AppError(409, 'TASK_CANCELLED', 'Task has been cancelled on-chain — escrow already returned to the poster.');
+      }
+      if (settleResult.workerMismatch) {
+        console.error(
+          `[a2a] accept: task ${taskId} already assigned on-chain to ${settleResult.onChainWorker ?? 'unknown'} — refusing ${address} (check /health/bridge for cross-env poaching)`,
+        );
+        // Reconcile Redis to chain truth. updateState now MOVES the executor
+        // index (SREM this refused caller, SADD the real worker) so the poacher
+        // stops resume-looping a task it doesn't own and drops off its
+        // /executions list. The caller never received key material (we're in
+        // the failure path before the wrappedKey response), and any slice the
+        // self-heal persisted is now unreachable: every meta-returning surface
+        // is projected or ownership-gated, and the caller is no longer indexed
+        // on this task.
+        if (settleResult.onChainWorker) {
+          try {
+            await a2aStore.updateState(taskId, { executorAddress: settleResult.onChainWorker.toLowerCase() });
+          } catch (recErr) {
+            console.error(`[a2a] accept: could not reconcile executor for ${taskId}:`, (recErr as Error).message);
+          }
+        }
+        throw new AppError(409, 'ASSIGNED_ELSEWHERE', 'Task is already assigned on-chain to a different executor');
+      }
       console.error(`[a2a] accept: settlement failed for ${taskId}: ${settleResult.error}`);
       // Release task back to open so another agent can retry.
       try { await a2aStore.releaseToOpen(taskId); } catch { /* best-effort */ }
@@ -537,6 +594,12 @@ a2aRouter.post('/tasks/:id/bid', requireAuth, async (req: AuthRequest, res, next
 
     const meta = await a2aStore.getMeta(taskId);
     if (!meta) throw new AppError(404, 'NOT_FOUND', 'Task not found or not A2A-enabled');
+
+    // Mirror /accept's SELF_ACCEPT gate at intent time — a poster bidding on
+    // their own task could only result in wrapping a slice to themselves.
+    if (meta.posterAddress && meta.posterAddress.toLowerCase() === address.toLowerCase()) {
+      throw new AppError(403, 'SELF_BID', 'You posted this task — a poster cannot bid to execute it');
+    }
 
     const agent = await agentStore.getAgent(address);
     if (!agent) {
@@ -745,9 +808,12 @@ function scheduleCascadeAdvance(
         score: next.score,
         expiresAt: deadline,
       });
+      // No rootHash in the broadcast: the WS 'join' handshake is
+      // unauthenticated, so a task:offer payload reaches anyone who joined the
+      // room. The agent only needs the taskId to fire /accept, which returns
+      // rootHash + its wrapped slice over the authenticated channel.
       emitTaskOffer(next.address, taskHash, {
         requiredCapabilities: requiredCaps,
-        rootHash,
       }, next.score, deadline);
 
       scheduleCascadeAdvance(taskHash, requiredCaps, rootHash);
@@ -940,9 +1006,9 @@ a2aRouter.post('/tasks/index', requireAuth, async (req: AuthRequest, res, next) 
           score: best.score,
           expiresAt: deadline,
         }).catch(() => {});
+        // rootHash deliberately omitted — unauthenticated WS room, see above.
         emitTaskOffer(best.address, taskHash, {
           requiredCapabilities: requiredCaps,
-          rootHash: data.rootHash,
         }, best.score, deadline);
         // Schedule advancement after the per-position window
         scheduleCascadeAdvance(taskHash, requiredCaps, data.rootHash);
@@ -1822,9 +1888,20 @@ a2aRouter.get('/executions', requireAuth, async (req: AuthRequest, res, next) =>
     const address = queryAddr ?? req.user!.address;
     const tasks = await a2aStore.getExecutorTasks(address);
 
+    // Full meta (incl. the caller's own wrappedKey slice + rootHash, needed by
+    // the worker's resume path) only for a SELF query. A cross-address query is
+    // the agent-detail dashboard viewing some other executor's history — it
+    // renders status/result, never key material, so project it. Without this,
+    // requireAuth (which only proves control of the CALLER's wallet, not the
+    // queried address) would hand any logged-in party the full wrappedKeys /
+    // keyCustodyBlob / rootHash graph for every executor — the exact leak the
+    // browse/list/detail projection closed.
+    const isSelf = !queryAddr || queryAddr.toLowerCase() === req.user!.address.toLowerCase();
+    const executions = isSelf ? tasks : tasks.map(a2aStore.projectPublicEntry);
+
     const body: ApiResponse = {
       success: true,
-      data: { executions: tasks, total: tasks.length },
+      data: { executions, total: executions.length },
     };
     res.json(body);
   } catch (err) {

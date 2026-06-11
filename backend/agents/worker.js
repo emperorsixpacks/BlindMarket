@@ -824,22 +824,31 @@ async function pollAndWork() {
     // Then judge any tasks we're the designated verifier for.
     await pollAndVerify();
 
-    const url = `${BACKEND_URL}/api/v1/a2a/tasks`;
-    log(`polling ${url}...`);
-    const res = await fetchWithTimeout(url, {
-      headers: { 'Authorization': `Bearer ${AGENT_PLATFORM_TOKEN}` },
-    });
-    if (!res.ok) {
-      const errText = await res.text();
-      log(`poll failed: ${res.status} ${errText.slice(0, 80)}`);
-      return;
-    }
-
-    const json = await res.json();
-    const entries = json.data?.tasks;
-    if (!Array.isArray(entries)) {
-      log(`unexpected /a2a/tasks shape: ${Object.keys(json.data || {}).join(', ')}`);
-      return;
+    // The browse endpoint is paginated (max 200/page) — walk every page so a
+    // board with >200 open tasks doesn't hide its tail from us. Redis set order
+    // isn't recency-sorted, so a partial read could otherwise leave acceptable
+    // work permanently invisible behind a wall of un-acceptable-but-open tasks.
+    const PAGE = 200;
+    const entries = [];
+    log(`polling ${BACKEND_URL}/api/v1/a2a/tasks ...`);
+    for (let offset = 0; ; offset += PAGE) {
+      const res = await fetchWithTimeout(`${BACKEND_URL}/api/v1/a2a/tasks?limit=${PAGE}&offset=${offset}`, {
+        headers: { 'Authorization': `Bearer ${AGENT_PLATFORM_TOKEN}` },
+      });
+      if (!res.ok) {
+        const errText = await res.text();
+        log(`poll failed: ${res.status} ${errText.slice(0, 80)}`);
+        return;
+      }
+      const json = await res.json();
+      const page = json.data?.tasks;
+      if (!Array.isArray(page)) {
+        log(`unexpected /a2a/tasks shape: ${Object.keys(json.data || {}).join(', ')}`);
+        return;
+      }
+      entries.push(...page);
+      const total = json.data?.total ?? entries.length;
+      if (page.length < PAGE || entries.length >= total) break;
     }
     if (entries.length === 0) {
       log('no open A2A tasks');
@@ -999,6 +1008,13 @@ async function runAcceptedTask(acceptedTaskHash, acceptedRootHash, acceptedWrapp
         log(`decrypted brief for ${acceptedTaskHash.slice(0, 10)}… (${briefPlaintext.length} chars)`);
       } catch (e) {
         log(`brief decrypt failed for ${acceptedTaskHash.slice(0, 10)}…: ${e.message}`);
+        // Don't strand the task in 'accepted' — hand it back. If the chain is
+        // still Funded (assignment never landed / Redis-chain divergence) the
+        // release re-opens it for another agent; if we're already the on-chain
+        // worker the backend refuses with 409 ON_CHAIN_LOCKED and only the
+        // poster's claimTimeout after the deadline recovers the escrow —
+        // releaseTask logs the refusal so the stuck task is at least visible.
+        await releaseTask(acceptedTaskHash);
         return;
       }
     } else {

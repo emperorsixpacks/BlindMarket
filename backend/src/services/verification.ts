@@ -252,25 +252,41 @@ export async function verifyEvidence(req: VerificationRequest): Promise<Verifica
   }
 
   if (!isComputeConfigured()) {
-    if (config.nodeEnv === 'production') {
-      throw new Error('0G Compute not configured — verification unavailable in production');
+    if (localStubAllowed()) {
+      return verifyLocal(req);
     }
-    return verifyLocal(req);
+    throw new Error(
+      '0G Compute not configured — refusing to verify (fail closed). Set OG_COMPUTE_PRIVATE_KEY, or ALLOW_INSECURE_LOCAL_VERIFY=true in a non-production environment to use the auto-pass stub.',
+    );
   }
 
-  // Attempt 0G Sealed Inference; fall back to local stub on infrastructure errors
-  // (e.g., insufficient ledger funds, provider unavailable). In production, fail hard.
+  // Attempt 0G Sealed Inference. The local stub auto-PASSES, so falling back
+  // to it on infrastructure errors is only allowed where the stub itself is
+  // allowed — everywhere else a broken verifier must surface as an error
+  // (task stays Submitted and retryable), never as a verdict.
   try {
     return await verify0g(req);
   } catch (e: any) {
     console.error('[verification] 0G Compute failed:', e.message);
-    if (config.nodeEnv === 'production') {
+    if (!localStubAllowed()) {
       throw new Error('Verification service unavailable');
     }
     const result = await verifyLocal(req);
     result.reasoning = `[FALLBACK] 0G Compute error: ${e.message?.slice(0, 100)}. ` + result.reasoning;
     return result;
   }
+}
+
+/**
+ * Fail closed by default: the local stub auto-PASSES, so it must never be
+ * reachable by accident — a staging/preview deploy whose NODE_ENV isn't
+ * exactly 'production' would otherwise release real escrow on no verification
+ * at all. 'test' keeps vitest green; everything else needs the explicit
+ * ALLOW_INSECURE_LOCAL_VERIFY opt-in; production refuses even with the flag.
+ */
+function localStubAllowed(): boolean {
+  if (config.nodeEnv === 'production') return false;
+  return config.nodeEnv === 'test' || config.allowInsecureLocalVerify;
 }
 
 async function verify0g(req: VerificationRequest): Promise<VerificationResult> {

@@ -192,9 +192,17 @@ export async function updateState(
   if (existing.status === 'open' && updated.status !== 'open') {
     pipe.srem(KEY.open, finalTid);
   }
-  // Index by executor when an executorAddress is first set
-  if (!existing.executorAddress && updated.executorAddress) {
-    pipe.sadd(KEY.executor(updated.executorAddress), finalTid);
+  // Maintain the executor index (invariant at top of file: a2a:executor:<addr>
+  // holds taskId iff state.executorAddress==addr). SADD on first-set, and MOVE
+  // the task between sets when executorAddress changes to a different value —
+  // the workerMismatch reconcile rewrites executorAddress from the refused
+  // CAS-winner to the real on-chain worker, and without the SREM the refused
+  // caller stays indexed and resume-loops a task it doesn't own. A patch that
+  // doesn't touch executorAddress leaves updated==existing here, so this is a
+  // no-op on the common path.
+  if (existing.executorAddress !== updated.executorAddress) {
+    if (existing.executorAddress) pipe.srem(KEY.executor(existing.executorAddress), finalTid);
+    if (updated.executorAddress) pipe.sadd(KEY.executor(updated.executorAddress), finalTid);
   }
   // Drop from the verifier index once the verdict is in, so the verifier's
   // GET /verifications queue doesn't accumulate settled tasks forever. Only
@@ -427,6 +435,46 @@ export async function browseAgentTasks(
 
     return true;
   });
+}
+
+// ── Public projection ───────────────────────────────────────────────────────
+
+/** Task meta as exposed on UNAUTHENTICATED discovery surfaces (REST browse,
+ *  JSON-RPC tasks/list & tasks/get, H2A task detail). Strips key material:
+ *  wrappedKeys (per-executor ECIES slices), keyCustodyBlob (the custody-sealed
+ *  AES key) and rootHash (storage pointer to the encrypted brief). The winning
+ *  /accept response is where an executor gets its slice + rootHash; nothing
+ *  before that point needs them, and returning them publicly hands the whole
+ *  key-wrap graph to any unauthenticated GET. hasEncryptedBrief preserves the
+ *  one signal discovery actually used (does this task carry a brief at all). */
+export type PublicTaskMeta = Omit<A2ATaskMeta, 'wrappedKeys' | 'keyCustodyBlob' | 'rootHash'> & {
+  hasEncryptedBrief: boolean;
+};
+
+export function projectPublicMeta(meta: A2ATaskMeta): PublicTaskMeta {
+  const { wrappedKeys: _wrappedKeys, keyCustodyBlob: _keyCustodyBlob, rootHash, ...pub } = meta;
+  return { ...pub, hasEncryptedBrief: !!rootHash };
+}
+
+/** Task state minus operator-internal diagnostics. assignError/verifyError
+ *  embed on-chain revert reasons and RPC fragments — useful to the poster on
+ *  authenticated surfaces, but pure leak (and noise) to unauthenticated
+ *  callers. resultData (the executor's plaintext deliverable) is intentionally
+ *  NOT stripped here yet: today's TaskDetail renders it for everyone, and
+ *  making the deliverable poster/executor-only is the P2 confidentiality work
+ *  (it needs an authenticated result view to replace the public one). Tracked
+ *  in docs/VISION-2.md §8 follow-ups. */
+export type PublicTaskState = Omit<A2ATaskState, 'assignError' | 'verifyError'>;
+
+export function projectPublicState(state: A2ATaskState): PublicTaskState {
+  const { assignError: _assignError, verifyError: _verifyError, ...pub } = state;
+  return pub;
+}
+
+export function projectPublicEntry(
+  entry: { meta: A2ATaskMeta; state: A2ATaskState },
+): { meta: PublicTaskMeta; state: PublicTaskState } {
+  return { meta: projectPublicMeta(entry.meta), state: projectPublicState(entry.state) };
 }
 
 /** Get all tasks accepted (currently or historically) by a specific executor. */

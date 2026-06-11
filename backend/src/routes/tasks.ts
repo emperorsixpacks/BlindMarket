@@ -219,8 +219,18 @@ tasksRouter.get('/:id', async (req, res, next) => {
         ...serializeBigInts(task as unknown as Record<string, unknown>),
         taskId: taskId.toString(), // Include numeric ID explicitly
         a2aIndexed,
-        a2aMeta: a2aMeta ?? null,
-        a2aState: a2aState ? { ...a2aState, resultData: a2aState.resultData ?? null } : null,
+        // Public projection — this route has no auth, and full A2A meta
+        // carries the brief's key material (wrappedKeys/keyCustodyBlob) plus
+        // the storage pointer. Strip it; the executor's slice travels only in
+        // the authenticated /a2a/tasks/:id/accept response.
+        a2aMeta: a2aMeta ? a2aStore.projectPublicMeta(a2aMeta) : null,
+        // Strip operator-internal diagnostics (assignError/verifyError) on this
+        // unauthenticated surface. resultData is preserved for now — today's
+        // TaskDetail renders it; making the deliverable poster/executor-only is
+        // P2 confidentiality work (docs/VISION-2.md §8 follow-ups).
+        a2aState: a2aState
+          ? { ...a2aStore.projectPublicState(a2aState), resultData: a2aState.resultData ?? null }
+          : null,
         meta: meta ? {
           ...serializeBigInts(meta as unknown as Record<string, unknown>),
           decimals,

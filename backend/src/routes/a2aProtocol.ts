@@ -69,33 +69,39 @@ a2aProtocolRouter.post('/', async (req, res) => {
         res.json(rpcError(id, -32001, 'Task not found'));
         return;
       }
-      res.json(rpcSuccess(id, { meta, state }));
+      // Public projection: this surface is unauthenticated, so key material
+      // (wrappedKeys / keyCustodyBlob / rootHash) must never appear here, and
+      // operator-internal diagnostics (assignError/verifyError revert strings)
+      // are stripped from state. An accepted executor gets its slice from the
+      // authenticated REST /accept.
+      res.json(rpcSuccess(id, {
+        meta: a2aStore.projectPublicMeta(meta),
+        state: state ? a2aStore.projectPublicState(state) : null,
+      }));
       break;
     }
 
     case 'tasks/list': {
-      const tasks = await a2aStore.browseAgentTasks();
-      res.json(rpcSuccess(id, { tasks, total: tasks.length }));
+      const limit = Math.min(Math.max(Number(params?.limit) || 100, 1), 200);
+      const offset = Math.max(Number(params?.offset) || 0, 0);
+      const matches = await a2aStore.browseAgentTasks();
+      const tasks = matches.slice(offset, offset + limit).map(a2aStore.projectPublicEntry);
+      res.json(rpcSuccess(id, { tasks, total: matches.length, offset, limit }));
       break;
     }
 
     case 'tasks/cancel': {
-      const taskId = params?.taskId as string;
-      if (!taskId) {
-        res.json(rpcError(id, -32602, 'Missing taskId param'));
-        return;
-      }
-      const state = await a2aStore.getState(taskId);
-      if (!state) {
-        res.json(rpcError(id, -32001, 'Task not found'));
-        return;
-      }
-      if (state.status === 'completed' || state.status === 'verified') {
-        res.json(rpcError(id, -32003, 'Cannot cancel completed task'));
-        return;
-      }
-      await a2aStore.updateState(taskId, { status: 'failed' });
-      res.json(rpcSuccess(id, { taskId, status: 'failed' }));
+      // Removed: this endpoint has no authentication, so a cancel here was an
+      // anonymous kill switch on any live task — there is no way to establish
+      // ownership on this surface. Lifecycle mutations live on the
+      // authenticated REST API: posters cancel Funded tasks on-chain via
+      // cancelTask; executors/posters revert a stuck assignment via
+      // POST /api/v1/a2a/tasks/:id/release.
+      res.json(rpcError(
+        id,
+        -32601,
+        'tasks/cancel is not available on the public A2A surface — use the authenticated REST API (POST /api/v1/a2a/tasks/:id/release) or cancelTask on-chain',
+      ));
       break;
     }
 

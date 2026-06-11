@@ -108,6 +108,64 @@ export interface SettleResult {
   alreadySettled?: boolean;
   /** Terminal: the on-chain deadline has passed — do not release/retry. */
   expired?: boolean;
+  /** Terminal for this caller: the chain has a DIFFERENT worker assigned.
+   *  Do not releaseToOpen (every future /accept would bounce off the same
+   *  revert) and do not return key material to the caller. */
+  workerMismatch?: boolean;
+  onChainWorker?: string;
+  /** Terminal: the task was cancelled/refunded on-chain (no worker). Close
+   *  the off-chain state; do not reconcile to the zero address. */
+  cancelled?: boolean;
+}
+
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
+
+/**
+ * InvalidStatus on marketplaceAssign means "task is past Funded" — which is
+ * idempotent success ONLY if the on-chain worker is the executor we were
+ * settling for. A retry by the rightful worker must succeed quietly; a second
+ * executor racing in from a divergent Redis (cross-deployment poaching on a
+ * shared instance, a restored snapshot, or a manual on-chain assignWorker the
+ * indexer never saw) must NOT be told success — the accept route would hand
+ * them the brief key for a task someone else owns.
+ */
+async function confirmAssignedWorker(
+  taskId: number | string,
+  executor: string,
+  taskHash: string,
+): Promise<SettleResult> {
+  try {
+    const t = await escrowAsMarketplace!.getTask(BigInt(taskId));
+    const onChainWorker = String(t.worker);
+    if (onChainWorker.toLowerCase() === executor.toLowerCase()) {
+      console.log(`[a2aSettlement] assignment skipped — task ${taskId} already assigned to this executor`);
+      return { success: true, alreadySettled: true, onChainWorker };
+    }
+    // marketplaceAssign reverts InvalidStatus for ANY non-Funded status. The
+    // only non-Funded state with no worker is Cancelled (poster reclaimed the
+    // escrow) — treating 0x0 as "a different executor" would write the zero
+    // address into Redis and 409 ASSIGNED_ELSEWHERE a task that no longer
+    // exists. Surface it as cancelled instead. No assignError persisted: this
+    // is terminal-closed by the caller, not a retryable bridge fault.
+    if (onChainWorker.toLowerCase() === ZERO_ADDRESS) {
+      console.warn(`[a2aSettlement] assignment refused — task ${taskId} is cancelled on-chain (no worker)`);
+      return { success: false, cancelled: true };
+    }
+    const msg = `task ${taskId} is already assigned on-chain to ${onChainWorker}, not ${executor}`;
+    console.error(`[a2aSettlement] ${msg} — Redis/chain divergence (check /health/bridge for cross-env poaching)`);
+    // Deliberately do NOT persist assignError here: the accept route closes
+    // this off-chain and reconciles executorAddress to the real worker, who
+    // must then pass /submit — and /submit short-circuits BRIDGE_FAILED on a
+    // lingering assignError that nothing else would ever clear.
+    return { success: false, error: msg, workerMismatch: true, onChainWorker };
+  } catch (readErr) {
+    // Can't prove the caller is the assigned worker → fail closed. The caller
+    // sees a retryable settlement failure, not a key handout.
+    const msg = `task ${taskId} reverted InvalidStatus and the follow-up worker read failed: ${(readErr as Error).message}`;
+    console.error(`[a2aSettlement] ${msg}`);
+    await safePersistAssignError(taskHash, msg);
+    return { success: false, error: msg };
+  }
 }
 
 /**
@@ -140,8 +198,7 @@ export async function settleAssignment(taskHash: string, executor: string): Prom
       await escrowAsMarketplace!.marketplaceAssign.staticCall(BigInt(taskId), executor);
     } catch (staticErr) {
       if (isAlreadySettled(staticErr)) {
-        console.log(`[a2aSettlement] assignment skipped — task ${taskId} already past Funded state`);
-        return { success: true, alreadySettled: true };
+        return confirmAssignedWorker(taskId, executor, taskHash);
       }
       if (isDeadlineReached(staticErr)) {
         console.warn(`[a2aSettlement] assignment refused — task ${taskId} deadline has passed (terminal)`);
@@ -156,8 +213,7 @@ export async function settleAssignment(taskHash: string, executor: string): Prom
     );
   } catch (err) {
     if (isAlreadySettled(err)) {
-      console.log(`[a2aSettlement] assignment skipped — task ${taskId} already past Funded state`);
-      return { success: true, alreadySettled: true };
+      return confirmAssignedWorker(taskId, executor, taskHash);
     }
     if (isDeadlineReached(err)) {
       console.warn(`[a2aSettlement] assignment refused — task ${taskId} deadline has passed (terminal)`);

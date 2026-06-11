@@ -283,6 +283,61 @@ describe('POST /accept — key custody', () => {
   });
 });
 
+// ── Security closeout: self-accept + settlement worker-match ─────────────────
+describe('POST /accept — self-accept + settlement worker-match', () => {
+  it('poster cannot execute own task: 403 SELF_ACCEPT before the CAS', async () => {
+    // posterAddress equals the caller — would let one wallet wash-trade
+    // reputation + recycle its own escrow. Refuse before any state change.
+    vi.mocked(a2aStore.getMeta).mockResolvedValue(meta({ posterAddress: AGENT }) as any);
+
+    const res = await accept();
+
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('SELF_ACCEPT');
+    expect(a2aStore.tryAccept).not.toHaveBeenCalled();
+    expect(settleAssignment).not.toHaveBeenCalled();
+  });
+
+  it('on-chain assigned to a DIFFERENT worker: 409 ASSIGNED_ELSEWHERE, no key, reconciles to chain truth', async () => {
+    const OTHER = '0xother00000000000000000000000000000000ff';
+    vi.mocked(a2aStore.getMeta).mockResolvedValue(
+      meta({ rootHash: ROOT, wrappedKeys: { [AGENT]: 'deadbeef' } }) as any,
+    );
+    vi.mocked(a2aStore.tryAccept).mockResolvedValue({ ok: true, state: {} } as any);
+    vi.mocked(settleAssignment).mockResolvedValueOnce({
+      success: false, workerMismatch: true, onChainWorker: OTHER,
+    } as any);
+
+    const res = await accept();
+
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('ASSIGNED_ELSEWHERE');
+    expect(res.body.data?.wrappedKey).toBeUndefined(); // no key material to a refused poacher
+    // Reconciles executorAddress to the real on-chain worker (updateState then
+    // moves the executor index off the refused caller). NOT released — that
+    // would bounce every future /accept off the same revert.
+    expect(a2aStore.updateState).toHaveBeenCalledWith(TASK, { executorAddress: OTHER });
+    expect(a2aStore.releaseToOpen).not.toHaveBeenCalled();
+  });
+
+  it('cancelled on-chain (no worker): 409 TASK_CANCELLED, closed off-chain, not reconciled to 0x0', async () => {
+    vi.mocked(a2aStore.getMeta).mockResolvedValue(
+      meta({ rootHash: ROOT, wrappedKeys: { [AGENT]: 'deadbeef' } }) as any,
+    );
+    vi.mocked(a2aStore.tryAccept).mockResolvedValue({ ok: true, state: {} } as any);
+    vi.mocked(settleAssignment).mockResolvedValueOnce({ success: false, cancelled: true } as any);
+
+    const res = await accept();
+
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('TASK_CANCELLED');
+    expect(a2aStore.updateState).toHaveBeenCalledWith(
+      TASK, { status: 'failed', failedReason: 'cancelled', executorAddress: undefined },
+    );
+    expect(a2aStore.releaseToOpen).not.toHaveBeenCalled();
+  });
+});
+
 // ── Deadline pre-check (batch-4) ─────────────────────────────────────────────
 //
 // The authoritative deadline gate is on-chain (marketplaceAssign reverts

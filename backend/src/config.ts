@@ -17,6 +17,11 @@ const IS_PROD = process.env.NODE_ENV === 'production';
 export const config = {
   port: parseInt(optional('PORT', '3001'), 10),
   nodeEnv: optional('NODE_ENV', 'development'),
+  // Verification fails CLOSED: with 0G Compute unconfigured the sealed
+  // verifier refuses to verify instead of auto-passing. Only an explicit
+  // opt-in (or the vitest 'test' env) re-enables the local auto-pass stub,
+  // and production ignores the flag entirely. See services/verification.ts.
+  allowInsecureLocalVerify: optional('ALLOW_INSECURE_LOCAL_VERIFY', 'false').toLowerCase() === 'true',
 
   // 0G Chain
   ogRpcUrl: optional('OG_RPC_URL', IS_PROD ? 'https://evmrpc.0g.ai' : 'https://evmrpc-testnet.0g.ai'),
