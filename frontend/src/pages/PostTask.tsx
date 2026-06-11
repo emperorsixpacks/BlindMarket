@@ -22,10 +22,6 @@ import { authedGet, authedPost } from '../lib/api';
 import { trackEvent } from '../hooks/useAnalytics';
 import { MARKETPLACE_TOKEN_ADDRESS } from '../config/constants';
 
-// Suggested categories surfaced via <datalist> on the category input — these
-// are popular hints, not the full set. The category field is free-text
-// (backend accepts any string 1..64 chars) so the poster can describe whatever
-// their task actually is rather than being forced into "other".
 // BlindEscrow contract's hard bounds on `duration` (seconds).
 // Source: BlindEscrow.sol:64-65 — MIN_DEADLINE = 1 hours, MAX_DEADLINE = 90 days.
 const MIN_DURATION_SECONDS = 60 * 60;          // 1 hour
@@ -51,18 +47,6 @@ function durationHint(secs: number): string {
   return `${Math.round(secs / 86400)} days from now`;
 }
 
-const CATEGORY_SUGGESTIONS = [
-  'photography',
-  'research',
-  'verification',
-  'data-collection',
-  'transcription',
-  'writing',
-  'translation',
-  'code-review',
-  'analysis',
-];
-
 import { AGENT_CAPABILITIES } from '../config/capabilities';
 
   // Pulled from the shared constants module so the address lives in exactly
@@ -77,7 +61,6 @@ export default function PostTask() {
 
   const [form, setForm] = useState({
     instructions: '',
-    category: '',
     locationZone: 'global',
     amount: '10',
     // Stored as a datetime-local string (YYYY-MM-DDTHH:mm). Converted to a
@@ -310,7 +293,7 @@ export default function PostTask() {
         taskHash,
         token: TOKEN,
         amount: amountWei.toString(),
-        category: form.category,
+        category: 'general',
         locationZone: form.locationZone,
         duration: String(durationSecs),
         targetExecutorType: 'agent' as const,
@@ -358,7 +341,6 @@ export default function PostTask() {
       setStatus('done');
       trackEvent('task_posted', {
         taskId: taskJson.taskId ?? null,
-        category: form.category,
         amount: Number(form.amount),
       });
     } catch (err) {
@@ -483,50 +465,14 @@ export default function PostTask() {
                 />
               </FormField>
 
-              {/* Stack category + location on phones — at 2-col on a 439px
-                  viewport the placeholder gets clipped. Side-by-side returns at sm. */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <FormField label="Category" required>
-                  <FormInput
-                    type="text"
-                    required
-                    maxLength={64}
-                    value={form.category}
-                    onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
-                    placeholder="Describe it, or pick a suggestion below"
-                  />
-                  {/* Auto-fill grid keeps suggestion chips on a regular column
-                      rhythm instead of the ragged wrap a plain flex produces.
-                      Each cell is ≥90px and stretches to fill. Category tokens
-                      are data values, so they stay font-mono. */}
-                  <div className="mt-2 grid grid-cols-[repeat(auto-fill,minmax(90px,1fr))] gap-1.5">
-                    {CATEGORY_SUGGESTIONS.map(c => {
-                      const active = form.category === c;
-                      return (
-                        <button
-                          key={c}
-                          type="button"
-                          onClick={() => setForm(f => ({ ...f, category: c }))}
-                          className={`px-2 py-1 text-[10px] font-mono border transition-colors text-center ${active
-                            ? 'border-cream text-cream bg-cream/10'
-                            : 'border-line text-ink-3 hover:border-ink-2 hover:text-ink-2'
-                            }`}
-                        >
-                          {c}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </FormField>
-                <FormField label="Location zone" hint="Where the work applies, if it matters.">
-                  <FormInput
-                    type="text"
-                    value={form.locationZone}
-                    onChange={e => setForm(f => ({ ...f, locationZone: e.target.value }))}
-                    placeholder="global, US-NY, EU, etc."
-                  />
-                </FormField>
-              </div>
+              <FormField label="Location zone" hint="Where the work applies, if it matters.">
+                <FormInput
+                  type="text"
+                  value={form.locationZone}
+                  onChange={e => setForm(f => ({ ...f, locationZone: e.target.value }))}
+                  placeholder="global, US-NY, EU, etc."
+                />
+              </FormField>
 
               <FormField
                 label="Capabilities (optional)"
