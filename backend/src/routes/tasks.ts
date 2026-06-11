@@ -21,7 +21,6 @@ const createTaskSchema = z.object({
   taskHash: z.string().regex(/^0x[0-9a-fA-F]{64}$/, 'Must be a bytes32 hex string'),
   token: z.string().regex(/^0x[0-9a-fA-F]{40}$/, 'Invalid token address'),
   amount: z.string().min(1, 'Amount required'), // bigint as string
-  category: z.string().min(1).max(64),
   locationZone: z.string().min(1).max(128),
   duration: z.string().min(1, 'Duration required'), // seconds as string
   // A2A optional fields
@@ -262,7 +261,7 @@ tasksRouter.post('/', requireAuth, async (req: AuthRequest, res, next) => {
       data.taskHash,
       data.token,
       amountBigInt,
-      data.category,
+      'general',
       data.locationZone,
       BigInt(data.duration),
       isNative ? amountBigInt : undefined,
@@ -295,7 +294,7 @@ tasksRouter.post('/', requireAuth, async (req: AuthRequest, res, next) => {
       success: true,
       data: { unsignedTx: tx },
     };
-    rooms.tasks('task:created', { category: data.category, locationZone: data.locationZone, amount: data.amount });
+    rooms.tasks('task:created', { locationZone: data.locationZone, amount: data.amount });
     rooms.platform('stats:update', {});
     
     // Custom replacer to handle BigInt serialization

@@ -31,18 +31,12 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'create', label: 'Create template' },
 ];
 
-const CATEGORIES = [
-  'data_processing', 'research', 'content', 'analysis',
-  'development', 'integration', 'automation', 'other',
-];
-
 export default function TaskTemplates() {
   const [tab, setTab] = useState<Tab>('browse');
   const { address } = useAccount();
   const qc = useQueryClient();
 
   const [name, setName] = useState('');
-  const [category, setCategory] = useState('');
   const [description, setDescription] = useState('');
   const [selectedCaps, setSelectedCaps] = useState<string[]>([]);
   const [suggestedReward, setSuggestedReward] = useState('');
@@ -63,7 +57,6 @@ export default function TaskTemplates() {
   const createMut = useMutation({
     mutationFn: () => createTemplate({
       name,
-      category: category || 'other',
       description,
       requiredCapabilities: selectedCaps,
       suggestedReward: suggestedReward || undefined,
@@ -71,7 +64,6 @@ export default function TaskTemplates() {
     }),
     onSuccess: () => {
       setName('');
-      setCategory('');
       setDescription('');
       setSelectedCaps([]);
       setSuggestedReward('');
@@ -133,11 +125,9 @@ export default function TaskTemplates() {
                   <div className="flex items-start justify-between gap-3 mb-2">
                     <div className="min-w-0">
                       <div className="text-sm font-medium text-ink truncate">{t.name}</div>
-                      <div className="text-[11px] text-ink-3 mt-0.5">{t.category.replace(/_/g, ' ')}</div>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       <span className="text-[11px] text-ink-3 font-mono">{t.use_count} uses</span>
-                      <Tag tone="info">{t.category.replace(/_/g, ' ')}</Tag>
                     </div>
                   </div>
                   <p className="text-xs text-ink-3 leading-relaxed line-clamp-3 mb-3">
@@ -179,7 +169,7 @@ export default function TaskTemplates() {
                   <div className="min-w-0 flex-1">
                     <div className="text-ink font-medium truncate">{t.name}</div>
                     <div className="text-xs text-ink-3 mt-0.5">
-                      {t.category} · {t.use_count} uses{t.suggested_reward && ` · ${t.suggested_reward} 0G`}
+                      {t.use_count} uses{t.suggested_reward && ` · ${t.suggested_reward} 0G`}
                     </div>
                   </div>
                   <Tag tone={t.is_public ? 'ok' : 'neutral'}>{t.is_public ? 'public' : 'private'}</Tag>
@@ -195,18 +185,6 @@ export default function TaskTemplates() {
           <SectionRule num="01" title="New template" />
           <FormField label="Template name" required>
             <FormInput placeholder="e.g. Market research report" value={name} onChange={(e) => setName(e.target.value)} />
-          </FormField>
-          <FormField label="Category" required>
-            <div className="flex flex-wrap gap-1.5">
-              {CATEGORIES.map((c) => (
-                <button key={c} type="button"
-                  onClick={() => setCategory(category === c ? '' : c)}
-                  className={`px-2.5 py-1 text-xs border transition-colors ${category === c ? 'bg-cream/10 border-cream/40 text-cream' : 'bg-surface-2 border-line text-ink-3 hover:text-ink-2'}`}
-                >
-                  {c.replace(/_/g, ' ')}
-                </button>
-              ))}
-            </div>
           </FormField>
           <FormField label="Description" required hint="Describe the task brief in detail">
             <FormTextarea rows={6} placeholder="Describe what needs to be done…" value={description} onChange={(e) => setDescription(e.target.value)} />
@@ -244,7 +222,7 @@ export default function TaskTemplates() {
             <Button
               variant="primary"
               label={createMut.isPending ? 'Creating…' : 'Create template'}
-              disabled={!name.trim() || !category || !description.trim() || selectedCaps.length === 0 || createMut.isPending}
+              disabled={!name.trim() || !description.trim() || selectedCaps.length === 0 || createMut.isPending}
               onClick={() => createMut.mutate()}
             />
             {createMut.isError && (

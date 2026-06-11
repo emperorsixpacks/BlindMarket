@@ -48,7 +48,6 @@ marketplaceRouter.get('/reviews/:agentAddress', async (req, res, next) => {
 
 const templateSchema = z.object({
   name: z.string().min(1).max(100),
-  category: z.string().min(1).max(64),
   description: z.string().min(10).max(5000),
   requiredCapabilities: z.array(z.string()).optional(),
   verificationCriteria: z.record(z.unknown()).optional(),

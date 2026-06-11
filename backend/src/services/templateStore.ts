@@ -4,7 +4,6 @@ export interface TaskTemplate {
   id: number;
   creator_address: string;
   name: string;
-  category: string;
   description: string;
   required_capabilities: string[];
   verification_criteria: Record<string, unknown> | null;
@@ -17,7 +16,6 @@ export interface TaskTemplate {
 export async function createTemplate(opts: {
   creatorAddress: string;
   name: string;
-  category: string;
   description: string;
   requiredCapabilities?: string[];
   verificationCriteria?: Record<string, unknown>;
@@ -26,12 +24,11 @@ export async function createTemplate(opts: {
 }): Promise<TaskTemplate> {
   const db = await getPool();
   const { rows } = await db.query<TaskTemplate>(
-    `INSERT INTO task_templates (creator_address, name, category, description, required_capabilities, verification_criteria, suggested_reward, is_public)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+    `INSERT INTO task_templates (creator_address, name, description, required_capabilities, verification_criteria, suggested_reward, is_public)
+     VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
     [
       opts.creatorAddress.toLowerCase(),
       opts.name,
-      opts.category,
       opts.description,
       opts.requiredCapabilities ?? [],
       opts.verificationCriteria ? JSON.stringify(opts.verificationCriteria) : null,

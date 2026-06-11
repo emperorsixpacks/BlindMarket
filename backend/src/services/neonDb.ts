@@ -133,7 +133,6 @@ const migrations: Array<{ id: number; name: string; sql: string }> = [
         id SERIAL PRIMARY KEY,
         creator_address TEXT NOT NULL,
         name TEXT NOT NULL,
-        category TEXT NOT NULL,
         description TEXT NOT NULL,
         required_capabilities TEXT[] NOT NULL DEFAULT '{}',
         verification_criteria JSONB,
@@ -257,6 +256,13 @@ const migrations: Array<{ id: number; name: string; sql: string }> = [
 
       CREATE INDEX IF NOT EXISTS idx_api_keys_owner ON api_keys(owner_address);
       CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
+    `,
+  },
+  {
+    id: 10,
+    name: 'drop_task_templates_category',
+    sql: `
+      ALTER TABLE task_templates DROP COLUMN IF EXISTS category;
     `,
   },
 ];

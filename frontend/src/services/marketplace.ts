@@ -31,7 +31,6 @@ export interface TaskTemplate {
   id: number;
   creator_address: string;
   name: string;
-  category: string;
   description: string;
   required_capabilities: string[];
   verification_criteria: Record<string, unknown> | null;
@@ -114,7 +113,6 @@ export async function getMyTemplates(): Promise<TaskTemplate[]> {
 
 export async function createTemplate(data: {
   name: string;
-  category: string;
   description: string;
   requiredCapabilities?: string[];
   verificationCriteria?: Record<string, unknown>;
