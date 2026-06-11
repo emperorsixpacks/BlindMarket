@@ -1,16 +1,5 @@
 {
-    "experimentalServices": {
-        "frontend": {
-            "entrypoint": "frontend",
-            "routePrefix": "/",
-            "framework": "vite"
-        },
-        "backend": {
-            "entrypoint": "backend",
-            "routePrefix": "/_/backend"
-        }
-    },
-    "rewrites": [
-        { "source": "/((?!_/|api/|health|assets/|.*\\.).*)", "destination": "/index.html" }
-    ]
+  "rewrites": [
+    { "source": "/((?!_/|api/|health|assets/|.*\\.).*)", "destination": "/index.html" }
+  ]
 }
