@@ -4,7 +4,6 @@ export { Button } from './Button';
 export { Tag } from './Tag';
 export { Panel } from './Panel';
 export { SectionRule } from './SectionRule';
-export { Prompt } from './Prompt';
 export { StatCard } from './StatCard';
 export { FormField, FormInput, FormTextarea } from './FormField';
 export { Spinner, Skeleton, LoadingState, EmptyState, ErrorState, StatusTag, statusTone } from './states';

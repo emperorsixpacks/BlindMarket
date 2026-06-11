@@ -53,15 +53,6 @@ export async function post<T>(path: string, body?: unknown): Promise<T> {
   return handleResponse<T>(res);
 }
 
-export async function patch<T>(path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`${API_BASE_URL}${path}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  return handleResponse<T>(res);
-}
-
 export async function authedGet<T>(path: string, overrideToken?: string): Promise<T> {
   const res = await fetch(`${API_BASE_URL}${path}`, {
     headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders(overrideToken)) },

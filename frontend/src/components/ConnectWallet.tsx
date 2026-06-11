@@ -24,7 +24,7 @@ export function ConnectWallet() {
     <div className="flex items-center gap-2">
       <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface border border-neutral-800">
         <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-        <span className="text-xs text-neutral-300 font-mono">{truncateAddress(address!)}</span>
+        <span className="text-xs text-neutral-300 font-mono">{truncateAddress(address ?? '')}</span>
       </div>
       <button
         className="px-3 py-1.5 rounded-lg text-xs text-neutral-600 hover:text-neutral-300 transition-colors"

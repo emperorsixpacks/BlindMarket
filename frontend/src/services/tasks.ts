@@ -32,26 +32,6 @@ export async function getTask(taskId: string): Promise<{ onChain: OnChainTask; m
   };
 }
 
-export async function buildCreateTask(params: {
-  taskHash: string;
-  token: string;
-  amount: string;
-  category: string;
-  locationZone: string;
-  duration: string;
-  targetExecutorType?: 'human' | 'agent';
-  verificationMode?: 'manual' | 'auto' | 'oracle';
-  requiredCapabilities?: string[];
-  verificationCriteria?: {
-    required_fields?: string[];
-    min_length?: number;
-    contains_keywords?: string[];
-  };
-}): Promise<UnsignedTx> {
-  const res = await authedPost<{ unsignedTx: UnsignedTx }>('/api/v1/tasks', params);
-  return res.unsignedTx;
-}
-
 export async function applyToTask(taskId: string, message?: string): Promise<{ application_id: string }> {
   return authedPost<{ application_id: string }>(`/api/v1/tasks/${taskId}/apply`, { message });
 }
@@ -59,11 +39,6 @@ export async function applyToTask(taskId: string, message?: string): Promise<{ a
 export async function getApplications(taskId: string): Promise<Application[]> {
   const res = await authedGet<{ applications: Application[] }>(`/api/v1/tasks/${taskId}/applications`);
   return res.applications;
-}
-
-export async function buildAssignTask(taskId: string, worker: string): Promise<UnsignedTx> {
-  const res = await authedPost<{ unsignedTx: UnsignedTx }>(`/api/v1/tasks/${taskId}/assign`, { worker });
-  return res.unsignedTx;
 }
 
 export async function buildCancelTask(taskId: string): Promise<UnsignedTx> {

@@ -26,7 +26,9 @@ export default function AgentMetricsPanel({ agentId }: { agentId: string }) {
         const pt: DataPoint = { t: Date.now(), cpu, ramMb };
         dataRef.current = [...dataRef.current.slice(-(MAX_POINTS - 1)), pt];
         setData([...dataRef.current]);
-      } catch { /* server may be restarting */ }
+      } catch (err) {
+        console.warn('Failed to fetch agent metrics:', err);
+      }
     };
 
     fetchStats();

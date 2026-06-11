@@ -103,10 +103,6 @@ export async function getPublicTemplates(
   );
 }
 
-export async function getTemplate(id: number): Promise<TaskTemplate> {
-  return get<TaskTemplate>(`/api/v1/marketplace/templates/${id}`);
-}
-
 export async function getMyTemplates(): Promise<TaskTemplate[]> {
   return authedGet<TaskTemplate[]>('/api/v1/marketplace/templates/mine');
 }
@@ -120,10 +116,6 @@ export async function createTemplate(data: {
   isPublic?: boolean;
 }): Promise<TaskTemplate> {
   return authedPost<TaskTemplate>('/api/v1/marketplace/templates', data);
-}
-
-export async function deleteTemplate(id: number): Promise<void> {
-  await authedDelete(`/api/v1/marketplace/templates/${id}`);
 }
 
 export async function registerWebhook(data: {
@@ -146,15 +138,4 @@ export async function getAgentBadges(agentAddress: string): Promise<AgentBadge[]
   return get<AgentBadge[]>(`/api/v1/marketplace/badges/${agentAddress}`);
 }
 
-export async function grantBadge(data: {
-  agentAddress: string;
-  capability: string;
-  badgeType?: string;
-  expiresAt?: string;
-}): Promise<AgentBadge> {
-  return authedPost<AgentBadge>('/api/v1/marketplace/badges', data);
-}
 
-export async function revokeBadge(agentAddress: string, capability: string): Promise<void> {
-  await authedDelete(`/api/v1/marketplace/badges/${agentAddress}/${capability}`);
-}
