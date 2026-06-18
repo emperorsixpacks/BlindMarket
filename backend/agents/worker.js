@@ -98,6 +98,16 @@ const AGENT_PRIVATE_KEY = process.env.AGENT_PRIVATE_KEY ?? '';
 const AGENT_PUBLIC_KEY = process.env.AGENT_PUBLIC_KEY || derivePublicKeyHex(AGENT_PRIVATE_KEY);
 const OG_RPC_URL = process.env.OG_RPC_URL ?? 'https://evmrpc-testnet.0g.ai';
 const OG_CHAIN_ID = Number(process.env.OG_CHAIN_ID ?? 16602);
+// Chain type — 'evm' (default, 0G) or 'sui'. Determines which chain adapter the
+// worker uses for on-chain operations (submitEvidence, delegate_to_agent, etc.).
+const CHAIN_TYPE = (process.env.CHAIN_TYPE ?? 'evm').toLowerCase();
+// Sui chain config (used when CHAIN_TYPE=sui).
+const SUI_NETWORK_ID = process.env.SUI_NETWORK_ID ?? 'testnet';
+const SUI_RPC_URL = process.env.SUI_RPC_URL ?? 'https://fullnode.testnet.sui.io:443';
+const SUI_PACKAGE_ID = process.env.SUI_PACKAGE_ID ?? '0x0';
+const SUI_BLIND_ESCROW_OBJECT_ID = process.env.SUI_BLIND_ESCROW_OBJECT_ID ?? '0x0';
+const SUI_BLIND_REPUTATION_OBJECT_ID = process.env.SUI_BLIND_REPUTATION_OBJECT_ID ?? '0x0';
+const SUI_ADMIN_CAP_ID = process.env.SUI_ADMIN_CAP_ID ?? '0x0';
 // BlindEscrow proxy address — the verifier role (verificationMode='agent')
 // signs completeVerification directly against this contract (trustless).
 const AGENT_ESCROW_ADDRESS = process.env.AGENT_ESCROW_ADDRESS ?? '';
@@ -253,7 +263,24 @@ if (agentCapabilities.length === 0) {
 }
 
 let signerWallet = null;
-if (AGENT_PRIVATE_KEY) {
+let suiSigner = null;       // SuiSigner instance (when CHAIN_TYPE=sui)
+
+if (CHAIN_TYPE === 'sui') {
+  try {
+    // Dynamic import of Sui modules — available when @mysten/sui is installed.
+    const { Ed25519Keypair } = await import('@mysten/sui/keypairs/ed25519');
+    const privKey = AGENT_PRIVATE_KEY.startsWith('suiprivkey')
+      ? AGENT_PRIVATE_KEY
+      : AGENT_PRIVATE_KEY.startsWith('0x')
+        ? AGENT_PRIVATE_KEY.slice(2)
+        : AGENT_PRIVATE_KEY;
+    const keypair = Ed25519Keypair.fromSecretKey(privKey);
+    suiSigner = { keypair, address: keypair.toSuiAddress() };
+    log(`Sui agent wallet: ${suiSigner.address}`);
+  } catch (e) {
+    log(`Sui signer init failed — @mysten/sui not installed or key invalid: ${e.message}`);
+  }
+} else if (AGENT_PRIVATE_KEY) {
   try {
     const provider = new ethers.JsonRpcProvider(OG_RPC_URL, OG_CHAIN_ID);
     signerWallet = new ethers.Wallet(
@@ -1151,15 +1178,60 @@ async function runAcceptedTask(acceptedTaskHash, acceptedRootHash, acceptedWrapp
       return;
     }
 
-    if (!signerWallet) {
+    let broadcastOk = false;
+
+    if (CHAIN_TYPE === 'sui') {
+      // Sui path: execute submitEvidence via Move call on BlindEscrow.
+      if (!suiSigner) {
+        log(`cannot broadcast submitEvidence on Sui: signer not initialised`);
+        await releaseTask(acceptedTaskHash);
+        return;
+      }
+      try {
+        const { Transaction } = await import('@mysten/sui/transactions');
+        const { SuiGrpcClient } = await import('@mysten/sui/grpc');
+
+        const client = new SuiGrpcClient({
+          network: SUI_NETWORK_ID,
+          baseUrl: SUI_RPC_URL,
+        });
+
+        const tx = new Transaction();
+        tx.setSender(suiSigner.address);
+        tx.moveCall({
+          target: `${SUI_PACKAGE_ID}::blind_escrow::submit_evidence`,
+          arguments: [
+            tx.object(SUI_BLIND_ESCROW_OBJECT_ID),
+            tx.pure.u64(String(acceptedTaskHash)), // taskId from hash
+            tx.pure.vector('u8', Array.from(Buffer.from(evidenceHashHex, 'hex'))),
+          ],
+        });
+
+        const result = await suiSigner.keypair.signAndExecuteTransaction({
+          transaction: tx,
+          client,
+          include: { effects: true },
+        });
+
+        if (result.effects?.status?.status === 'failure') {
+          throw new Error(result.effects?.status?.error ?? 'Sui tx failed');
+        }
+        log(`submitEvidence Sui tx: ${result.digest}`);
+        broadcastOk = true;
+      } catch (e) {
+        log(`submitEvidence Sui broadcast failed for ${acceptedTaskHash.slice(0, 10)}…: ${e.message}`);
+        await releaseTask(acceptedTaskHash);
+        return;
+      }
+    } else if (!signerWallet) {
       log(`cannot broadcast submitEvidence: signer not initialised (missing AGENT_PRIVATE_KEY)`);
       await releaseTask(acceptedTaskHash);
       return;
-    }
-    const MAX_SUBMIT_ATTEMPTS = 3;
-    const RETRY_DELAY_MS = 6_000;
-    let broadcastOk = false;
-    for (let attempt = 1; attempt <= MAX_SUBMIT_ATTEMPTS; attempt++) {
+    } else {
+      // EVM broadcast loop
+      const MAX_SUBMIT_ATTEMPTS = 3;
+      const RETRY_DELAY_MS = 6_000;
+      for (let attempt = 1; attempt <= MAX_SUBMIT_ATTEMPTS; attempt++) {
       try {
         const sent = await signerWallet.sendTransaction(unsignedSubmitEvidence);
         log(`submitEvidence broadcast for ${acceptedTaskHash.slice(0, 10)}…: ${sent.hash}`);
@@ -1177,6 +1249,7 @@ async function runAcceptedTask(acceptedTaskHash, acceptedRootHash, acceptedWrapp
         log(`submitEvidence broadcast failed for ${acceptedTaskHash.slice(0, 10)}… after ${attempt} attempt(s): ${label}`);
         await releaseTask(acceptedTaskHash);
         return;
+      }
       }
     }
     if (!broadcastOk) {

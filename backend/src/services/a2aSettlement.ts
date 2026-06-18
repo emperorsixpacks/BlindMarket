@@ -26,7 +26,7 @@
  */
 
 import type { ContractTransactionResponse } from 'ethers';
-import { escrowAsMarketplace, marketplaceSigner } from './chain.js';
+import { escrowAsMarketplace, marketplaceSigner, isSui } from './chain.js';
 import { getTaskIdByHash } from './escrowEvents.js';
 import * as a2aStore from './a2aStore.js';
 import { rooms } from './socket.js';
@@ -61,6 +61,13 @@ function enqueueSignerTx<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 function bridgeReady(): boolean {
+  if (isSui) {
+    console.warn(
+      '[a2aSettlement] bridge on Sui not yet supported — Move contracts must be deployed and Sui settlement path wired. ' +
+        'Tasks will accept/submit off-chain but won\'t settle on-chain.',
+    );
+    return false;
+  }
   if (!escrowAsMarketplace || !marketplaceSigner) {
     console.error(
       '[a2aSettlement] bridge disabled — MARKETPLACE_SIGNER_PRIVATE_KEY is not set in backend env. ' +

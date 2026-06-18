@@ -263,6 +263,14 @@ export async function startAgent(id: string, opts?: { skipResume?: boolean }): P
       AGENT_PUBLIC_KEY: agent.publicKey ?? '',
       OG_RPC_URL: config.ogRpcUrl,
       OG_CHAIN_ID: String(config.ogChainId),
+      CHAIN_TYPE: config.chainType,
+      // Sui chain config (used when CHAIN_TYPE=sui)
+      SUI_NETWORK_ID: config.suiNetworkId,
+      SUI_RPC_URL: config.suiRpcUrl,
+      SUI_PACKAGE_ID: config.suiPackageId,
+      SUI_BLIND_ESCROW_OBJECT_ID: config.suiBlindEscrowObjectId,
+      SUI_BLIND_REPUTATION_OBJECT_ID: config.suiBlindReputationObjectId,
+      SUI_ADMIN_CAP_ID: config.suiAdminCapId,
       // Escrow proxy address — the verifier role (verificationMode='agent')
       // signs completeVerification directly against this contract.
       AGENT_ESCROW_ADDRESS: config.blindEscrowAddress,

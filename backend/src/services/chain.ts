@@ -11,51 +11,55 @@ function loadAbi(name: string): ethers.InterfaceAbi {
   return JSON.parse(readFileSync(join(abiDir, `${name}.json`), 'utf-8')) as ethers.InterfaceAbi;
 }
 
-/**
- * Read-only JSON-RPC provider for 0G Chain.
- *
- * batchMaxCount: 1 disables ethers v6's default JSON-RPC batching. The 0G
- * testnet RPC returns clean single requests in <1s but consistently times
- * out / drops the connection on batched eth_getLogs calls — observed via
- * the escrowEvents poller spiraling on TIMEOUT/ECONNRESET while a direct
- * curl of the same query returns []. Single-request mode trades some
- * efficiency for reliability, which is the right call here.
- *
- * staticNetwork: true skips ethers' periodic chainId re-detection probe
- * (one fewer thing that can fail in flight).
- */
-export const provider = new ethers.JsonRpcProvider(config.ogRpcUrl, config.ogChainId, {
-  batchMaxCount: 1,
-  staticNetwork: true,
-});
+// ═══════════════════════════════════════════════════════════════════════════
+// Chain type guard
+// ═══════════════════════════════════════════════════════════════════════════
+
+export const isSui = config.chainType === 'sui';
+export const isEvm = config.chainType === 'evm';
+
+// ═══════════════════════════════════════════════════════════════════════════
+// EVM / 0G Chain (default)
+// ═══════════════════════════════════════════════════════════════════════════
+
+function notOnEvm(name: string): never {
+  throw new Error(`${name} is only available on EVM chains (CHAIN_TYPE=evm). Current: CHAIN_TYPE=${config.chainType}`);
+}
+
+export const provider: ethers.JsonRpcProvider = isEvm
+  ? new ethers.JsonRpcProvider(config.ogRpcUrl, config.ogChainId, {
+      batchMaxCount: 1,
+      staticNetwork: true,
+    })
+  : new Proxy({} as ethers.JsonRpcProvider, { get: () => notOnEvm('provider') });
 
 /** Signing wallet for backend-initiated transactions (e.g. INFT mint) */
-export const signer = config.ogStoragePrivateKey
+export const signer: ethers.Wallet | null = isEvm && config.ogStoragePrivateKey
   ? new ethers.Wallet(config.ogStoragePrivateKey, provider)
   : null;
 
-/**
- * Marketplace signer — holds the verifier role on BlindEscrow. Used by
- * services/a2aSettlement.ts to call marketplaceAssign + completeVerification
- * on A2A tasks. Null when MARKETPLACE_SIGNER_PRIVATE_KEY isn't configured,
- * which disables the settlement bridge but doesn't break other flows.
- */
-export const marketplaceSigner = config.marketplaceSignerPrivateKey
+export const marketplaceSigner: ethers.Wallet | null = isEvm && config.marketplaceSignerPrivateKey
   ? new ethers.Wallet(config.marketplaceSignerPrivateKey, provider)
   : null;
 
 /** Read-only contract instances */
-export const escrow = new ethers.Contract(config.blindEscrowAddress, loadAbi('BlindEscrow'), provider);
-export const registry = new ethers.Contract(config.taskRegistryAddress, loadAbi('TaskRegistry'), provider);
-export const reputation = new ethers.Contract(config.blindReputationAddress, loadAbi('BlindReputation'), provider);
+export const escrow: ethers.Contract = isEvm
+  ? new ethers.Contract(config.blindEscrowAddress, loadAbi('BlindEscrow'), provider)
+  : new Proxy({} as ethers.Contract, { get: () => notOnEvm('escrow') });
+export const registry: ethers.Contract = isEvm
+  ? new ethers.Contract(config.taskRegistryAddress, loadAbi('TaskRegistry'), provider)
+  : new Proxy({} as ethers.Contract, { get: () => notOnEvm('registry') });
+export const reputation: ethers.Contract = isEvm
+  ? new ethers.Contract(config.blindReputationAddress, loadAbi('BlindReputation'), provider)
+  : new Proxy({} as ethers.Contract, { get: () => notOnEvm('reputation') });
 
 /** Write-capable BlindEscrow bound to the marketplace signer (verifier role). */
-export const escrowAsMarketplace = marketplaceSigner
+export const escrowAsMarketplace: ethers.Contract | null = isEvm && marketplaceSigner
   ? new ethers.Contract(config.blindEscrowAddress, loadAbi('BlindEscrow'), marketplaceSigner)
   : null;
 
 /** INFT contract — write-capable when signer is available */
-export const inft = config.inftAddress
+export const inft: ethers.Contract | null = isEvm && config.inftAddress
   ? new ethers.Contract(config.inftAddress, loadAbi('INFT'), signer ?? provider)
   : null;
 
@@ -76,17 +80,83 @@ export async function buildUnsignedTx(
     ...(value !== undefined ? { value } : {}),
   };
 }
-/** Get decimals for an ERC-20 token */
+
+/** Get decimals for an ERC-20 token. Returns 9 for SUI (non-EVM). */
 export async function getTokenDecimals(tokenAddress: string): Promise<number> {
-  // If native token, return 18
-  if (tokenAddress === '0x0000000000000000000000000000000000000000') {
-    return 18;
-  }
+  if (isSui) return 9; // SUI has 9 decimals
+  if (tokenAddress === '0x0000000000000000000000000000000000000000') return 18;
   try {
-    const token = new ethers.Contract(tokenAddress, ['function decimals() view returns (uint8)'], provider);
+    const token = new ethers.Contract(tokenAddress, ['function decimals() view returns (uint8)'], provider!);
     return Number(await token.decimals());
-  } catch (err) {
-    console.warn(`[chain] Failed to fetch decimals for ${tokenAddress}, defaulting to 18:`, err);
+  } catch {
     return 18;
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Sui Chain (lazy-initialised)
+// ═══════════════════════════════════════════════════════════════════════════
+
+let _suiClient: import('@mysten/sui/grpc').SuiGrpcClient | null = null;
+
+export function getSuiClient() {
+  if (!isSui) return null;
+  return _suiClient;
+}
+
+let _suiSigner: import('@mysten/sui/keypairs/ed25519').Ed25519Keypair | null = null;
+let _suiSignerAddress: string | null = null;
+
+export function getSuiSigner() {
+  return _suiSigner;
+}
+
+export function getSuiSignerAddress() {
+  return _suiSignerAddress;
+}
+
+/** Initialise Sui chain — call once at boot (after config loaded). */
+export async function initSui(): Promise<void> {
+  if (!isSui) return;
+
+  try {
+    const { SuiGrpcClient } = await import('@mysten/sui/grpc');
+    _suiClient = new SuiGrpcClient({
+      network: config.suiNetworkId,
+      baseUrl: config.suiRpcUrl,
+    });
+    console.log(`[chain] Sui gRPC client connected to ${config.suiNetworkId}`);
+
+    if (config.suiAgentPrivateKey) {
+      const { Ed25519Keypair } = await import('@mysten/sui/keypairs/ed25519');
+      _suiSigner = Ed25519Keypair.fromSecretKey(config.suiAgentPrivateKey);
+      _suiSignerAddress = _suiSigner.toSuiAddress();
+      console.log(`[chain] Sui signer: ${_suiSignerAddress}`);
+    }
+  } catch (err) {
+    console.error('[chain] Failed to initialise Sui — @mysten/sui may not be installed:', err);
+  }
+}
+
+/**
+ * Build a Sui Move call transaction (unsigned).
+ * Returns JSON that the worker/agent can sign and execute.
+ *
+ * TODO: wire after Move contracts deployed and package ID known.
+ */
+export async function buildSuiMoveCallTx(_params: {
+  moduleName: string;
+  functionName: string;
+  args: unknown[];
+  typeArgs?: string[];
+}): Promise<Record<string, unknown>> {
+  throw new Error('buildSuiMoveCallTx: Sui contract interaction not yet wired. Deploy Move contracts first.');
+}
+
+/**
+ * Execute a Sui transaction server-side.
+ * TODO: wire after Move contracts deployed.
+ */
+export async function executeSuiTx(_txJson: Record<string, unknown>): Promise<{ digest: string }> {
+  throw new Error('executeSuiTx: Sui contract interaction not yet wired. Deploy Move contracts first.');
 }

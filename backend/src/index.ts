@@ -33,12 +33,17 @@ import { startEscrowEventLoop } from './services/escrowEvents.js';
 import { startExpirySweepLoop } from './services/a2aExpirySweep.js';
 import { auditCustodySealedTasks } from './services/keyCustodyService.js';
 import { isBridgeConfigured } from './services/a2aSettlement.js';
-import { marketplaceSigner, escrow } from './services/chain.js';
+import { marketplaceSigner, escrow, isSui, initSui } from './services/chain.js';
+import { logChainConfig } from './services/chainService.js';
 import { reconcileAgents, startZombieReaper } from './services/agentRunner.js';
 import { config as appConfig } from './config.js';
 
 // Fail fast on a misconfigured (esp. production) deploy before binding the port.
 assertBootConfig();
+
+// Initialise chain connectivity (lazy-loads Sui if CHAIN_TYPE=sui).
+void initSui();
+logChainConfig();
 
 const app = express();
 app.set('trust proxy', 1);
@@ -150,7 +155,9 @@ httpServer.listen(config.port, () => {
   // Visibility into whether the A2A settlement bridge will actually fire
   // when an agent accepts/submits. Off-by-default if MARKETPLACE_SIGNER_PRIVATE_KEY
   // is unset; when on, log the signer address so it's clear which key is signing.
-  if (isBridgeConfigured() && marketplaceSigner) {
+  if (isSui) {
+    console.log('[a2aSettlement] bridge on Sui — on-chain settlement via Move contracts (pending deployment)');
+  } else if (isBridgeConfigured() && marketplaceSigner) {
     void (async () => {
       const signerAddr = await marketplaceSigner.getAddress();
       console.log(`[a2aSettlement] bridge active — marketplace signer = ${signerAddr}`);
