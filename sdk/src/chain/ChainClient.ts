@@ -1,6 +1,7 @@
 import { ethers } from 'ethers';
 import type { Signer as SdkSigner } from '../signer/index.js';
-import type { Network } from '../network/index.js';
+import type { EVMNetwork } from './domain-types.js';
+import type { Network } from './domain-types.js';
 import { BlindEscrowClient } from './BlindEscrowClient.js';
 import { BlindReputationClient } from './BlindReputationClient.js';
 import { TaskRegistryClient } from './TaskRegistryClient.js';
@@ -17,15 +18,21 @@ export interface ChainClientOptions {
  * ethers runner. Reads use provider (or signer's provider); writes require a
  * signer. To keep the SDK's Signer abstraction decoupled from ethers at the
  * call sites, we unwrap an EthersSigner's inner ethers.Signer lazily here.
+ *
+ * Only supports EVM networks. For Sui, use SuiChainAdapter via
+ * createChainAdapter().
  */
 export class ChainClient {
   readonly escrow: BlindEscrowClient;
   readonly registry: TaskRegistryClient;
   readonly reputation: BlindReputationClient;
   readonly provider: ethers.Provider;
-  readonly network: Network;
+  readonly network: EVMNetwork;
 
   constructor(opts: ChainClientOptions) {
+    if (opts.network.chainType !== 'evm') {
+      throw new Error(`ChainClient requires an EVM network, got ${opts.network.chainType}. Use SuiChainAdapter for Sui.`);
+    }
     this.network = opts.network;
     const provider =
       opts.provider ??
@@ -52,7 +59,7 @@ function unwrapEthersSigner(signer: SdkSigner | undefined): ethers.Signer | unde
   return maybe.inner;
 }
 
-function defaultProvider(network: Network): ethers.Provider {
+function defaultProvider(network: EVMNetwork): ethers.Provider {
   const url = network.rpc[0];
   if (!url) throw new Error(`network ${network.name} has no RPC endpoint configured`);
   return new ethers.JsonRpcProvider(url, { chainId: Number(network.chainId), name: network.name });

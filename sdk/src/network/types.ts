@@ -1,18 +1,22 @@
-import type { Address } from '../types.js';
+import type {
+  Network,
+  EVMNetwork,
+  SuiNetwork,
+} from '../chain/domain-types.js';
+import type { NetworkName } from './presets.js';
 
-export interface NetworkContracts {
-  escrow: Address;
-  registry: Address;
-  reputation: Address;
-  usdc: Address;
-}
+export type {
+  Network,
+  EVMNetwork,
+  SuiNetwork,
+  NetworkBase,
+  BlockchainType,
+  CreateTaskParams,
+  DomainTask,
+  DomainTaskMeta,
+  DomainReputation,
+  DomainTxReceipt,
+  ChainSigner,
+} from '../chain/domain-types.js';
 
-export interface Network {
-  name: string;
-  chainId: bigint;
-  rpc: string[];
-  contracts: NetworkContracts;
-  indexer: string;
-  broker: string;
-  explorer?: string;
-}
+export type { NetworkName };

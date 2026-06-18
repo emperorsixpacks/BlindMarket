@@ -614,4 +614,26 @@ export {
 } from './tools/index.js';
 export type { Tool, ToolKit, ToolDefinition } from './tools/types.js';
 export type { BlindMarketTools } from './tools/index.js';
+export * from './executor/index.js';
 export * from './types.js';
+
+// Chain abstraction layer (multi-chain support)
+export { EVMChainAdapter } from './chain/evm/index.js';
+export { SuiChainAdapter } from './chain/sui/index.js';
+export { SuiSigner } from './signer/SuiSigner.js';
+export { createChainAdapter } from './chain/createChainAdapter.js';
+export type { CreateChainAdapterOptions } from './chain/createChainAdapter.js';
+export type { IBlindMarketChain } from './chain/IBlindMarketChain.js';
+export type {
+  Network,
+  EVMNetwork,
+  SuiNetwork,
+  BlockchainType,
+  CreateTaskParams,
+  DomainTask,
+  DomainTaskMeta,
+  DomainReputation,
+  DomainTxReceipt,
+  ChainSigner,
+} from './chain/domain-types.js';
+export { isEVMNetwork, isSuiNetwork } from './network/resolve.js';
