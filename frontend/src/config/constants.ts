@@ -45,3 +45,40 @@ export const OG_CHAIN_CONFIG = {
   blockExplorerUrls: [OG_CHAIN_ID === 16661 ? 'https://chainscan.0g.ai' : 'https://chainscan-newton.0g.ai'],
 } as const;
 
+// ── Multi-chain support ────────────────────────────────────────────────────
+
+export const SUPPORTED_CHAINS = ['og', 'sui'] as const;
+export type SupportedChain = typeof SUPPORTED_CHAINS[number];
+
+/** Active chain — driven by VITE_ACTIVE_CHAIN env var (default: 'og'). */
+export const ACTIVE_CHAIN: SupportedChain =
+  (import.meta.env.VITE_ACTIVE_CHAIN as SupportedChain | undefined) ?? 'og';
+
+// Sui chain config
+export const SUI_NETWORK_ID =
+  (import.meta.env.VITE_SUI_NETWORK_ID as 'mainnet' | 'testnet' | 'devnet' | 'local' | undefined) ?? 'testnet';
+
+export const SUI_RPC_URL =
+  import.meta.env.VITE_SUI_RPC_URL ||
+  (SUI_NETWORK_ID === 'mainnet'
+    ? 'https://fullnode.mainnet.sui.io:443'
+    : SUI_NETWORK_ID === 'devnet'
+      ? 'https://fullnode.devnet.sui.io:443'
+      : 'https://fullnode.testnet.sui.io:443');
+
+export const SUI_PACKAGE_ID = import.meta.env.VITE_SUI_PACKAGE_ID || '0x0';
+
+export const SUI_EXPLORER_URL =
+  import.meta.env.VITE_SUI_EXPLORER_URL ||
+  (SUI_NETWORK_ID === 'mainnet'
+    ? 'https://suivision.xyz'
+    : `https://${SUI_NETWORK_ID}.suivision.xyz`);
+
+export const SUI_CHAIN_CONFIG = {
+  networkId: SUI_NETWORK_ID,
+  rpcUrl: SUI_RPC_URL,
+  packageId: SUI_PACKAGE_ID,
+  explorerUrl: SUI_EXPLORER_URL,
+  nativeCurrency: { name: 'SUI', symbol: 'SUI', decimals: 9 },
+} as const;
+
