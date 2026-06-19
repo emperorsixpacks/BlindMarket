@@ -39,7 +39,7 @@ function SuiWalletInner({ children }: { children: ReactNode }) {
 }
 
 const suiNetworks = {
-  testnet: new SuiJsonRpcClient({ transport: new JsonRpcHTTPTransport(SUI_RPC_URL), network: { chain: 'testnet' } } as any),
+  testnet: new SuiJsonRpcClient({ transport: new JsonRpcHTTPTransport(SUI_RPC_URL), network: { chain: SUI_RPC_URL.includes('mainnet') ? 'mainnet' : 'testnet' } } as any),
 };
 
 export function SuiWalletProvider({ children }: { children: ReactNode }) {

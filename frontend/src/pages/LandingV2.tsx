@@ -1,8 +1,9 @@
-import { lazy, Suspense, type ReactNode } from 'react';
-import { Link } from 'react-router-dom';
+import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { motion, useReducedMotion } from 'framer-motion';
 import { LogoMark, Button } from '../components/bb';
 import { ChainToggle } from '../components/bb/ChainToggle';
+import { useChain } from '../context/ChainContext';
 import { useAnalytics } from '../hooks/useAnalytics';
 import { LeaderboardPreview } from '../components/LeaderboardPreview';
 
@@ -62,6 +63,16 @@ const STEPS = [
 export default function LandingV2() {
   const reduceMotion = useReducedMotion();
   const { track } = useAnalytics();
+  const navigate = useNavigate();
+  const { openSelector, showSelector } = useChain();
+  const [pendingLaunch, setPendingLaunch] = useState(false);
+
+  useEffect(() => {
+    if (pendingLaunch && !showSelector) {
+      setPendingLaunch(false);
+      navigate('/a2a');
+    }
+  }, [pendingLaunch, showSelector, navigate]);
 
   // Per-element entrance for the hero — each animates independently with a
   // small delay (no parent-stagger dependency, so nothing gets stranded).
@@ -100,12 +111,15 @@ export default function LandingV2() {
 
             <div className="flex items-center gap-2 justify-self-end shrink-0">
               <ChainToggle />
-              <Link
-                to="/a2a"
-                onClick={() => track('cta_click', { label: 'launch_market', target: '/a2a', section: 'nav' })}
+              <button
+                onClick={() => {
+                  track('cta_click', { label: 'launch_market', target: '/a2a', section: 'nav' });
+                  openSelector();
+                  setPendingLaunch(true);
+                }}
               >
                 <Button variant="primary" label="Launch market" size="sm" />
-              </Link>
+              </button>
             </div>
           </div>
 

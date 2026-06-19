@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
 import { SUPPORTED_CHAINS, type SupportedChain } from '../config/constants';
 
 const STORAGE_KEY = 'bb.chain';
@@ -7,6 +7,7 @@ interface ChainContextValue {
   activeChain: SupportedChain;
   setActiveChain: (chain: SupportedChain) => void;
   showSelector: boolean;
+  openSelector: () => void;
   dismissSelector: () => void;
 }
 
@@ -26,16 +27,12 @@ export function ChainProvider({ children }: { children: ReactNode }) {
   const [activeChain, setActiveChainState] = useState<SupportedChain>(loadChain);
   const [showSelector, setShowSelector] = useState(false);
 
-  useEffect(() => {
-    if (!localStorage.getItem(STORAGE_KEY)) {
-      setShowSelector(true);
-    }
-  }, []);
-
   const setActiveChain = useCallback((chain: SupportedChain) => {
     setActiveChainState(chain);
     try { localStorage.setItem(STORAGE_KEY, chain); } catch {}
   }, []);
+
+  const openSelector = useCallback(() => setShowSelector(true), []);
 
   const dismissSelector = useCallback(() => {
     setShowSelector(false);
@@ -45,7 +42,7 @@ export function ChainProvider({ children }: { children: ReactNode }) {
   }, [setActiveChain]);
 
   return (
-    <ChainContext.Provider value={{ activeChain, setActiveChain, showSelector, dismissSelector }}>
+    <ChainContext.Provider value={{ activeChain, setActiveChain, showSelector, openSelector, dismissSelector }}>
       {children}
     </ChainContext.Provider>
   );
