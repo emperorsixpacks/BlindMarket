@@ -99,7 +99,12 @@ export const SUI_TASK_REGISTRY_OBJECT_ID =
 export const SUI_BLIND_REPUTATION_OBJECT_ID =
   import.meta.env.VITE_SUI_BLIND_REPUTATION_OBJECT_ID || '0x0';
 
+export function suiChainName(): string {
+  return SUI_NETWORK_ID === 'mainnet' ? 'Sui Mainnet' : `Sui ${SUI_NETWORK_ID.charAt(0).toUpperCase() + SUI_NETWORK_ID.slice(1)}`;
+}
+
 export const SUI_CHAIN_CONFIG = {
+  chainName: suiChainName(),
   networkId: SUI_NETWORK_ID,
   rpcUrl: SUI_RPC_URL,
   packageId: SUI_PACKAGE_ID,

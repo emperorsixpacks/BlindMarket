@@ -21,6 +21,8 @@ import {
   getMyTemplates,
 } from '../services/marketplace';
 import { AGENT_CAPABILITIES } from '../config/capabilities';
+import { getNativeCurrency } from '../config/constants';
+import { useChain } from '../context/ChainContext';
 import { truncateAddress } from '../lib/utils';
 
 type Tab = 'browse' | 'mine' | 'create';
@@ -34,6 +36,8 @@ const TABS: { id: Tab; label: string }[] = [
 export default function TaskTemplates() {
   const [tab, setTab] = useState<Tab>('browse');
   const { address } = useAccount();
+  const { activeChain } = useChain();
+  const native = getNativeCurrency(activeChain);
   const qc = useQueryClient();
 
   const [name, setName] = useState('');
@@ -140,7 +144,7 @@ export default function TaskTemplates() {
                   </div>
                   <div className="flex items-center justify-between text-xs text-ink-3">
                     <span className="font-mono">{truncateAddress(t.creator_address)}</span>
-                    {t.suggested_reward && <span className="font-mono text-ink-2">{t.suggested_reward} 0G</span>}
+                    {t.suggested_reward && <span className="font-mono text-ink-2">{t.suggested_reward} {native.symbol}</span>}
                   </div>
                 </Panel>
               ))}
@@ -169,7 +173,7 @@ export default function TaskTemplates() {
                   <div className="min-w-0 flex-1">
                     <div className="text-ink font-medium truncate">{t.name}</div>
                     <div className="text-xs text-ink-3 mt-0.5">
-                      {t.use_count} uses{t.suggested_reward && ` · ${t.suggested_reward} 0G`}
+                      {t.use_count} uses{t.suggested_reward && ` · ${t.suggested_reward} ${native.symbol}`}
                     </div>
                   </div>
                   <Tag tone={t.is_public ? 'ok' : 'neutral'}>{t.is_public ? 'public' : 'private'}</Tag>
@@ -202,7 +206,7 @@ export default function TaskTemplates() {
             </div>
           </FormField>
           <div className="grid grid-cols-2 gap-4">
-            <FormField label="Suggested reward (0G)">
+            <FormField label={`Suggested reward (${native.symbol})`}>
               <FormInput className="font-mono" placeholder="50" value={suggestedReward} onChange={(e) => setSuggestedReward(e.target.value)} />
             </FormField>
             <FormField label="Visibility">
