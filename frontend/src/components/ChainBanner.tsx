@@ -1,5 +1,6 @@
 import { useWallet } from '../context/WalletContext';
 import { useAuth } from '../context/AuthContext';
+import { useChain } from '../context/ChainContext';
 import { isMainnet, OG_CHAIN_ID } from '../config/constants';
 
 /**
@@ -9,10 +10,12 @@ import { isMainnet, OG_CHAIN_ID } from '../config/constants';
  * already on the right chain.
  */
 export function ChainBanner() {
+  const { activeChain } = useChain();
   const { chainId, isCorrectChain, switchChain } = useWallet();
   const { isAuthenticated } = useAuth();
   const netName = `0G ${isMainnet ? 'Mainnet' : 'Galileo'}`;
 
+  if (activeChain === 'sui') return null;
   if (!isAuthenticated) return null;
   if (chainId == null) return null;
   if (isCorrectChain) return null;
