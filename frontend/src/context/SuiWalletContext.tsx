@@ -1,5 +1,7 @@
 import { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
 import { SuiClientProvider, WalletProvider as SuiDappKitWalletProvider, useCurrentAccount, useDisconnectWallet } from '@mysten/dapp-kit';
+import { SuiJsonRpcClient, JsonRpcHTTPTransport } from '@mysten/sui/jsonRpc';
+import { SUI_RPC_URL } from '../config/constants';
 
 interface SuiWalletContextValue {
   address: string | undefined;
@@ -36,9 +38,13 @@ function SuiWalletInner({ children }: { children: ReactNode }) {
   );
 }
 
+const suiNetworks = {
+  testnet: new SuiJsonRpcClient({ transport: new JsonRpcHTTPTransport(SUI_RPC_URL), network: { chain: 'testnet' } } as any),
+};
+
 export function SuiWalletProvider({ children }: { children: ReactNode }) {
   return (
-    <SuiClientProvider defaultNetwork="testnet">
+    <SuiClientProvider defaultNetwork="testnet" networks={suiNetworks}>
       <SuiDappKitWalletProvider>
         <SuiWalletInner>
           {children}
