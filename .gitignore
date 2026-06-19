@@ -50,3 +50,6 @@ frontend/.env.testnet
 docs/CELO-MULTI-CHAIN.md
 .vercel
 .env*.local
+*.key
+# Sui key exports
+!contracts/sui/.gitkeep

@@ -36,12 +36,12 @@ sui client publish --gas-budget 100000000
 After publishing, you'll get output like:
 ```
 Published Objects:
-  PackageID: 0xABC123...
+  PackageID: 0xd4296d049fbf05591b729434f9f73628f68d7fb939f24d2ac5b6c9d55ff0a44d
   Created Objects:
-    - ObjectID: 0xDEF456...  (BlindEscrow shared object)
-    - ObjectID: 0x789ABC...  (TaskRegistry shared object)
-    - ObjectID: 0xFED123...  (BlindReputation shared object)
-    - ObjectID: 0x...        (AdminCap — transfer to backend signer)
+    - ObjectID: 0x642582b447f002fa7e0a6bbe8ea61915b74e46737469bdd6930600511f27402a  (BlindEscrow shared object)
+    - ObjectID: 0x606dd42af017b8093fcd8eff10ad440a2d2ad424b6f67f4ef0789c4cf51218ff  (TaskRegistry shared object)
+    - ObjectID: 0xfd56d47bf24cb3d9354b16971d43fa4a0aa72bcbbd62dbe386cb72b6d9b32a87  (BlindReputation shared object)
+    - ObjectID: 0x2161b19b1dd3c9248016d53791c0e7947231df83184dc818bd0b99b9fc364fa0  (AdminCap — transfer to backend signer)
 ```
 
 ## 2. Fill In Backend `.env`
@@ -54,11 +54,11 @@ CHAIN_TYPE=sui
 
 # From publish output:
 SUI_NETWORK_ID=testnet
-SUI_PACKAGE_ID=0xABC123...           # PackageID
-SUI_BLIND_ESCROW_OBJECT_ID=0xDEF456...   # BlindEscrow shared object
-SUI_TASK_REGISTRY_OBJECT_ID=0x789ABC...  # TaskRegistry shared object
-SUI_BLIND_REPUTATION_OBJECT_ID=0xFED123.. # BlindReputation shared object
-SUI_ADMIN_CAP_ID=0x...                    # AdminCap object
+SUI_PACKAGE_ID=0xd4296d049fbf05591b729434f9f73628f68d7fb939f24d2ac5b6c9d55ff0a44d
+SUI_BLIND_ESCROW_OBJECT_ID=0x642582b447f002fa7e0a6bbe8ea61915b74e46737469bdd6930600511f27402a
+SUI_TASK_REGISTRY_OBJECT_ID=0x606dd42af017b8093fcd8eff10ad440a2d2ad424b6f67f4ef0789c4cf51218ff
+SUI_BLIND_REPUTATION_OBJECT_ID=0xfd56d47bf24cb3d9354b16971d43fa4a0aa72bcbbd62dbe386cb72b6d9b32a87
+SUI_ADMIN_CAP_ID=0x2161b19b1dd3c9248016d53791c0e7947231df83184dc818bd0b99b9fc364fa0
 
 # RPC (use a dedicated node for production, not the public one):
 SUI_RPC_URL=https://fullnode.testnet.sui.io:443
@@ -93,11 +93,11 @@ Once deployed, update the placeholder `0x0` addresses in:
 ```typescript
 'sui-testnet': {
   // ...
-  packageId: '0xABC123...',     // ← real package ID
+  packageId: '0xd4296d049fbf05591b729434f9f73628f68d7fb939f24d2ac5b6c9d55ff0a44d',
   sharedObjects: {
-    blindEscrow: '0xDEF456...',    // ← real object IDs
-    taskRegistry: '0x789ABC...',
-    blindReputation: '0xFED123...',
+    blindEscrow: '0x642582b447f002fa7e0a6bbe8ea61915b74e46737469bdd6930600511f27402a',
+    taskRegistry: '0x606dd42af017b8093fcd8eff10ad440a2d2ad424b6f67f4ef0789c4cf51218ff',
+    blindReputation: '0xfd56d47bf24cb3d9354b16971d43fa4a0aa72bcbbd62dbe386cb72b6d9b32a87',
   },
 },
 ```
@@ -129,9 +129,9 @@ functions. The backend and SDK use these object IDs:
 
 | Move Module | Shared Object ID | Purpose |
 |---|---|---|
-| `blindmarket::blind_escrow` | `SUI_BLIND_ESCROW_OBJECT_ID` | Task lifecycle |
-| `blindmarket::task_registry` | `SUI_TASK_REGISTRY_OBJECT_ID` | Task discovery |
-| `blindmarket::blind_reputation` | `SUI_BLIND_REPUTATION_OBJECT_ID` | Worker reputation |
+| `blindmarket::blind_escrow` | `0x642582b447f002fa7e0a6bbe8ea61915b74e46737469bdd6930600511f27402a` | Task lifecycle |
+| `blindmarket::task_registry` | `0x606dd42af017b8093fcd8eff10ad440a2d2ad424b6f67f4ef0789c4cf51218ff` | Task discovery |
+| `blindmarket::blind_reputation` | `0xfd56d47bf24cb3d9354b16971d43fa4a0aa72bcbbd62dbe386cb72b6d9b32a87` | Worker reputation |
 
 The `AdminCap` is NOT a shared object — it's an owned object held by the
 backend signer. Only the AdminCap holder can call admin functions
@@ -143,11 +143,11 @@ backend signer. Only the AdminCap holder can call admin functions
 |---|---|---|
 | `CHAIN_TYPE` | `sui` | Yes |
 | `SUI_NETWORK_ID` | `testnet` | Yes |
-| `SUI_PACKAGE_ID` | `0xABC...` | Yes |
-| `SUI_BLIND_ESCROW_OBJECT_ID` | `0xDEF...` | Yes |
-| `SUI_TASK_REGISTRY_OBJECT_ID` | `0x789...` | Yes |
-| `SUI_BLIND_REPUTATION_OBJECT_ID` | `0xFED...` | Yes |
-| `SUI_ADMIN_CAP_ID` | `0x...` | For admin ops |
+| `SUI_PACKAGE_ID` | `0xd4296d049fbf05591b729434f9f73628f68d7fb939f24d2ac5b6c9d55ff0a44d` | Yes |
+| `SUI_BLIND_ESCROW_OBJECT_ID` | `0x642582b447f002fa7e0a6bbe8ea61915b74e46737469bdd6930600511f27402a` | Yes |
+| `SUI_TASK_REGISTRY_OBJECT_ID` | `0x606dd42af017b8093fcd8eff10ad440a2d2ad424b6f67f4ef0789c4cf51218ff` | Yes |
+| `SUI_BLIND_REPUTATION_OBJECT_ID` | `0xfd56d47bf24cb3d9354b16971d43fa4a0aa72bcbbd62dbe386cb72b6d9b32a87` | Yes |
+| `SUI_ADMIN_CAP_ID` | `0x2161b19b1dd3c9248016d53791c0e7947231df83184dc818bd0b99b9fc364fa0` | For admin ops |
 | `SUI_AGENT_PRIVATE_KEY` | `suiprivkey...` | For server-side TX |
 | `SUI_RPC_URL` | `https://fullnode.testnet.sui.io:443` | Has default |
 | `AGENT_PRIVATE_KEY` | `suiprivkey...` | Per-agent (Sui format) |

@@ -59,11 +59,11 @@ export const networks = {
     chainType: 'sui' as const,
     networkId: 'testnet' as const,
     rpc: ['https://fullnode.testnet.sui.io:443'],
-    packageId: '0x0',   // placeholder — replace with deployed package ID
+    packageId: '0xd4296d049fbf05591b729434f9f73628f68d7fb939f24d2ac5b6c9d55ff0a44d',
     sharedObjects: {
-      blindEscrow: '0x0',
-      taskRegistry: '0x0',
-      blindReputation: '0x0',
+      blindEscrow: '0x642582b447f002fa7e0a6bbe8ea61915b74e46737469bdd6930600511f27402a',
+      taskRegistry: '0x606dd42af017b8093fcd8eff10ad440a2d2ad424b6f67f4ef0789c4cf51218ff',
+      blindReputation: '0xfd56d47bf24cb3d9354b16971d43fa4a0aa72bcbbd62dbe386cb72b6d9b32a87',
     },
     explorer: 'https://testnet.suivision.xyz',
   },
