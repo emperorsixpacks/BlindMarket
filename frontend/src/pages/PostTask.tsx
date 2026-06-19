@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAccount, useWalletClient } from 'wagmi';
+import { useWalletClient } from 'wagmi';
 import { getIdentityToken, getAccessToken } from '@privy-io/react-auth';
 import { BrowserProvider, parseUnits, formatUnits } from 'ethers';
 import { useSignAndExecuteTransaction } from '@mysten/dapp-kit';
@@ -24,6 +24,7 @@ import { authedGet, authedPost } from '../lib/api';
 import { trackEvent } from '../hooks/useAnalytics';
 import { MARKETPLACE_TOKEN_ADDRESS, getNativeCurrency } from '../config/constants';
 import { useChain } from '../context/ChainContext';
+import { useChainAddress } from '../hooks/useChainWallet';
 
 // BlindEscrow contract's hard bounds on `duration` (seconds).
 // Source: BlindEscrow.sol:64-65 — MIN_DEADLINE = 1 hours, MAX_DEADLINE = 90 days.
@@ -61,10 +62,9 @@ export default function PostTask() {
   const { activeChain } = useChain();
   const isSui = activeChain === 'sui';
   const native = getNativeCurrency(activeChain);
-  const { address: evmAddress } = useAccount();
+  const address = useChainAddress();
   const { data: walletClient } = useWalletClient();
   const suiSignAndExecuteTx = useSignAndExecuteTransaction();
-  const address = isSui ? undefined : evmAddress;
   const navigate = useNavigate();
 
   const [form, setForm] = useState({
@@ -127,7 +127,7 @@ export default function PostTask() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!address || !walletClient) return;
+    if (!address || (!isSui && !walletClient)) return;
     if (submittingRef.current) return; // ignore a double-fire mid-post
     submittingRef.current = true;
 

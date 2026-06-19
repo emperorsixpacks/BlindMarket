@@ -8,18 +8,18 @@ import { useWallet } from '../context/WalletContext';
 
 export function useChainAddress(): string | undefined {
   const { activeChain } = useChain();
-  const { address: evmAddress } = useAccount();
+  const { address: evmAddress } = useWallet();
   const { address: suiAddress } = useSuiWallet();
 
-  return activeChain === 'sui' ? suiAddress : evmAddress;
+  return activeChain === 'sui' ? suiAddress : (evmAddress || undefined);
 }
 
 export function useChainIsConnected(): boolean {
   const { activeChain } = useChain();
-  const { isConnected: evmConnected } = useAccount();
+  const { address: evmAddress } = useWallet();
   const { isConnected: suiConnected } = useSuiWallet();
 
-  return activeChain === 'sui' ? suiConnected : evmConnected;
+  return activeChain === 'sui' ? suiConnected : !!evmAddress;
 }
 
 export function useChainConnect() {

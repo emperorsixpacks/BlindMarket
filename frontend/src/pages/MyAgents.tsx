@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useAccount, useBalance } from 'wagmi';
+import { useBalance } from 'wagmi';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import {
@@ -16,6 +16,7 @@ import {
 import { truncateAddress } from '../lib/utils';
 import { API_BASE_URL } from '../config/constants';
 import { authedPost } from '../lib/api';
+import { useChainAddress } from '../hooks/useChainWallet';
 
 // Mirrors AgentDetail's threshold so a low-gas chip here is consistent with
 // the warning the user sees once they click into the agent. If you change one,
@@ -68,7 +69,7 @@ const AGENTS_PAGE_SIZE = 20;
 type Act = 'start' | 'pause' | 'stop' | 'restart';
 
 export default function MyAgents() {
-  const { address } = useAccount();
+  const address = useChainAddress();
   const qc = useQueryClient();
   const [page, setPage] = useState(1);
 

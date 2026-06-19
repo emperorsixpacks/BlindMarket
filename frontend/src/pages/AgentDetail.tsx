@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
-import { useAccount, useBalance, useWalletClient } from 'wagmi';
+import { useBalance, useWalletClient } from 'wagmi';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { BrowserProvider, parseEther } from 'ethers';
 import {
@@ -23,6 +23,7 @@ import { truncateAddress } from '../lib/utils';
 import { get, authedPatch, authedPost } from '../lib/api';
 import { API_BASE_URL } from '../config/constants';
 import { AGENT_CAPABILITIES } from '../config/capabilities';
+import { useChainAddress } from '../hooks/useChainWallet';
 import {
   getAgentReviews,
   submitReview,
@@ -80,7 +81,7 @@ const ACTION_LABELS: Record<'start' | 'pause' | 'stop' | 'restart', string> = {
 
 export default function AgentDetail() {
   const { id } = useParams<{ id: string }>();
-  const { address } = useAccount();
+  const address = useChainAddress();
   const { data: walletClient } = useWalletClient();
   const qc = useQueryClient();
 

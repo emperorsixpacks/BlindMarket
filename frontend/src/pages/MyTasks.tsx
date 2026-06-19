@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { useAccount } from 'wagmi';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { formatUnits } from 'ethers';
@@ -21,6 +20,7 @@ import { authedGet } from '../lib/api';
 import { getAesKey } from '../lib/keyStash';
 import { getNativeCurrency } from '../config/constants';
 import { useChain } from '../context/ChainContext';
+import { useChainAddress } from '../hooks/useChainWallet';
 
 // ── Shapes returned by GET /api/v1/a2a/tasks/posted ──────────────────────
 //
@@ -114,7 +114,7 @@ function workerAddress(t: PostedTask): string | null {
 }
 
 export default function MyTasks() {
-  const { address } = useAccount();
+  const address = useChainAddress();
   const { activeChain } = useChain();
   const native = getNativeCurrency(activeChain);
   const qc = useQueryClient();
