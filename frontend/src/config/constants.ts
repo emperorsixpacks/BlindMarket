@@ -50,9 +50,25 @@ export const OG_CHAIN_CONFIG = {
 export const SUPPORTED_CHAINS = ['og', 'sui'] as const;
 export type SupportedChain = typeof SUPPORTED_CHAINS[number];
 
-/** Active chain — driven by VITE_ACTIVE_CHAIN env var (default: 'og'). */
-export const ACTIVE_CHAIN: SupportedChain =
-  (import.meta.env.VITE_ACTIVE_CHAIN as SupportedChain | undefined) ?? 'og';
+/**
+ * Active chain — driven by localStorage (set by the chain selector), falling
+ * back to VITE_ACTIVE_CHAIN env var, then 'og'.
+ *
+ * Components should prefer the reactive `useChain()` hook from ChainContext
+ * so they re-render when the user switches chains. This constant is a
+ * synchronous snapshot for non-React code (e.g. API interceptors).
+ */
+export const ACTIVE_CHAIN: SupportedChain = getActiveChain();
+
+export function getActiveChain(): SupportedChain {
+  try {
+    const saved = localStorage.getItem('bb.chain');
+    if (saved && (SUPPORTED_CHAINS as readonly string[]).includes(saved)) {
+      return saved as SupportedChain;
+    }
+  } catch {}
+  return (import.meta.env.VITE_ACTIVE_CHAIN as SupportedChain | undefined) ?? 'og';
+}
 
 // Sui chain config
 export const SUI_NETWORK_ID =
@@ -74,11 +90,36 @@ export const SUI_EXPLORER_URL =
     ? 'https://suivision.xyz'
     : `https://${SUI_NETWORK_ID}.suivision.xyz`);
 
+export const SUI_BLIND_ESCROW_OBJECT_ID =
+  import.meta.env.VITE_SUI_BLIND_ESCROW_OBJECT_ID || '0x0';
+
+export const SUI_TASK_REGISTRY_OBJECT_ID =
+  import.meta.env.VITE_SUI_TASK_REGISTRY_OBJECT_ID || '0x0';
+
+export const SUI_BLIND_REPUTATION_OBJECT_ID =
+  import.meta.env.VITE_SUI_BLIND_REPUTATION_OBJECT_ID || '0x0';
+
 export const SUI_CHAIN_CONFIG = {
   networkId: SUI_NETWORK_ID,
   rpcUrl: SUI_RPC_URL,
   packageId: SUI_PACKAGE_ID,
+  escrowObjectId: SUI_BLIND_ESCROW_OBJECT_ID,
+  taskRegistryObjectId: SUI_TASK_REGISTRY_OBJECT_ID,
+  reputationObjectId: SUI_BLIND_REPUTATION_OBJECT_ID,
   explorerUrl: SUI_EXPLORER_URL,
   nativeCurrency: { name: 'SUI', symbol: 'SUI', decimals: 9 },
 } as const;
+
+export const CHAIN_CONFIGS = {
+  og: OG_CHAIN_CONFIG,
+  sui: SUI_CHAIN_CONFIG,
+} as const;
+
+export function getChainConfig(chain: SupportedChain) {
+  return CHAIN_CONFIGS[chain];
+}
+
+export function getNativeCurrency(chain: SupportedChain) {
+  return getChainConfig(chain).nativeCurrency;
+}
 

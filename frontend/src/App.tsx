@@ -6,6 +6,9 @@ import { wagmiConfig } from './config/wagmi';
 import { ogTestnet } from './config/chains';
 import { WalletProvider } from './context/WalletContext';
 import { AuthProvider } from './context/AuthContext';
+import { ChainProvider } from './context/ChainContext';
+import { SuiWalletProvider } from './context/SuiWalletContext';
+import { ChainSelectorModal } from './components/bb/ChainSelectorModal';
 import { DashboardLayout } from './components/bb/DashboardLayout';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ThemeSync } from './components/ThemeSync';
@@ -52,82 +55,87 @@ function RouteFallback() {
 
 export default function App() {
   return (
-    <PrivyProvider
-      appId={privyAppId}
-      config={{
-        defaultChain: ogTestnet,
-        supportedChains: [ogTestnet],
-        appearance: { theme: 'dark' },
-        loginMethods: ['wallet', 'email', 'google', 'twitter'],
-        // Disable Coinbase Smart Wallet — CSW only supports a fixed chain list
-        // (Base, Mainnet, etc.) and throws "configured chains not supported"
-        // on 0G Galileo (16602), which stalls Privy's modal render.
-        externalWallets: {
-          coinbaseWallet: {
-            config: {
-              preference: { options: 'eoaOnly' },
+    <ChainProvider>
+      <SuiWalletProvider>
+      <PrivyProvider
+        appId={privyAppId}
+        config={{
+          defaultChain: ogTestnet,
+          supportedChains: [ogTestnet],
+          appearance: { theme: 'dark' },
+          loginMethods: ['wallet', 'email', 'google', 'twitter'],
+          // Disable Coinbase Smart Wallet — CSW only supports a fixed chain list
+          // (Base, Mainnet, etc.) and throws "configured chains not supported"
+          // on 0G Galileo (16602), which stalls Privy's modal render.
+          externalWallets: {
+            coinbaseWallet: {
+              config: {
+                preference: { options: 'eoaOnly' },
+              },
             },
           },
-        },
-        embeddedWallets: {
-          ethereum: {
-            createOnLogin: 'users-without-wallets',
+          embeddedWallets: {
+            ethereum: {
+              createOnLogin: 'users-without-wallets',
+            },
           },
-        },
-      }}
-    >
-      <WagmiProvider config={wagmiConfig}>
-        <WalletProvider>
-          <AuthProvider>
-            <ThemeSync />
-            <ErrorBoundary>
-            <Suspense fallback={<RouteFallback />}>
-            <Routes>
-              <Route path="/" element={<LandingV2 />} />
-              {/* The redesign (formerly previewed at /v2) is now the live
-                  landing at `/`. Redirect the old preview URL so existing
-                  bookmarks/links don't 404. */}
-              <Route path="/v2" element={<Navigate to="/" replace />} />
-              <Route path="/register/:token" element={<RegisterAgent />} />
-              <Route element={<DashboardLayout />}>
-                <Route path="/how-it-works" element={<HowItWorks />} />
-                <Route path="/tasks/new" element={<PostTask />} />
-                <Route path="/tasks/mine" element={<MyTasks />} />
-                <Route path="/tasks/templates" element={<TaskTemplates />} />
-                <Route path="/tasks/:id" element={<TaskDetail />} />
-                <Route path="/a2a" element={<A2ADashboard />} />
-                <Route path="/earnings" element={<Earnings />} />
-                <Route path="/settings" element={<Settings />} />
-                <Route path="/agents/browse" element={<AgentMarketplace />} />
-                <Route path="/agents/deploy" element={<DeployAgent />} />
-                <Route path="/agents/deploy/ui" element={<DeployAgentForm />} />
-                <Route path="/agents/deploy/sdk" element={<DeployAgentSdk />} />
-                <Route path="/agents/mine" element={<MyAgents />} />
-                <Route path="/agents/:id" element={<AgentDetail />} />
-                <Route path="/messages" element={<Messages />} />
-                <Route path="/metrics" element={<Metrics />} />
+        }}
+      >
+        <WagmiProvider config={wagmiConfig}>
+          <WalletProvider>
+            <AuthProvider>
+              <ThemeSync />
+              <ChainSelectorModal />
+              <ErrorBoundary>
+              <Suspense fallback={<RouteFallback />}>
+              <Routes>
+                <Route path="/" element={<LandingV2 />} />
+                {/* The redesign (formerly previewed at /v2) is now the live
+                    landing at `/`. Redirect the old preview URL so existing
+                    bookmarks/links don't 404. */}
+                <Route path="/v2" element={<Navigate to="/" replace />} />
+                <Route path="/register/:token" element={<RegisterAgent />} />
+                <Route element={<DashboardLayout />}>
+                  <Route path="/how-it-works" element={<HowItWorks />} />
+                  <Route path="/tasks/new" element={<PostTask />} />
+                  <Route path="/tasks/mine" element={<MyTasks />} />
+                  <Route path="/tasks/templates" element={<TaskTemplates />} />
+                  <Route path="/tasks/:id" element={<TaskDetail />} />
+                  <Route path="/a2a" element={<A2ADashboard />} />
+                  <Route path="/earnings" element={<Earnings />} />
+                  <Route path="/settings" element={<Settings />} />
+                  <Route path="/agents/browse" element={<AgentMarketplace />} />
+                  <Route path="/agents/deploy" element={<DeployAgent />} />
+                  <Route path="/agents/deploy/ui" element={<DeployAgentForm />} />
+                  <Route path="/agents/deploy/sdk" element={<DeployAgentSdk />} />
+                  <Route path="/agents/mine" element={<MyAgents />} />
+                  <Route path="/agents/:id" element={<AgentDetail />} />
+                  <Route path="/messages" element={<Messages />} />
+                  <Route path="/metrics" element={<Metrics />} />
 
-                {/* Pure-A2A pivot: H2H/H2A/A2H surfaces removed from the IA.
-                    Old deep-links bounce to the closest A2A equivalent so we
-                    don't 404 anyone with bookmarked URLs (or copy-paste
-                    links living in older READMEs). */}
-                <Route path="/tasks" element={<Navigate to="/a2a" replace />} />
-                <Route path="/agents" element={<Navigate to="/a2a" replace />} />
-                <Route path="/agent" element={<Navigate to="/tasks/new" replace />} />
-                <Route path="/worker" element={<Navigate to="/a2a" replace />} />
-                <Route path="/validators" element={<Navigate to="/how-it-works" replace />} />
-                <Route path="/verification" element={<Navigate to="/a2a" replace />} />
-                <Route path="/leaderboard" element={<Navigate to="/a2a" replace />} />
-              </Route>
-              <Route path="*" element={<DashboardLayout />}>
-                <Route path="*" element={<NotFound />} />
-              </Route>
-            </Routes>
-            </Suspense>
-            </ErrorBoundary>
-          </AuthProvider>
-        </WalletProvider>
-      </WagmiProvider>
-    </PrivyProvider>
+                  {/* Pure-A2A pivot: H2H/H2A/A2H surfaces removed from the IA.
+                      Old deep-links bounce to the closest A2A equivalent so we
+                      don't 404 anyone with bookmarked URLs (or copy-paste
+                      links living in older READMEs). */}
+                  <Route path="/tasks" element={<Navigate to="/a2a" replace />} />
+                  <Route path="/agents" element={<Navigate to="/a2a" replace />} />
+                  <Route path="/agent" element={<Navigate to="/tasks/new" replace />} />
+                  <Route path="/worker" element={<Navigate to="/a2a" replace />} />
+                  <Route path="/validators" element={<Navigate to="/how-it-works" replace />} />
+                  <Route path="/verification" element={<Navigate to="/a2a" replace />} />
+                  <Route path="/leaderboard" element={<Navigate to="/a2a" replace />} />
+                </Route>
+                <Route path="*" element={<DashboardLayout />}>
+                  <Route path="*" element={<NotFound />} />
+                </Route>
+              </Routes>
+              </Suspense>
+              </ErrorBoundary>
+            </AuthProvider>
+          </WalletProvider>
+        </WagmiProvider>
+      </PrivyProvider>
+      </SuiWalletProvider>
+    </ChainProvider>
   );
 }
