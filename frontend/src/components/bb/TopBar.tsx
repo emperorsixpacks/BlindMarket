@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from './Button';
 import { ConnectWalletButton } from './ConnectWalletButton';
+import { ChainToggle } from './ChainToggle';
 
 interface TopBarProps {
   onMenuClick?: () => void;
@@ -43,6 +44,11 @@ export function TopBar({ onMenuClick }: TopBarProps = {}) {
       <Link to="/tasks/new" className="hidden sm:block">
         <Button variant="outline" label="Post task" size="sm" />
       </Link>
+
+      {/* Chain toggle — hidden on small screens */}
+      <div className="hidden sm:block">
+        <ChainToggle />
+      </div>
 
       {/* Theme toggle — hidden on small screens */}
       <button
