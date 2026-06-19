@@ -149,7 +149,15 @@ export async function deployAgent(params: {
   storageRef?: string;
 }): Promise<DeployedAgent> {
   const { privateKey, publicKey } = generateKeyPair();
-  const walletAddress = new Wallet(`0x${privateKey}`).address;
+
+  let walletAddress: string;
+  if (config.chainType === 'sui') {
+    const { Ed25519Keypair } = await import('@mysten/sui/keypairs/ed25519');
+    const keypair = Ed25519Keypair.fromSecretKey(privateKey);
+    walletAddress = keypair.toSuiAddress();
+  } else {
+    walletAddress = new Wallet(`0x${privateKey}`).address;
+  }
 
   const encryptedPrivateKey = eciesEncrypt(
     Buffer.from(privateKey, 'hex'),

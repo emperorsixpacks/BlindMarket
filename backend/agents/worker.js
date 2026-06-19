@@ -1177,6 +1177,8 @@ async function runAcceptedTask(acceptedTaskHash, acceptedRootHash, acceptedWrapp
       await releaseTask(acceptedTaskHash);
       return;
     }
+    const evidenceHash = submitJson.data?.evidenceHash ?? '';
+    const evidenceHashHex = evidenceHash.startsWith('0x') ? evidenceHash.slice(2) : evidenceHash;
 
     let broadcastOk = false;
 
