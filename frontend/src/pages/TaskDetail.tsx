@@ -2,8 +2,11 @@ import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useSignAndExecuteTransaction } from '@mysten/dapp-kit';
 import { useTask } from '../hooks/useTasks';
 import { useWallet } from '../context/WalletContext';
+import { useChain } from '../context/ChainContext';
+import { useSuiWallet } from '../context/SuiWalletContext';
 import { useAuth } from '../context/AuthContext';
 import { Panel, SectionRule, Tag, Button, StatusTag, Skeleton, ErrorState } from '../components/bb';
 import { EncryptionIndicator } from '../components/EncryptionIndicator';
@@ -12,6 +15,9 @@ import { CustodyChain } from '../components/CustodyChain';
 import { truncateAddress, formatDate } from '../lib/utils';
 import { buildCancelTask, buildClaimTimeout } from '../services/tasks';
 import { signAndSendTx } from '../lib/txSigner';
+import { buildSuiCancelTask, buildSuiClaimTimeout } from '../lib/suiTxBuilder';
+import { getNativeCurrency } from '../config/constants';
+import { useChainExplorerUrl } from '../hooks/useChainWallet';
 import { TaskStatus, TaskStatusLabels } from '../types/api';
 
 const fadeUp = {
@@ -45,9 +51,15 @@ function Field({
 }
 
 export default function TaskDetail() {
-  const { id } = useParams<{ id: string }>();
-  const { data, isLoading, isError, refetch } = useTask(id);
+  const { id } = useParams();
+  const { data, isLoading, isError, refetch } = useTask(id || '');
   const { address, signer } = useWallet();
+  const { activeChain } = useChain();
+  useSuiWallet();
+  const suiSignAndExecuteTx = useSignAndExecuteTransaction();
+  const explorerUrl = useChainExplorerUrl();
+  const native = getNativeCurrency(activeChain);
+  const isSui = activeChain === 'sui';
   // Auth context kept for any future reads; not used in the A2A view path.
   void useAuth();
   const qc = useQueryClient();
@@ -59,9 +71,14 @@ export default function TaskDetail() {
   const cancelMutation = useMutation({
     mutationFn: async () => {
       if (!id) throw new Error('Missing task id');
-      if (!signer) throw new Error('Wallet not connected');
-      const tx = await buildCancelTask(id);
-      return signAndSendTx(signer, tx);
+      if (isSui) {
+        const tx = buildSuiCancelTask(id);
+        await suiSignAndExecuteTx.mutateAsync({ transaction: tx });
+      } else {
+        if (!signer) throw new Error('Wallet not connected');
+        const tx = await buildCancelTask(id);
+        await signAndSendTx(signer, tx);
+      }
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['tasks', id] }),
   });
@@ -69,9 +86,14 @@ export default function TaskDetail() {
   const timeoutMutation = useMutation({
     mutationFn: async () => {
       if (!id) throw new Error('Missing task id');
-      if (!signer) throw new Error('Wallet not connected');
-      const tx = await buildClaimTimeout(id);
-      return signAndSendTx(signer, tx);
+      if (isSui) {
+        const tx = buildSuiClaimTimeout(id);
+        await suiSignAndExecuteTx.mutateAsync({ transaction: tx });
+      } else {
+        if (!signer) throw new Error('Wallet not connected');
+        const tx = await buildClaimTimeout(id);
+        await signAndSendTx(signer, tx);
+      }
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['tasks', id] }),
   });
@@ -159,7 +181,7 @@ export default function TaskDetail() {
         </div>
         <div className="sm:text-right shrink-0">
           <div className="text-3xl font-bold font-mono text-cream">
-            {reward.toLocaleString(undefined, { maximumFractionDigits: 4 })} 0G
+            {reward.toLocaleString(undefined, { maximumFractionDigits: 4 })} {native.symbol}
           </div>
           <div className="text-[11px] tracking-wide text-ink-3 mt-1">Escrow locked</div>
         </div>
@@ -247,7 +269,7 @@ export default function TaskDetail() {
                 <Field label="Assignment TX" span2>
                   <p className="text-sm font-mono break-all">
                     <a
-                      href={`https://chainscan-new-york.0g.ai/tx/${a2aState.assignTxHash}`}
+                      href={`${explorerUrl}/tx/${a2aState.assignTxHash}`}
                       target="_blank"
                       rel="noreferrer"
                       className="text-cream hover:underline decoration-cream/30"
@@ -261,7 +283,7 @@ export default function TaskDetail() {
                 <Field label="Verification TX" span2>
                   <p className="text-sm font-mono break-all">
                     <a
-                      href={`https://chainscan-new-york.0g.ai/tx/${a2aState.verifyTxHash}`}
+                      href={`${explorerUrl}/tx/${a2aState.verifyTxHash}`}
                       target="_blank"
                       rel="noreferrer"
                       className="text-cream hover:underline decoration-cream/30"

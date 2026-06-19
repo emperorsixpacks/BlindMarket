@@ -19,6 +19,8 @@ import {
 import { useSocket } from '../hooks/useSocket';
 import { authedGet } from '../lib/api';
 import { getAesKey } from '../lib/keyStash';
+import { getNativeCurrency } from '../config/constants';
+import { useChain } from '../context/ChainContext';
 
 // ── Shapes returned by GET /api/v1/a2a/tasks/posted ──────────────────────
 //
@@ -70,31 +72,22 @@ const STATUS_LABELS: Record<number, string> = {
   0: 'open', 1: 'assigned', 2: 'submitted', 3: 'verified', 4: 'completed', 5: 'cancelled', 6: 'disputed',
 };
 
-// The marketplace settles every task in native 0G (18 decimals) on both
-// mainnet and testnet — see MARKETPLACE_TOKEN_ADDRESS in config/constants.ts.
-// If a whitelisted ERC-20 is ever added, this (and `sumRewards` below) must
-// switch on `onChain.token` for the right decimals/symbol.
-const NATIVE_DECIMALS = 18;
-const NATIVE_SYMBOL = '0G';
+// ── Chain-aware helpers ─────────────────────────────────────────────────
 
-// Convert a raw uint256 reward (wei, as string) to a 0G number. Uses
-// `formatUnits` rather than `Number(BigInt(raw)) / 1e18` because a single 0G is
-// 1e18 wei, which exceeds Number.MAX_SAFE_INTEGER (~9.007e15) — the old path
-// silently lost low-order digits for any amount ≳ 0.009 0G.
-function rewardToNumber(raw: string | undefined): number {
+function rewardToNumber(raw: string | undefined, decimals: number): number {
   if (!raw) return 0;
   try {
-    return Number(formatUnits(BigInt(raw), NATIVE_DECIMALS));
+    return Number(formatUnits(BigInt(raw), decimals));
   } catch {
     return 0;
   }
 }
 
-function formatReward(raw: string | undefined) {
+function formatReward(raw: string | undefined, decimals: number, symbol: string) {
   if (!raw) return '—';
   try {
-    const n = rewardToNumber(raw);
-    return `${n.toLocaleString(undefined, { maximumFractionDigits: 4 })} ${NATIVE_SYMBOL}`;
+    const n = rewardToNumber(raw, decimals);
+    return `${n.toLocaleString(undefined, { maximumFractionDigits: 4 })} ${symbol}`;
   } catch {
     return raw;
   }
@@ -122,6 +115,8 @@ function workerAddress(t: PostedTask): string | null {
 
 export default function MyTasks() {
   const { address } = useAccount();
+  const { activeChain } = useChain();
+  const native = getNativeCurrency(activeChain);
   const qc = useQueryClient();
   const [filter, setFilter] = useState<'all' | 'open' | 'active' | 'completed'>('all');
   const [sort, setSort] = useState<'newest' | 'oldest' | 'highest-reward' | 'lowest-reward'>('newest');
@@ -204,7 +199,7 @@ export default function MyTasks() {
     (s, t) => s + (t.onChain ? BigInt(t.onChain.reward) : 0n),
     0n,
   );
-  const totalSpent = Number(formatUnits(totalSpentWei, NATIVE_DECIMALS));
+  const totalSpent = Number(formatUnits(totalSpentWei, native.decimals));
 
   const FILTERS: { id: 'all' | 'open' | 'active' | 'completed'; label: string }[] = [
     { id: 'all', label: 'All' },
@@ -236,7 +231,7 @@ export default function MyTasks() {
         <StatCard label="Open" value={String(openCount)} sub="Awaiting worker" />
         <div className="border-l border-line"><StatCard label="Active" value={String(activeCount)} sub="In progress" subColor="warn" /></div>
         <div className="border-t border-l-0 sm:border-t-0 sm:border-l border-line"><StatCard label="Completed" value={String(completedCount)} sub="All time" subColor="ok" /></div>
-        <div className="border-t border-l border-line sm:border-t-0"><StatCard label="Total spent" value={`${totalSpent.toLocaleString(undefined, { maximumFractionDigits: 4 })} ${NATIVE_SYMBOL}`} sub="Paid out on completed tasks" /></div>
+        <div className="border-t border-l border-line sm:border-t-0"><StatCard label="Total spent" value={`${totalSpent.toLocaleString(undefined, { maximumFractionDigits: 4 })} ${native.symbol}`} sub="Paid out on completed tasks" /></div>
       </div>
 
       <div className="border border-line">
@@ -364,7 +359,7 @@ export default function MyTasks() {
                   <div className="pt-3 border-t border-line flex items-end justify-between">
                     <div>
                       <div className="text-lg font-mono font-semibold text-cream leading-none">
-                        {formatReward(t.onChain?.reward)}
+                        {formatReward(t.onChain?.reward, native.decimals, native.symbol)}
                       </div>
                       <div className="text-[11px] text-ink-3 mt-1.5">
                         {worker ? (

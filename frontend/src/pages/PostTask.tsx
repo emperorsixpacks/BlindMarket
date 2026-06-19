@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAccount, useWalletClient } from 'wagmi';
 import { getIdentityToken, getAccessToken } from '@privy-io/react-auth';
 import { BrowserProvider, parseUnits, formatUnits } from 'ethers';
+import { useSignAndExecuteTransaction } from '@mysten/dapp-kit';
 import {
   Breadcrumb,
   PageHeader,
@@ -18,9 +19,11 @@ import {
 import { aesEncrypt, eciesEncrypt, generateAesKey, sha256, toBase64, toBytes } from '../lib/crypto';
 import { stashAesKey } from '../lib/keyStash';
 import { signAndSendTx } from '../lib/txSigner';
+import { buildSuiCreateTask } from '../lib/suiTxBuilder';
 import { authedGet, authedPost } from '../lib/api';
 import { trackEvent } from '../hooks/useAnalytics';
-import { MARKETPLACE_TOKEN_ADDRESS } from '../config/constants';
+import { MARKETPLACE_TOKEN_ADDRESS, getNativeCurrency } from '../config/constants';
+import { useChain } from '../context/ChainContext';
 
 // BlindEscrow contract's hard bounds on `duration` (seconds).
 // Source: BlindEscrow.sol:64-65 — MIN_DEADLINE = 1 hours, MAX_DEADLINE = 90 days.
@@ -55,8 +58,13 @@ import { AGENT_CAPABILITIES } from '../config/capabilities';
   const TOKEN = MARKETPLACE_TOKEN_ADDRESS;
 
 export default function PostTask() {
-  const { address } = useAccount();
+  const { activeChain } = useChain();
+  const isSui = activeChain === 'sui';
+  const native = getNativeCurrency(activeChain);
+  const { address: evmAddress } = useAccount();
   const { data: walletClient } = useWalletClient();
+  const suiSignAndExecuteTx = useSignAndExecuteTransaction();
+  const address = isSui ? undefined : evmAddress;
   const navigate = useNavigate();
 
   const [form, setForm] = useState({
@@ -150,13 +158,9 @@ export default function PostTask() {
       const token = idTok || accTok;
       if (!token) throw new Error('No authentication token available. Please try logging out and back in.');
 
-      // 0. Handle Payment (Native 0G)
-      console.log('[PostTask] Initializing provider for payment setup...');
-      const provider = new BrowserProvider(walletClient.transport);
-      const signer = await provider.getSigner();
-
-      // Treat input as 0G units (18 decimals)
-      const amountWei = parseUnits(form.amount, 18);
+      // 0. Handle Payment (Native token)
+      const amountBase = parseUnits(form.amount, native.decimals);
+      console.log(`[PostTask] Amount: ${form.amount} ${native.symbol} (${amountBase} base units)`);
 
       // 1. Discover eligible executors
       console.log('[PostTask] Looking up matching executors...');
@@ -263,6 +267,12 @@ export default function PostTask() {
         console.warn('[PostTask] key-custody seal skipped:', (e as Error).message);
       }
 
+      let evmSigner: Awaited<ReturnType<BrowserProvider['getSigner']>> | undefined;
+      if (!isSui) {
+        const provider = new BrowserProvider(walletClient!.transport);
+        evmSigner = await provider.getSigner();
+      }
+
       // 5. Compute duration (seconds from now) from the chosen deadline.
       //    Re-evaluate at submit time so the value is accurate even if the
       //    form sat open for a while between picking the deadline and clicking
@@ -292,7 +302,7 @@ export default function PostTask() {
       const taskJson = await authedPost<any>('/api/v1/tasks', {
         taskHash,
         token: TOKEN,
-        amount: amountWei.toString(),
+        amount: amountBase.toString(),
         category: 'general',
         locationZone: form.locationZone,
         duration: String(durationSecs),
@@ -305,15 +315,26 @@ export default function PostTask() {
         wrappedKeys,
       }, token);
 
-      // 7. Sign and send via MetaMask
+      // 7. Sign and send — EVM via ethers/MetaMask, Sui via wallet
       setStatus('signing');
-      console.log(`[PostTask] Signing registration TX with value ${amountWei}...`);
-      const sent = await signAndSendTx(signer, taskJson.unsignedTx, BigInt(amountWei));
-      // Always index by the real submitted hash. Never fall back to an empty
-      // string: the tx is on-chain and the backend now polls the receipt, so a
-      // transiently-lagging RPC must not strand a funded task.
-      const txHash = sent.hash;
-      console.log(`[PostTask] Task TX submitted: hash=${txHash} block=${sent.receipt?.blockNumber ?? 'pending'}`);
+      let txHash: string;
+      if (isSui) {
+        const suiTx = buildSuiCreateTask(
+          taskHash,
+          amountBase.toString(),
+          'general',
+          form.locationZone,
+          Math.floor(Date.now() / 1000) + durationSecs,
+        );
+        const result = await suiSignAndExecuteTx.mutateAsync({ transaction: suiTx });
+        txHash = result.digest;
+        console.log(`[PostTask] Sui task TX submitted: digest=${txHash}`);
+      } else {
+        console.log(`[PostTask] Signing registration TX with value ${amountBase}...`);
+        const sent = await signAndSendTx(evmSigner!, taskJson.unsignedTx, BigInt(amountBase));
+        txHash = sent.hash;
+        console.log(`[PostTask] Task TX submitted: hash=${txHash} block=${sent.receipt?.blockNumber ?? 'pending'}`);
+      }
 
       // 8. Register A2A meta on the backend, gated on the receipt. Previously
       //    meta was written eagerly in step 6 — but if the createTask tx
@@ -592,7 +613,7 @@ export default function PostTask() {
             <SectionRule num="02" title="Payment" />
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <FormField
-                label="Bounty (0G)"
+                label={`Bounty (${native.symbol})`}
                 required
                 hint="85% to worker, 15% protocol fee."
               >
@@ -606,11 +627,11 @@ export default function PostTask() {
                   onChange={e => setForm(f => ({ ...f, amount: e.target.value }))}
                 />
                 {form.amount && !isNaN(parseFloat(form.amount)) && (() => {
-                  const amountinWei = parseUnits(form.amount, 18);
+                  const amt = parseUnits(form.amount, native.decimals);
                   return (
                     <div className="mt-1.5">
                       <Tag tone="neutral" className="font-mono">
-                        {formatUnits(amountinWei, 18)} 0G
+                        {formatUnits(amt, native.decimals)} {native.symbol}
                       </Tag>
                     </div>
                   );
