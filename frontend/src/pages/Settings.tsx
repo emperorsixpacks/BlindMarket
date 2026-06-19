@@ -9,9 +9,12 @@ import {
   Tag,
   FormField,
 } from '../components/bb';
-import { useWallet } from '../context/WalletContext';
+import { useChain } from '../context/ChainContext';
 import { useReputation } from '../hooks/useReputation';
-import { isMainnet, OG_CHAIN_ID, OG_RPC_URL } from '../config/constants';
+import {
+  isMainnet, OG_CHAIN_ID, OG_RPC_URL,
+  SUI_NETWORK_ID, SUI_RPC_URL,
+} from '../config/constants';
 import { authedGet, authedPost, authedDelete } from '../lib/api';
 
 const NOTIF_KEYS = {
@@ -32,11 +35,18 @@ function saveBool(key: string, v: boolean) {
 }
 
 export default function Settings() {
-  const { chainId, isCorrectChain, switchChain } = useWallet();
-  const { address, isConnected } = useAccount();
+  const { activeChain } = useChain();
+  const { address: evmAddress, isConnected: evmConnected } = useAccount();
+  const isConnected = activeChain === 'sui' ? false : evmConnected;
+  const address = activeChain === 'sui' ? undefined : evmAddress;
   const { data: reputation } = useReputation(address ?? null);
   const { user, linkWallet } = usePrivy();
   const { unlink } = useUnlinkWallet();
+  const chainLabel = activeChain === 'sui' ? 'Sui Testnet' : `0G ${isMainnet ? 'Mainnet' : 'Galileo'}`;
+  const chainIdLabel = activeChain === 'sui' ? SUI_NETWORK_ID : String(OG_CHAIN_ID);
+  const rpcDisplay = activeChain === 'sui'
+    ? SUI_RPC_URL.replace(/^https?:\/\//, '')
+    : OG_RPC_URL.replace(/^https?:\/\//, '');
 
 
   const [notifyPayouts, setNotifyPayouts] = useState(() => loadBool(NOTIF_KEYS.payout, true));
@@ -206,27 +216,14 @@ export default function Settings() {
             <SectionRule num="03" title="Network" />
 
             <FormField
-              label="Supported chain"
-              hint={`BlindMarket runs on 0G ${isMainnet ? 'Mainnet' : 'Galileo'} (chain ID ${isMainnet ? 16661 : 16602}).`}
+              label="Active chain"
+              hint={`Currently set to ${activeChain === 'sui' ? 'Sui' : '0G'}. Change via the header dropdown.`}
             >
               <div className="px-3 py-2.5 bg-surface-2 border border-line text-sm flex items-center gap-2 flex-wrap">
-                <Tag tone={isCorrectChain ? 'ok' : 'warn'}>
-                  0G {isMainnet ? 'Mainnet' : 'Galileo'} · <span className="font-mono">{OG_CHAIN_ID}</span>
+                <Tag tone="ok">
+                  {activeChain === 'sui' ? 'Sui' : '0G'} · <span className="font-mono">{chainIdLabel}</span>
                 </Tag>
-                {chainId != null && chainId !== OG_CHAIN_ID && (
-                  <>
-                    <span className="text-ink-3">
-                      Currently on chain <span className="font-mono">{chainId}</span>
-                    </span>
-                    <button
-                      onClick={switchChain}
-                      className="ml-auto text-xs underline underline-offset-2 text-cream hover:text-ink transition-colors"
-                    >
-                      Switch network
-                    </button>
-                  </>
-                )}
-                {isCorrectChain && <span className="ml-auto text-xs text-ok">Active</span>}
+                <span className="ml-auto text-xs text-ok">{chainLabel}</span>
               </div>
             </FormField>
           </div>
@@ -321,14 +318,14 @@ export default function Settings() {
                   color: isConnected ? 'text-ok' : 'text-ink-3',
                 },
                 {
-                  label: 'Chain ID',
-                  value: chainId != null ? String(chainId) : '—',
+                  label: activeChain === 'sui' ? 'Network' : 'Chain ID',
+                  value: activeChain === 'sui' ? SUI_NETWORK_ID : String(OG_CHAIN_ID),
                   mono: true,
-                  color: isCorrectChain ? 'text-ok' : 'text-warn',
+                  color: 'text-ok',
                 },
                 {
                   label: 'RPC',
-                  value: OG_RPC_URL.replace(/^https?:\/\//, ''),
+                  value: rpcDisplay,
                   mono: true,
                   color: 'text-ink-3',
                 },

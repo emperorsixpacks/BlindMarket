@@ -19,7 +19,7 @@ import {
   useRegisterAgent,
 } from '../hooks/useA2A';
 import { useAuth } from '../context/AuthContext';
-import { useAccount } from 'wagmi';
+import { useChainAddress } from '../hooks/useChainWallet';
 import { getOrCreateExecutorIdentity } from '../lib/executorIdentity';
 import { AGENT_CAPABILITIES as ALL_CAPABILITIES } from '../config/capabilities';
 
@@ -47,7 +47,7 @@ export default function A2ADashboard() {
   const [registerError, setRegisterError] = useState<string | null>(null);
 
   const { isAuthenticated } = useAuth();
-  const { address } = useAccount();
+  const address = useChainAddress();
   const { data: profile } = useAgentProfile();
   const { data: browse, isLoading: browseLoading, isError: browseError, refetch: refetchBrowse } = useBrowseAgentTasks({ enabled: activeTab === 'browse' });
   const { data: execs, isLoading: execsLoading, isError: execsError, refetch: refetchExecs } = useMyExecutions({ enabled: activeTab === 'executions' });

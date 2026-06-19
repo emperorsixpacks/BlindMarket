@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { useAccount } from 'wagmi';
 import { useQuery } from '@tanstack/react-query';
 import {
   Breadcrumb,
@@ -14,8 +13,10 @@ import {
 } from '../components/bb';
 import { useAccountingEntries, useAccountingSummary } from '../hooks/useAccounting';
 import { useAuth } from '../context/AuthContext';
+import { useChain } from '../context/ChainContext';
+import { useChainAddress } from '../hooks/useChainWallet';
 import type { Transaction } from '../services/accounting';
-import { API_BASE_URL } from '../config/constants';
+import { API_BASE_URL, getNativeCurrency } from '../config/constants';
 
 type Tab = 'transactions' | 'my_agents';
 
@@ -32,10 +33,10 @@ type Agent = {
   inftTokenId?: number;
 };
 
-function format0G(n: number | null | undefined): string {
+function formatCurrency(n: number | null | undefined, symbol: string): string {
   if (n == null || !Number.isFinite(n)) return '—';
   const sign = n < 0 ? '-' : n > 0 ? '+' : '';
-  return `${sign}${Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })} 0G`;
+  return `${sign}${Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })} ${symbol}`;
 }
 
 function formatTime(iso: string): string {
@@ -81,7 +82,10 @@ export default function Earnings() {
   const [tab, setTab] = useState<Tab>('transactions');
   const [txPage, setTxPage] = useState(1);
   const { isAuthenticated } = useAuth();
-  const { address } = useAccount();
+  const { activeChain } = useChain();
+  const address = useChainAddress();
+  const native = getNativeCurrency(activeChain);
+  const fmt = (n: number | null | undefined) => formatCurrency(n, native.symbol);
   const { data: summary, isLoading: summaryLoading } = useAccountingSummary();
   const { data: entriesRes, isLoading: entriesLoading, error: entriesError } = useAccountingEntries(undefined, undefined, undefined, txPage, PAGE_SIZE);
   const { data: agents, isLoading: agentsLoading } = useQuery({
@@ -118,14 +122,14 @@ export default function Earnings() {
       header: 'Amount',
       width: '130px',
       align: 'right',
-      cell: (p) => <span className="font-mono font-semibold text-ink">{format0G(p.amount)}</span>,
+      cell: (p) => <span className="font-mono font-semibold text-ink">{fmt(p.amount)}</span>,
     },
     {
       key: 'fee',
       header: 'Fee',
       width: '120px',
       align: 'right',
-      cell: (p) => <span className="font-mono text-ink-3">{format0G(p.fee)}</span>,
+      cell: (p) => <span className="font-mono text-ink-3">{fmt(p.fee)}</span>,
     },
     {
       key: 'tx',
@@ -167,14 +171,14 @@ export default function Earnings() {
       header: 'Amount',
       width: '120px',
       align: 'right',
-      cell: (tx) => <span className={`font-mono font-semibold ${amountClass(tx.amount)}`}>{format0G(tx.amount)}</span>,
+      cell: (tx) => <span className={`font-mono font-semibold ${amountClass(tx.amount)}`}>{fmt(tx.amount)}</span>,
     },
     {
       key: 'net',
       header: 'Net',
       width: '110px',
       align: 'right',
-      cell: (tx) => <span className="font-mono text-ink-3">{format0G(tx.net)}</span>,
+      cell: (tx) => <span className="font-mono text-ink-3">{fmt(tx.net)}</span>,
     },
     {
       key: 'tx',
@@ -244,13 +248,13 @@ export default function Earnings() {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-0 border border-line mb-8">
         <StatCard
           label="Total earned"
-          value={summaryLoading ? '…' : format0G(summary?.totalEarned)}
+          value={summaryLoading ? '…' : fmt(summary?.totalEarned)}
           sub={summary && summary.taskCount > 0 ? `${summary.taskCount} tasks` : 'Across all time'}
         />
         <div className="border-l border-line">
           <StatCard
             label="Net revenue"
-            value={summaryLoading ? '…' : format0G(summary?.netRevenue)}
+            value={summaryLoading ? '…' : fmt(summary?.netRevenue)}
             sub="After fees"
             subColor="ok"
           />
@@ -258,7 +262,7 @@ export default function Earnings() {
         <div className="border-l border-line">
           <StatCard
             label="Total fees"
-            value={summaryLoading ? '…' : format0G(summary?.totalFees)}
+            value={summaryLoading ? '…' : fmt(summary?.totalFees)}
             sub="15% platform"
             subColor="warn"
           />
