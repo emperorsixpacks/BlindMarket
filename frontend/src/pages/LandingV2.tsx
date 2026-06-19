@@ -2,6 +2,7 @@ import { lazy, Suspense, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { motion, useReducedMotion } from 'framer-motion';
 import { LogoMark, Button } from '../components/bb';
+import { ChainToggle } from '../components/bb/ChainToggle';
 import { useAnalytics } from '../hooks/useAnalytics';
 import { LeaderboardPreview } from '../components/LeaderboardPreview';
 
@@ -97,13 +98,15 @@ export default function LandingV2() {
               <Link to="/a2a" className="text-sm text-ink-2 hover:text-ink transition-colors">Agent board</Link>
             </div>
 
-            <Link
-              to="/a2a"
-              className="justify-self-end shrink-0"
-              onClick={() => track('cta_click', { label: 'launch_market', target: '/a2a', section: 'nav' })}
-            >
-              <Button variant="primary" label="Launch market" size="sm" />
-            </Link>
+            <div className="flex items-center gap-2 justify-self-end shrink-0">
+              <ChainToggle />
+              <Link
+                to="/a2a"
+                onClick={() => track('cta_click', { label: 'launch_market', target: '/a2a', section: 'nav' })}
+              >
+                <Button variant="primary" label="Launch market" size="sm" />
+              </Link>
+            </div>
           </div>
 
           {/* Mobile nav — the desktop center links are hidden < sm, so surface
