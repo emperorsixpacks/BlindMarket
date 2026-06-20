@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAccount, useWalletClient, useBalance } from 'wagmi';
+import { useWalletClient, useBalance } from 'wagmi';
 import { recoverPublicKey, hashMessage } from 'viem';
 import { BrowserProvider, parseEther, formatEther } from 'ethers';
+import { useSignPersonalMessage, useSignAndExecuteTransaction, useCurrentAccount, useSuiClient } from '@mysten/dapp-kit';
 import {
   Breadcrumb,
   PageHeader,
@@ -18,6 +19,10 @@ import { HeaderManager } from '../components/bb/HeaderManager';
 import { QueryParamManager } from '../components/bb/QueryParamManager';
 import { get, post } from '../lib/api';
 import { AGENT_CAPABILITIES } from '../config/capabilities';
+import { useChain } from '../context/ChainContext';
+import { useChainAddress } from '../hooks/useChainWallet';
+import { getNativeCurrency } from '../config/constants';
+import { buildSuiTransferCoin } from '../lib/suiTxBuilder';
 
 interface Tool {
   type: 'http' | 'mcp';
@@ -33,6 +38,7 @@ interface Tool {
 
 const OG_COMPUTE_DEPOSIT = '1.5';
 const DEPLOY_FUND_AMOUNT = '0.005';
+const SUI_DEPLOY_FUND_AMOUNT = '50000000'; // 0.05 SUI in MIST (9 decimals)
 
 function fundAmount(provider: string) {
   return provider === '0g-compute' ? OG_COMPUTE_DEPOSIT : DEPLOY_FUND_AMOUNT;
@@ -42,6 +48,9 @@ function minOwnerBalance(provider: string) {
   const amt = parseFloat(fundAmount(provider));
   return (amt + 0.055).toFixed(3);
 }
+
+const SUI_FAUCET_URL = 'https://faucet.testnet.sui.io';
+const OG_FAUCET_URL = 'https://faucet.0g.ai';
 
 type Provider = 'openai' | 'anthropic' | 'groq' | 'gemini' | '0g-compute';
 type ProviderModels = Record<Provider, string[]>;
@@ -120,9 +129,18 @@ const selectClass =
   'w-full px-3 py-2.5 bg-surface-2 border border-line text-ink text-sm focus:border-cream';
 
 export default function DeployAgentForm() {
-  const { address } = useAccount();
+  const { activeChain } = useChain();
+  const isSui = activeChain === 'sui';
+  const native = getNativeCurrency(activeChain);
+  const address = useChainAddress();
   const { data: walletClient } = useWalletClient();
   const navigate = useNavigate();
+
+  // SUI wallet
+  const suiAccount = useCurrentAccount();
+  const suiClient = useSuiClient();
+  const { mutateAsync: signPersonalMessage } = useSignPersonalMessage();
+  const { mutateAsync: signAndExecute } = useSignAndExecuteTransaction();
 
   const [providers, setProviders] = useState<ProviderModels>({
     openai: ['gpt-4o', 'gpt-4o-mini'],
@@ -166,13 +184,27 @@ export default function DeployAgentForm() {
   const [agentId, setAgentId] = useState('');
   const [fundingSkipped, setFundingSkipped] = useState(false);
 
+  // EVM balance (for 0G chain)
   const { data: ownerBalance } = useBalance({
     address: address as `0x${string}` | undefined,
-    query: { enabled: !!address },
+    query: { enabled: !!address && !isSui },
   });
-  const ownerBalanceEther = ownerBalance ? parseFloat(formatEther(ownerBalance.value)) : 0;
-  const deployFundAmt = fundAmount(form.provider);
-  const minBal = minOwnerBalance(form.provider);
+
+  // SUI balance
+  const [suiBalanceMist, setSuiBalanceMist] = useState<string>('0');
+  useEffect(() => {
+    if (!isSui || !address) { setSuiBalanceMist('0'); return; }
+    suiClient.getBalance({ owner: address })
+      .then(r => setSuiBalanceMist(r.totalBalance))
+      .catch(() => setSuiBalanceMist('0'));
+  }, [isSui, address, suiClient]);
+
+  const ownerBalanceEther = isSui
+    ? parseInt(suiBalanceMist) / (10 ** native.decimals)
+    : ownerBalance ? parseFloat(formatEther(ownerBalance.value)) : 0;
+
+  const deployFundAmt = isSui ? SUI_DEPLOY_FUND_AMOUNT : fundAmount(form.provider);
+  const minBal = isSui ? (parseFloat(SUI_DEPLOY_FUND_AMOUNT) / (10 ** native.decimals) + 0.01).toFixed(4) : minOwnerBalance(form.provider);
   const hasEnoughForDeploy = ownerBalanceEther >= parseFloat(minBal);
 
   // model IDs don't match router API — no per-model pricing shown
@@ -240,15 +272,27 @@ export default function DeployAgentForm() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!address || !walletClient) return;
+    if (!address) return;
+    if (!isSui && !walletClient) return;
+    if (isSui && !suiAccount) return;
     setStatus('deploying');
     setError('');
     setFundingSkipped(false);
     try {
       const msg = `BlindMarket agent deployment\nOwner: ${address}`;
-      const sig = await walletClient.signMessage({ message: msg });
-      const recovered = await recoverPublicKey({ hash: hashMessage(msg), signature: sig });
-      const ownerPublicKey = recovered.replace(/^0x/, '');
+      let ownerPublicKey: string;
+
+      if (isSui) {
+        // SUI: sign message to prove ownership, get Ed25519 public key
+        await signPersonalMessage({ message: new TextEncoder().encode(msg) });
+        if (!suiAccount?.publicKey) throw new Error('SUI wallet public key not available');
+        ownerPublicKey = Array.from(suiAccount.publicKey).map(b => b.toString(16).padStart(2, '0')).join('');
+      } else {
+        // EVM: sign message and recover secp256k1 public key
+        const sig = await walletClient!.signMessage({ message: msg });
+        const recovered = await recoverPublicKey({ hash: hashMessage(msg), signature: sig });
+        ownerPublicKey = recovered.replace(/^0x/, '');
+      }
 
       const data = await post<{ id: string; walletAddress?: string }>('/api/v1/agents/deploy', {
         ...form,
@@ -280,13 +324,18 @@ export default function DeployAgentForm() {
 
       setStatus('funding');
       try {
-        const provider = new BrowserProvider(walletClient.transport);
-        const signer = await provider.getSigner();
-        const tx = await signer.sendTransaction({
-          to: data.walletAddress,
-          value: parseEther(deployFundAmt),
-        });
-        await tx.wait();
+        if (isSui) {
+          const tx = buildSuiTransferCoin(data.walletAddress, SUI_DEPLOY_FUND_AMOUNT);
+          await signAndExecute({ transaction: tx });
+        } else {
+          const provider = new BrowserProvider(walletClient!.transport);
+          const signer = await provider.getSigner();
+          const tx = await signer.sendTransaction({
+            to: data.walletAddress,
+            value: parseEther(fundAmount(form.provider)),
+          });
+          await tx.wait();
+        }
       } catch (fundErr) {
         console.warn('[deploy] funding step failed:', (fundErr as Error).message);
         setFundingSkipped(true);
@@ -321,15 +370,15 @@ export default function DeployAgentForm() {
                 <span>Agent is unfunded</span>
               </div>
               <p>
-                This agent's wallet has <span className="font-mono">0 0G</span> and can't submit
+                This agent's wallet has <span className="font-mono">0 {native.symbol}</span> and can't submit
                 evidence on-chain. Open the agent's page and click "Top up gas" to send{' '}
-                <span className="font-mono">{form.provider === '0g-compute' ? OG_COMPUTE_DEPOSIT : DEPLOY_FUND_AMOUNT} 0G</span> from your wallet.
+                <span className="font-mono">{isSui ? '0.05' : (form.provider === '0g-compute' ? OG_COMPUTE_DEPOSIT : DEPLOY_FUND_AMOUNT)} {native.symbol}</span> from your wallet.
               </p>
             </div>
           ) : (
             <div className="flex items-center justify-center gap-2 text-[13px] text-ok">
               <Icon name="check" size={15} />
-              <span>Funded with <span className="font-mono">{deployFundAmt} 0G</span> for gas</span>
+              <span>Funded with <span className="font-mono">{isSui ? '0.05' : deployFundAmt} {native.symbol}</span> for gas</span>
             </div>
           )}
 
@@ -634,26 +683,26 @@ export default function DeployAgentForm() {
                 </div>
                 <ol className="text-[13px] text-ink-2 leading-relaxed space-y-1 list-decimal list-inside">
                   <li>Sign a message — no gas, derives your owner public key for encryption.</li>
-                  <li>Send <span className="font-mono">{deployFundAmt} 0G</span> to the new agent wallet{form.provider === '0g-compute' ? ' — covers ledger deposit + gas for 0G Compute' : ' — pays for its gas'}.</li>
+                  <li>Send <span className="font-mono">{isSui ? '0.05' : fundAmount(form.provider)} {native.symbol}</span> to the new agent wallet{!isSui && form.provider === '0g-compute' ? ' — covers ledger deposit + gas for 0G Compute' : ' — pays for its gas'}.</li>
                 </ol>
                 <div className="text-[13px] text-ink-3 pt-0.5">
                   Your wallet balance:{' '}
                   <span className="font-mono text-ink-2">
-                    {ownerBalance ? `${ownerBalanceEther.toFixed(4)} 0G` : '…'}
+                    {ownerBalanceEther ? `${ownerBalanceEther.toFixed(4)} ${native.symbol}` : '…'}
                   </span>
                 </div>
               </div>
 
-              {!hasEnoughForDeploy && ownerBalance && (
+              {!hasEnoughForDeploy && ownerBalanceEther > 0 && (
                 <div className="mb-4 border border-err/40 bg-err/5 px-4 py-3.5 text-[13px] text-ink-2 leading-relaxed space-y-1.5">
                   <div className="flex items-center gap-2 font-semibold text-err">
                     <Icon name="bolt" size={15} />
-                    <span>Not enough 0G to fund the agent</span>
+                    <span>Not enough {native.symbol} to fund the agent</span>
                   </div>
                   <p>
-                    You need at least <span className="font-mono">{minBal} 0G</span> (fund
+                    You need at least <span className="font-mono">{minBal} {native.symbol}</span> (fund
                     amount plus gas for the transfer). Top up your wallet at{' '}
-                    <a href="https://faucet.0g.ai" target="_blank" rel="noreferrer" className="text-cream underline">faucet.0g.ai</a>
+                    <a href={isSui ? SUI_FAUCET_URL : OG_FAUCET_URL} target="_blank" rel="noreferrer" className="text-cream underline">{isSui ? 'Sui testnet faucet' : 'faucet.0g.ai'}</a>
                     {' '}then refresh.
                   </p>
                 </div>
@@ -668,7 +717,7 @@ export default function DeployAgentForm() {
                     status === 'deploying'
                       ? 'Deploying…'
                       : status === 'funding'
-                        ? `Funding agent with ${deployFundAmt} 0G…`
+                        ? `Funding agent with ${isSui ? '0.05' : fundAmount(form.provider)} ${native.symbol}…`
                         : 'Deploy + fund agent →'
                   }
                 />
