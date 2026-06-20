@@ -59,6 +59,7 @@ interface AgentDetails {
   tasksCompleted?: number; totalEarned?: string; tools?: AgentTool[];
   capabilities?: string[];
   minReward?: string;
+  chainType?: 'evm' | 'sui';
   reputation?: { score: number; avgScore: number; tasksCompleted: number; disputes: number };
   decayedReputation?: { rawScore: number; decayedScore: number; tasksCompleted: number; disputes: number };
 }
@@ -96,10 +97,11 @@ export default function AgentDetail() {
   const { mutateAsync: signAndExecute } = useSignAndExecuteTransaction();
 
   const [agent, setAgent] = useState<AgentDetails | null>(null);
-  // Detect agent wallet type from address format.
-  // SUI addresses from Ed25519Keypair.toSuiAddress() are 0x + 64 hex = 66 chars.
-  // EVM addresses are 0x + 40 hex = 42 chars.
-  const isSui = agent?.walletAddress?.length === 66 && agent.walletAddress.startsWith('0x');
+  // Detect agent wallet type — use explicit chainType if available,
+  // fall back to address format detection for legacy agents.
+  const isSui = agent?.chainType
+    ? agent.chainType === 'sui'
+    : agent?.walletAddress?.length === 66 && agent.walletAddress.startsWith('0x');
   const agentCurrency = getNativeCurrency(isSui ? 'sui' : 'og');
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(false);

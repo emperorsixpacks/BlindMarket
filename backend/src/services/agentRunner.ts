@@ -147,6 +147,7 @@ export async function deployAgent(params: {
   capabilities: AgentCapability[];
   tools?: AgentTool[];
   storageRef?: string;
+  chainType?: 'evm' | 'sui';
 }): Promise<DeployedAgent> {
   const { privateKey, publicKey } = generateKeyPair();
 
@@ -212,6 +213,7 @@ export async function deployAgent(params: {
     inftTokenId,
     storageRef: params.storageRef,
     platformToken,
+    chainType: params.chainType ?? config.chainType,
   };
 
   await saveAgent(agent);

@@ -265,6 +265,13 @@ const migrations: Array<{ id: number; name: string; sql: string }> = [
       ALTER TABLE task_templates DROP COLUMN IF EXISTS category;
     `,
   },
+  {
+    id: 11,
+    name: 'deployed_agents_chain_type',
+    sql: `
+      ALTER TABLE deployed_agents ADD COLUMN IF NOT EXISTS chain_type TEXT;
+    `,
+  },
 ];
 
 async function runMigrations(p: pg.Pool): Promise<void> {

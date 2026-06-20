@@ -321,6 +321,7 @@ export default function DeployAgentForm() {
               body: t.body
             }
         ),
+        chainType: isSui ? 'sui' : 'evm',
       });
       setAgentId(data.id);
 

@@ -167,6 +167,7 @@ const DeploySchema = z.object({
   capabilities: z.array(z.enum(AGENT_CAPABILITIES as unknown as [string, ...string[]])).min(1, 'Agent must declare at least one capability'),
   tools: z.array(ToolSchema).default([]),
   storageRef: z.string().optional(),
+  chainType: z.enum(['evm', 'sui']).optional(),
 });
 
 function strip(agent: Awaited<ReturnType<typeof getAgent>>) {
