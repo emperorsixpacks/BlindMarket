@@ -469,7 +469,8 @@ agentsRouter.post('/:id/link-owner', requireAuth, async (req: AuthRequest, res) 
     } else {
       recovered = ethers.verifyMessage(buildLinkMessage(authed, agent.id, nonce), signature).toLowerCase();
     }
-  } catch {
+  } catch (err) {
+    if (agent?.chainType === 'sui') console.error('[agents] link-owner SUI verify error:', err);
     res.status(400).json({ success: false, error: { code: 'BAD_SIGNATURE', message: 'Signature could not be verified' } });
     return;
   }
