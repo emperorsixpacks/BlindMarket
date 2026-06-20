@@ -461,11 +461,23 @@ agentsRouter.post('/:id/link-owner', requireAuth, async (req: AuthRequest, res) 
   let recovered: string;
   try {
     if (agent.chainType === 'sui') {
-      // SUI agent: verify Ed25519 signature via the SUI SDK.
       const messageStr = buildLinkMessage(authed, agent.id, nonce);
       const messageBytes = Buffer.from(messageStr, 'utf-8');
+      console.log('[agents] link-owner SUI verify starting, msg length:', messageBytes.length, 'sig length:', signature.length, 'first 20 sig chars:', signature.slice(0, 20));
+
+      // Decode base64 signature and inspect
+      let sigBytes: Uint8Array;
+      try {
+        sigBytes = Buffer.from(signature, 'base64');
+        console.log('[agents] decoded sig bytes length:', sigBytes.length, 'first byte:', sigBytes[0]);
+      } catch (e) {
+        console.error('[agents] base64 decode failed:', e);
+        throw e;
+      }
+
       const publicKey = await verifyPersonalMessageSignature(messageBytes, signature);
       recovered = publicKey.toSuiAddress().toLowerCase();
+      console.log('[agents] SUI verify OK, recovered:', recovered);
     } else {
       recovered = ethers.verifyMessage(buildLinkMessage(authed, agent.id, nonce), signature).toLowerCase();
     }
