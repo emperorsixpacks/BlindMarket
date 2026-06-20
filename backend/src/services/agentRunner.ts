@@ -157,7 +157,7 @@ export async function deployAgent(params: {
   let walletAddress: string;
   if (effectiveChainType === 'sui') {
     const { Ed25519Keypair } = await import('@mysten/sui/keypairs/ed25519');
-    const keypair = Ed25519Keypair.fromSecretKey(privateKey);
+    const keypair = Ed25519Keypair.fromSecretKey(Buffer.from(privateKey, 'hex'));
     walletAddress = keypair.toSuiAddress();
   } else {
     walletAddress = new Wallet(`0x${privateKey}`).address;
