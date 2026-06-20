@@ -15,7 +15,6 @@ import * as agentStore from '../services/agentStore.js';
 import { redis } from '../services/redis.js';
 import { ethers } from 'ethers';
 import { provider } from '../services/chain.js';
-import { Ed25519PublicKey } from '@mysten/sui/keypairs/ed25519';
 import { verifyPersonalMessageSignature } from '@mysten/sui/verify';
 
 /**
