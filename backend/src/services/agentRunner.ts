@@ -151,8 +151,11 @@ export async function deployAgent(params: {
 }): Promise<DeployedAgent> {
   const { privateKey, publicKey } = generateKeyPair();
 
+  // Use the per-request chainType when provided, otherwise fall back to server config
+  const effectiveChainType = params.chainType ?? config.chainType;
+
   let walletAddress: string;
-  if (config.chainType === 'sui') {
+  if (effectiveChainType === 'sui') {
     const { Ed25519Keypair } = await import('@mysten/sui/keypairs/ed25519');
     const keypair = Ed25519Keypair.fromSecretKey(privateKey);
     walletAddress = keypair.toSuiAddress();
