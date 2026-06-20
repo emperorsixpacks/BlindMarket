@@ -143,7 +143,9 @@ const ToolSchema = z.discriminatedUnion('type', [
 
 const DeploySchema = z.object({
   ownerAddress: z.string().min(1),
-  ownerPublicKey: z.string().regex(/^(04[0-9a-fA-F]{128}|[0-9a-fA-F]{64})$/, 'Must be uncompressed secp256k1 pubkey (04 + 128 hex chars) or Ed25519 pubkey (64 hex chars)'),
+  ownerPublicKey: z.string()
+    .regex(/^(04[0-9a-fA-F]{128}|00[0-9a-fA-F]{64}|[0-9a-fA-F]{64})$/, 'Must be uncompressed secp256k1 pubkey (04 + 128 hex chars) or Ed25519 pubkey (64 or 66 hex chars)')
+    .transform(k => k.startsWith('00') && k.length === 66 ? k.slice(2) : k),
   name: z.string().min(1).max(80),
   instructions: z.string().min(1),
   provider: z.enum(PROVIDERS),

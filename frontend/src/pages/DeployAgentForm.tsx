@@ -292,7 +292,11 @@ export default function DeployAgentForm() {
         // SUI: sign message to prove ownership, get Ed25519 public key
         await signPersonalMessage({ message: new TextEncoder().encode(msg) });
         if (!suiAccount?.publicKey) throw new Error('SUI wallet public key not available');
-        ownerPublicKey = Array.from(suiAccount.publicKey).map(b => b.toString(16).padStart(2, '0')).join('');
+        const pk = suiAccount.publicKey;
+        // SUI wallets may return 33 bytes (flag || 32-byte key) or 32 bytes (raw key).
+        // Strip the 1-byte scheme flag (0x00 for Ed25519) if present.
+        const rawKey = pk.length === 33 ? pk.slice(1) : pk;
+        ownerPublicKey = Array.from(rawKey).map(b => b.toString(16).padStart(2, '0')).join('');
       } else {
         // EVM: sign message and recover secp256k1 public key
         const sig = await walletClient!.signMessage({ message: msg });
