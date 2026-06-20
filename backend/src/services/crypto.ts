@@ -120,7 +120,14 @@ export function generateKeyPair(): { privateKey: string; publicKey: string } {
  * Auto-detects key type: 65-byte secp256k1 or 32-byte Ed25519 (X25519).
  */
 export function eciesEncrypt(data: Buffer, recipientPubKeyHex: string): Buffer {
-  const keyBytes = Buffer.from(recipientPubKeyHex, 'hex');
+  const cleanKey = recipientPubKeyHex.startsWith('0x') ? recipientPubKeyHex.slice(2) : recipientPubKeyHex;
+
+  // zkLogin public identifier -> no private key exists for ECIES decryption, return empty
+  if (cleanKey.startsWith('05')) {
+    return Buffer.alloc(0);
+  }
+
+  const keyBytes = Buffer.from(cleanKey, 'hex');
 
   if (keyBytes.length === X25519_PUBKEY_LENGTH) {
     // Ed25519 public key → convert to X25519 for ECDH
@@ -128,7 +135,16 @@ export function eciesEncrypt(data: Buffer, recipientPubKeyHex: string): Buffer {
   }
 
   // Default: secp256k1
-  return eciesEncryptSecp256k1(data, recipientPubKeyHex);
+  try {
+    let normKey = cleanKey;
+    if (cleanKey.length === 68 && cleanKey.startsWith('01')) {
+      normKey = cleanKey.slice(2);
+    }
+    return eciesEncryptSecp256k1(data, normKey);
+  } catch (err) {
+    console.warn(`[crypto] ECIES encryption failed for public key of length ${cleanKey.length}:`, (err as Error).message);
+    return Buffer.alloc(0);
+  }
 }
 
 /**
@@ -137,6 +153,9 @@ export function eciesEncrypt(data: Buffer, recipientPubKeyHex: string): Buffer {
  * Auto-detects curve from ephemeral public key length in the blob.
  */
 export function eciesDecrypt(blob: Buffer, recipientPrivKeyHex: string): Buffer {
+  if (blob.length === 0) {
+    return Buffer.alloc(0);
+  }
   if (blob.length >= X25519_MIN_BLOB && blob.length < ECIES_MIN_BLOB) {
     return eciesDecryptX25519(blob, recipientPrivKeyHex);
   }

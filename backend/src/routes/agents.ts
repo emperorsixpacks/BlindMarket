@@ -144,14 +144,15 @@ const ToolSchema = z.discriminatedUnion('type', [
 const DeploySchema = z.object({
   ownerAddress: z.string().min(1),
   ownerPublicKey: z.string()
-    .regex(/^[0-9a-fA-F]{64,130}$/, 'Must be a hex-encoded public key (64-130 hex chars)')
+    .regex(/^[0-9a-fA-F]{64,512}$/, 'Must be a hex-encoded public key (64-512 hex chars)')
     .transform(k => {
-      // Normalize: strip leading 00 (SUI Ed25519 flag byte) or 04 (secp256k1 prefix)
-      // that's already captured in the 130-char secp256k1 format.
+      // Normalize: strip leading 00 (SUI Ed25519 flag byte) or 01 (SUI secp256k1 flag byte)
       // 65 bytes (130 hex, starts with 04) = secp256k1 uncompressed → keep as-is
       // 33 bytes (66 hex, starts with 00) = SUI Ed25519 with flag → strip 00
+      // 34 bytes (68 hex, starts with 01) = SUI Secp256k1 with flag → strip 01
       // 32 bytes (64 hex) = raw Ed25519 → keep as-is
       if (k.length === 66 && k.startsWith('00')) return k.slice(2);
+      if (k.length === 68 && k.startsWith('01')) return k.slice(2);
       return k;
     }),
   name: z.string().min(1).max(80),
