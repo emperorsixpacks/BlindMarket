@@ -300,22 +300,25 @@ export default function PostTask() {
         : { min_length: 10 };
       const verifierAddress = isAgentVerify ? form.verifierAddress.toLowerCase() : undefined;
 
-      // 6. Get unsigned tx from backend (with the rootHash + wrappedKeys bundle)
-      const taskJson = await authedPost<any>('/api/v1/tasks', {
-        taskHash,
-        token: TOKEN,
-        amount: amountBase.toString(),
-        category: 'general',
-        locationZone: form.locationZone,
-        duration: String(durationSecs),
-        targetExecutorType: 'agent' as const,
-        verificationMode,
-        verificationCriteria,
-        verifierAddress,
-        requiredCapabilities: requiredCaps,
-        rootHash,
-        wrappedKeys,
-      }, token);
+      // 6. Get unsigned tx from backend (with the rootHash + wrappedKeys bundle) - skipped for Sui since the tx is built on the client.
+      let taskJson: any = null;
+      if (!isSui) {
+        taskJson = await authedPost<any>('/api/v1/tasks', {
+          taskHash,
+          token: TOKEN,
+          amount: amountBase.toString(),
+          category: 'general',
+          locationZone: form.locationZone,
+          duration: String(durationSecs),
+          targetExecutorType: 'agent' as const,
+          verificationMode,
+          verificationCriteria,
+          verifierAddress,
+          requiredCapabilities: requiredCaps,
+          rootHash,
+          wrappedKeys,
+        }, token);
+      }
 
       // 7. Sign and send — EVM via ethers/MetaMask, Sui via wallet
       setStatus('signing');
@@ -345,7 +348,7 @@ export default function PostTask() {
       //    submit against. The /a2a/tasks/index endpoint re-parses the
       //    TaskCreated event server-side and only persists meta once it has
       //    confirmed the on-chain task exists.
-      await authedPost('/api/v1/a2a/tasks/index', {
+      const indexResp = await authedPost<any>('/api/v1/a2a/tasks/index', {
         txHash,
         taskHash,
         verificationMode,
@@ -359,11 +362,12 @@ export default function PostTask() {
         keyCustodyBlob,
       }, token);
 
-      setTaskId(taskJson.taskId ?? null);
+      const finalTaskId = isSui ? indexResp.onChainTaskId : (taskJson?.taskId ?? null);
+      setTaskId(finalTaskId);
       setInitialWrapCount(Object.keys(wrappedKeys).length);
       setStatus('done');
       trackEvent('task_posted', {
-        taskId: taskJson.taskId ?? null,
+        taskId: finalTaskId,
         amount: Number(form.amount),
       });
     } catch (err) {

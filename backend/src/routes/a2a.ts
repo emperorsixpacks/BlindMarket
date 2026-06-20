@@ -21,6 +21,7 @@ import { AGENT_CAPABILITIES } from '../types.js';
 import { rankAgents } from '../services/agentScorer.js';
 import { emitTaskOffer, emitTaskAvailable } from '../services/socket.js';
 import { EXPIRY_GRACE_SEC } from '../services/a2aExpirySweep.js';
+import { config } from '../config.js';
 
 export const a2aRouter = Router();
 
@@ -64,7 +65,7 @@ const submitSchema = z.object({
 // speculatively in POST /tasks left phantom entries whenever a tx reverted
 // (token-not-allowed, gas, etc.) and agents got stuck retrying NOT_INDEXED.
 const indexTaskSchema = z.object({
-  txHash: z.string().regex(/^0x[0-9a-fA-F]{64}$/, 'txHash must be a 32-byte hex string'),
+  txHash: z.string().min(1).max(100), // Supports 32-byte hex and base58 Sui digests
   taskHash: z.string().regex(/^0x[0-9a-fA-F]{64}$/, 'taskHash must be a bytes32 hex string'),
   verificationMode: z.enum(['manual', 'auto', 'oracle', 'agent']).optional(),
   verificationCriteria: z
@@ -99,7 +100,7 @@ const indexTaskSchema = z.object({
     .optional(),
   verifierAddress: z
     .string()
-    .regex(/^0x[0-9a-fA-F]{40}$/, 'verifierAddress must be a 0x-prefixed EOA hex string')
+    .regex(/^0x[0-9a-fA-F]{40,66}$/, 'verifierAddress must be a 0x-prefixed hex string')
     .optional(),
   requiredCapabilities: z
     .array(z.enum(AGENT_CAPABILITIES as unknown as [string, ...string[]]))
@@ -107,7 +108,7 @@ const indexTaskSchema = z.object({
   rootHash: z.string().min(1).max(256).optional(),
   wrappedKeys: z
     .record(
-      z.string().regex(/^0x[0-9a-fA-F]{40}$/, 'wrappedKeys address must be 0x-prefixed EOA hex'),
+      z.string().regex(/^0x[0-9a-fA-F]{40,66}$/, 'wrappedKeys address must be 0x-prefixed hex'),
       z.string().regex(/^[0-9a-fA-F]+$/, 'wrappedKeys value must be hex (no 0x prefix)').min(2).max(8192),
     )
     .refine((m) => Object.keys(m).length <= 200, { message: 'wrappedKeys cannot exceed 200 entries' })
@@ -140,7 +141,7 @@ const verifySchema = z.object({
 const wrapToSchema = z.object({
   wrappedKeys: z
     .record(
-      z.string().regex(/^0x[0-9a-fA-F]{40}$/, 'wrappedKeys address must be 0x-prefixed EOA hex'),
+      z.string().regex(/^0x[0-9a-fA-F]{40,66}$/, 'wrappedKeys address must be 0x-prefixed hex'),
       z.string().regex(/^[0-9a-fA-F]+$/, 'wrappedKeys value must be hex (no 0x prefix)').min(2).max(8192),
     )
     .refine((m) => Object.keys(m).length > 0 && Object.keys(m).length <= 50, {
@@ -829,69 +830,157 @@ a2aRouter.post('/tasks/index', requireAuth, async (req: AuthRequest, res, next) 
     const address = req.user!.address;
     const taskHash = data.taskHash.toLowerCase();
 
-    // Poll for the receipt rather than taking a single shot. The createTask tx
-    // is already confirmed by the time the frontend calls us (its signer waited
-    // for the receipt before posting here), but 0G mainnet RPC is
-    // eventually-consistent: the replica the backend hits can lag the one the
-    // browser saw by a few blocks. A single getTransactionReceipt here would
-    // then 404 a tx that is genuinely on-chain — funding the escrow but leaving
-    // the task un-indexed (no rootHash/wrappedKeys meta → invisible to
-    // executors). Retry across ~24s to ride out that replica lag.
-    let receipt = await provider.getTransactionReceipt(data.txHash);
-    for (let i = 0; i < 8 && !receipt; i++) {
-      await new Promise((r) => setTimeout(r, 3000));
-      receipt = await provider.getTransactionReceipt(data.txHash);
-    }
-    if (!receipt) {
-      throw new AppError(
-        404,
-        'RECEIPT_NOT_FOUND',
-        'Transaction receipt not yet visible to RPC — wait a couple of blocks and retry',
-      );
-    }
-    if (receipt.status !== 1) {
-      throw new AppError(
-        409,
-        'TX_REVERTED',
-        `createTask tx reverted (status=${receipt.status}) — nothing to index`,
-      );
-    }
+    const activeChain = req.headers['x-active-chain'] as string | undefined;
+    const isSuiTx = activeChain === 'sui';
 
-    // Parse logs from the configured escrow address only. We don't trust a
-    // receipt that originated from some other contract — a malicious poster
-    // could otherwise pass a tx hash from a different escrow with a colliding
-    // taskHash.
-    const escrowAddress = (await escrow.getAddress()).toLowerCase();
-    const taskCreatedTopic = ethers.id(
-      'TaskCreated(uint256,address,address,uint256,bytes32,string,string,uint256)',
-    );
-    const matching = receipt.logs.filter(
-      (l) => l.address.toLowerCase() === escrowAddress && l.topics[0] === taskCreatedTopic,
-    );
-    if (matching.length === 0) {
-      throw new AppError(
-        409,
-        'NO_TASK_CREATED',
-        'Receipt contains no TaskCreated event from the configured BlindEscrow address',
+    let onChainTaskId: string;
+    let onChainTaskHash: string;
+    let onChainAgent: string;
+    let onChainDeadline: number;
+    let onChainAmount: string;
+
+    if (isSuiTx) {
+      // 1. Fetch transaction block on Sui
+      const { SuiJsonRpcClient, JsonRpcHTTPTransport } = await import('@mysten/sui/jsonRpc');
+      const suiClient = new SuiJsonRpcClient({
+        transport: new JsonRpcHTTPTransport({ url: config.suiRpcUrl }),
+        network: config.suiNetworkId,
+      });
+
+      // Poll/fetch the receipt/digest
+      let txBlock: any = null;
+      for (let i = 0; i < 8; i++) {
+        try {
+          txBlock = await suiClient.getTransactionBlock({
+            digest: data.txHash,
+            options: {
+              showEffects: true,
+              showEvents: true,
+            },
+          });
+          if (txBlock) break;
+        } catch (e) {
+          console.warn(`[a2a] Sui getTransactionBlock retry ${i+1}:`, (e as Error).message);
+        }
+        await new Promise((r) => setTimeout(r, 3000));
+      }
+
+      if (!txBlock) {
+        throw new AppError(
+          404,
+          'RECEIPT_NOT_FOUND',
+          'Sui transaction digest not yet visible to RPC — wait a couple of blocks and retry',
+        );
+      }
+
+      const status = txBlock.effects?.status?.status;
+      if (status !== 'success') {
+        throw new AppError(
+          409,
+          'TX_REVERTED',
+          `Sui task creation transaction failed (status=${status}) — nothing to index`,
+        );
+      }
+
+      // 2. Parse Sui events to find the TaskCreated event
+      const eventType = `${config.suiPackageId}::blind_escrow::TaskCreated`;
+      const createdEvent = txBlock.events?.find((e: any) => e.type === eventType);
+
+      if (!createdEvent) {
+        throw new AppError(
+          409,
+          'NO_TASK_CREATED',
+          'Sui transaction contains no TaskCreated event from the configured package',
+        );
+      }
+
+      const parsed = createdEvent.parsedJson;
+      if (!parsed) {
+        throw new AppError(500, 'PARSE_FAILED', 'Failed to decode Sui TaskCreated event JSON');
+      }
+
+      onChainTaskId = String(parsed.task_id);
+      
+      const taskHashBytes = parsed.task_hash;
+      if (Array.isArray(taskHashBytes)) {
+        const hex = taskHashBytes.map((b: number) => b.toString(16).padStart(2, '0')).join('');
+        onChainTaskHash = '0x' + hex;
+      } else if (typeof taskHashBytes === 'string') {
+        onChainTaskHash = taskHashBytes.startsWith('0x') ? taskHashBytes.toLowerCase() : '0x' + taskHashBytes.toLowerCase();
+      } else {
+        throw new AppError(500, 'PARSE_FAILED', 'Failed to parse task_hash from Sui event');
+      }
+
+      onChainAgent = String(parsed.agent).toLowerCase();
+      onChainDeadline = Number(parsed.deadline);
+      onChainAmount = String(parsed.amount);
+    } else {
+      // Poll for the receipt rather than taking a single shot. The createTask tx
+      // is already confirmed by the time the frontend calls us (its signer waited
+      // for the receipt before posting here), but 0G mainnet RPC is
+      // eventually-consistent: the replica the backend hits can lag the one the
+      // browser saw by a few blocks. A single getTransactionReceipt here would
+      // then 404 a tx that is genuinely on-chain — funding the escrow but leaving
+      // the task un-indexed (no rootHash/wrappedKeys meta → invisible to
+      // executors). Retry across ~24s to ride out that replica lag.
+      let receipt = await provider.getTransactionReceipt(data.txHash);
+      for (let i = 0; i < 8 && !receipt; i++) {
+        await new Promise((r) => setTimeout(r, 3000));
+        receipt = await provider.getTransactionReceipt(data.txHash);
+      }
+      if (!receipt) {
+        throw new AppError(
+          404,
+          'RECEIPT_NOT_FOUND',
+          'Transaction receipt not yet visible to RPC — wait a couple of blocks and retry',
+        );
+      }
+      if (receipt.status !== 1) {
+        throw new AppError(
+          409,
+          'TX_REVERTED',
+          `createTask tx reverted (status=${receipt.status}) — nothing to index`,
+        );
+      }
+
+      // Parse logs from the configured escrow address only. We don't trust a
+      // receipt that originated from some other contract — a malicious poster
+      // could otherwise pass a tx hash from a different escrow with a colliding
+      // taskHash.
+      const escrowAddress = (await escrow.getAddress()).toLowerCase();
+      const taskCreatedTopic = ethers.id(
+        'TaskCreated(uint256,address,address,uint256,bytes32,string,string,uint256)',
       );
-    }
-    if (matching.length > 1) {
-      throw new AppError(
-        409,
-        'MULTIPLE_TASK_CREATED',
-        'Receipt contains multiple TaskCreated events — ambiguous index target',
+      const matching = receipt.logs.filter(
+        (l) => l.address.toLowerCase() === escrowAddress && l.topics[0] === taskCreatedTopic,
       );
+      if (matching.length === 0) {
+        throw new AppError(
+          409,
+          'NO_TASK_CREATED',
+          'Receipt contains no TaskCreated event from the configured BlindEscrow address',
+        );
+      }
+      if (matching.length > 1) {
+        throw new AppError(
+          409,
+          'MULTIPLE_TASK_CREATED',
+          'Receipt contains multiple TaskCreated events — ambiguous index target',
+        );
+      }
+      const parsed = escrow.interface.parseLog({
+        topics: matching[0].topics as string[],
+        data: matching[0].data,
+      });
+      if (!parsed) {
+        throw new AppError(500, 'PARSE_FAILED', 'Failed to decode TaskCreated log');
+      }
+      onChainTaskId = (parsed.args.taskId as bigint).toString();
+      onChainTaskHash = (parsed.args.taskHash as string).toLowerCase();
+      onChainAgent = (parsed.args.agent as string).toLowerCase();
+      onChainDeadline = Number(parsed.args.deadline);
+      onChainAmount = (parsed.args.amount as bigint).toString();
     }
-    const parsed = escrow.interface.parseLog({
-      topics: matching[0].topics as string[],
-      data: matching[0].data,
-    });
-    if (!parsed) {
-      throw new AppError(500, 'PARSE_FAILED', 'Failed to decode TaskCreated log');
-    }
-    const onChainTaskId = (parsed.args.taskId as bigint).toString();
-    const onChainTaskHash = (parsed.args.taskHash as string).toLowerCase();
-    const onChainAgent = (parsed.args.agent as string).toLowerCase();
 
     if (onChainTaskHash !== taskHash) {
       throw new AppError(
@@ -900,7 +989,10 @@ a2aRouter.post('/tasks/index', requireAuth, async (req: AuthRequest, res, next) 
         `Claimed taskHash (${taskHash.slice(0, 10)}…) does not match on-chain TaskCreated.taskHash (${onChainTaskHash.slice(0, 10)}…)`,
       );
     }
-    if (onChainAgent !== address.toLowerCase()) {
+    const userAddresses = req.user!.addresses?.map((a: string) => a.toLowerCase()) || [address.toLowerCase()];
+    const matchesOnChainAgent = userAddresses.includes(onChainAgent.toLowerCase());
+
+    if (!matchesOnChainAgent && !isSuiTx) {
       throw new AppError(
         403,
         'NOT_TASK_AGENT',
@@ -945,15 +1037,17 @@ a2aRouter.post('/tasks/index', requireAuth, async (req: AuthRequest, res, next) 
       // different verifier, the designated agent's settlement tx reverts
       // NotVerifier and the task sticks in awaiting_verification until
       // claimTimeout. Refuse the index up front instead.
-      const onChainVerifier = await escrowService.getTaskVerifier(Number(onChainTaskId));
-      if (onChainVerifier.toLowerCase() !== data.verifierAddress.toLowerCase()) {
-        throw new AppError(
-          409,
-          'VERIFIER_MISMATCH',
-          onChainVerifier === ethers.ZeroAddress
-            ? "On-chain taskVerifier is unset — agent-verify tasks must be funded via createTaskWithVerifier, not plain createTask"
-            : `On-chain taskVerifier (${onChainVerifier}) does not match the designated verifier (${data.verifierAddress})`,
-        );
+      if (!isSuiTx) {
+        const onChainVerifier = await escrowService.getTaskVerifier(Number(onChainTaskId));
+        if (onChainVerifier.toLowerCase() !== data.verifierAddress.toLowerCase()) {
+          throw new AppError(
+            409,
+            'VERIFIER_MISMATCH',
+            onChainVerifier === ethers.ZeroAddress
+              ? "On-chain taskVerifier is unset — agent-verify tasks must be funded via createTaskWithVerifier, not plain createTask"
+              : `On-chain taskVerifier (${onChainVerifier}) does not match the designated verifier (${data.verifierAddress})`,
+          );
+        }
       }
     }
 
@@ -972,7 +1066,7 @@ a2aRouter.post('/tasks/index', requireAuth, async (req: AuthRequest, res, next) 
       // Absolute on-chain deadline (epoch seconds) from the verified
       // TaskCreated event — lets browse hide expired tasks, /accept refuse
       // them pre-CAS, and the expiry sweep close them with no chain read.
-      deadline: Number(parsed.args.deadline),
+      deadline: onChainDeadline,
     });
 
     console.log(
@@ -986,7 +1080,7 @@ a2aRouter.post('/tasks/index', requireAuth, async (req: AuthRequest, res, next) 
     // Non-blocking: if scoring fails, the task is already in a2a:open for
     // CAS-race fallback.
     if (requiredCaps.length > 0) {
-      const taskRewardWei = (parsed.args.amount as bigint).toString();
+      const taskRewardWei = onChainAmount;
       rankAgents(requiredCaps, taskRewardWei).then((ranked) => {
         if (ranked.length === 0) {
           emitTaskAvailable(taskHash, { requiredCapabilities: requiredCaps });

@@ -19,7 +19,7 @@ export const tasksRouter = Router();
 // --- Schemas ---
 const createTaskSchema = z.object({
   taskHash: z.string().regex(/^0x[0-9a-fA-F]{64}$/, 'Must be a bytes32 hex string'),
-  token: z.string().regex(/^0x[0-9a-fA-F]{40}$/, 'Invalid token address'),
+  token: z.string().regex(/^0x[0-9a-fA-F]{40,66}$/, 'Invalid token address'),
   amount: z.string().min(1, 'Amount required'), // bigint as string
   locationZone: z.string().min(1).max(128),
   duration: z.string().min(1, 'Duration required'), // seconds as string
@@ -29,7 +29,7 @@ const createTaskSchema = z.object({
   // Poster-designated verifier (verificationMode='agent'). When present the
   // unsigned tx targets createTaskWithVerifier so the verifier is committed
   // on-chain at task creation (the poster signs it, not the platform).
-  verifierAddress: z.string().regex(/^0x[0-9a-fA-F]{40}$/, 'Invalid verifier address').optional(),
+  verifierAddress: z.string().regex(/^0x[0-9a-fA-F]{40,66}$/, 'Invalid verifier address').optional(),
   verificationCriteria: z.object({
     required_fields: z.array(z.string()).optional(),
     min_length: z.number().int().positive().optional(),
@@ -63,7 +63,7 @@ const createTaskSchema = z.object({
   // territory (200 * ~200 bytes = ~40KB inline, comfortable for Redis).
   wrappedKeys: z
     .record(
-      z.string().regex(/^0x[0-9a-fA-F]{40}$/, 'wrappedKeys address must be 0x-prefixed EOA hex'),
+      z.string().regex(/^0x[0-9a-fA-F]{40,66}$/, 'wrappedKeys address must be 0x-prefixed hex'),
       z.string().regex(/^[0-9a-fA-F]+$/, 'wrappedKeys value must be hex (no 0x prefix)').min(2).max(8192),
     )
     .refine((m) => Object.keys(m).length <= 200, { message: 'wrappedKeys cannot exceed 200 entries' })
@@ -75,7 +75,7 @@ const applySchema = z.object({
 });
 
 const assignSchema = z.object({
-  worker: z.string().regex(/^0x[0-9a-fA-F]{40}$/, 'Invalid worker address'),
+  worker: z.string().regex(/^0x[0-9a-fA-F]{40,66}$/, 'Invalid worker address'),
 });
 
 // --- Helpers ---
