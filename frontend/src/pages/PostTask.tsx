@@ -25,6 +25,7 @@ import { trackEvent } from '../hooks/useAnalytics';
 import { MARKETPLACE_TOKEN_ADDRESS, getNativeCurrency } from '../config/constants';
 import { useChain } from '../context/ChainContext';
 import { useChainAddress } from '../hooks/useChainWallet';
+import { useAuth } from '../context/AuthContext';
 
 // BlindEscrow contract's hard bounds on `duration` (seconds).
 // Source: BlindEscrow.sol:64-65 — MIN_DEADLINE = 1 hours, MAX_DEADLINE = 90 days.
@@ -66,6 +67,7 @@ export default function PostTask() {
   const { data: walletClient } = useWalletClient();
   const suiSignAndExecuteTx = useSignAndExecuteTransaction();
   const navigate = useNavigate();
+  const { isAuthenticated, login: loginPrivy } = useAuth();
 
   const [form, setForm] = useState({
     instructions: '',
@@ -667,6 +669,19 @@ export default function PostTask() {
               <div className="flex items-center gap-2 text-sm text-ink-3">
                 <Icon name="wallet" size={16} className="text-ink-3" />
                 Connect a wallet to post a task.
+              </div>
+            ) : !isAuthenticated ? (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 text-sm text-ink-3">
+                  <Icon name="lock" size={16} className="text-warn" />
+                  Please sign in to authenticate with the backend before posting.
+                </div>
+                <Button
+                  variant="primary"
+                  type="button"
+                  label="Sign in to backend"
+                  onClick={loginPrivy}
+                />
               </div>
             ) : (
               <Button

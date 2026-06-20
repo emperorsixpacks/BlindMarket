@@ -17,6 +17,7 @@ import { truncateAddress } from '../lib/utils';
 import { API_BASE_URL } from '../config/constants';
 import { authedPost } from '../lib/api';
 import { useChainAddress } from '../hooks/useChainWallet';
+import { useAuth } from '../context/AuthContext';
 
 // Mirrors AgentDetail's threshold so a low-gas chip here is consistent with
 // the warning the user sees once they click into the agent. If you change one,
@@ -70,6 +71,7 @@ type Act = 'start' | 'pause' | 'stop' | 'restart';
 
 export default function MyAgents() {
   const address = useChainAddress();
+  const { isAuthenticated, login: loginPrivy } = useAuth();
   const qc = useQueryClient();
   const [page, setPage] = useState(1);
 
@@ -103,15 +105,14 @@ export default function MyAgents() {
   const decayArrow = (factor: number) =>
     factor > 0.9 ? { glyph: '↑', cls: 'text-ok' } : factor > 0.5 ? { glyph: '→', cls: 'text-warn' } : { glyph: '↓', cls: 'text-err' };
 
-  // Context-aware action buttons for a single agent row. Small, clean, and
-  // self-contained so they read the same on the desktop table and mobile card.
   function RowActions({ agent }: { agent: Agent }) {
     const isActing = action.isPending && action.variables?.id === agent.id;
+    const disabled = isActing || !isAuthenticated;
     return (
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs">
         {agent.status !== 'running' && (
           <button
-            disabled={isActing}
+            disabled={disabled}
             onClick={() => action.mutate({ id: agent.id, act: 'start' })}
             className="text-ok hover:underline disabled:opacity-40"
           >
@@ -120,7 +121,7 @@ export default function MyAgents() {
         )}
         {agent.status === 'running' && (
           <button
-            disabled={isActing}
+            disabled={disabled}
             onClick={() => action.mutate({ id: agent.id, act: 'pause' })}
             className="text-warn hover:underline disabled:opacity-40"
           >
@@ -128,7 +129,7 @@ export default function MyAgents() {
           </button>
         )}
         <button
-          disabled={isActing}
+          disabled={disabled}
           onClick={() => action.mutate({ id: agent.id, act: 'stop' })}
           className="text-ink-3 hover:text-err hover:underline disabled:opacity-40"
         >
@@ -136,7 +137,7 @@ export default function MyAgents() {
         </button>
         {agent.status !== 'stopped' && (
           <button
-            disabled={isActing}
+            disabled={disabled}
             onClick={() => action.mutate({ id: agent.id, act: 'restart' })}
             className="text-ink-3 hover:text-ink hover:underline disabled:opacity-40"
           >
@@ -181,6 +182,20 @@ export default function MyAgents() {
           <StatCard label="Tasks completed" value={String(tasksTotal)} sub="All time" />
         </div>
       </div>
+
+      {address && !isAuthenticated && (
+        <div className="mb-6 p-4 border border-warn/40 bg-warn/5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-sm">
+          <span className="text-ink-2">
+            You are connected to your wallet, but not signed in to the backend. Please sign in to manage or interact with your agents.
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            label="Sign in to backend"
+            onClick={loginPrivy}
+          />
+        </div>
+      )}
 
       {/* Agent list — custom responsive list matching the bb DataTable look
           (header row, hairline dividers, hover). A generic DataTable can't host
