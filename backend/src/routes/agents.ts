@@ -16,6 +16,8 @@ import { redis } from '../services/redis.js';
 import { ethers } from 'ethers';
 import { provider } from '../services/chain.js';
 import { verifyPersonalMessageSignature } from '@mysten/sui/verify';
+import { SuiJsonRpcClient, JsonRpcHTTPTransport } from '@mysten/sui/jsonRpc';
+import { config } from '../config.js';
 
 /**
  * Owner-only guard for any agent endpoint that touches funds, keys, or
@@ -463,19 +465,12 @@ agentsRouter.post('/:id/link-owner', requireAuth, async (req: AuthRequest, res) 
     if (agent.chainType === 'sui') {
       const messageStr = buildLinkMessage(authed, agent.id, nonce);
       const messageBytes = Buffer.from(messageStr, 'utf-8');
-      console.log('[agents] link-owner SUI verify starting, msg length:', messageBytes.length, 'sig length:', signature.length, 'first 20 sig chars:', signature.slice(0, 20));
 
-      // Decode base64 signature and inspect
-      let sigBytes: Uint8Array;
-      try {
-        sigBytes = Buffer.from(signature, 'base64');
-        console.log('[agents] decoded sig bytes length:', sigBytes.length, 'first byte:', sigBytes[0]);
-      } catch (e) {
-        console.error('[agents] base64 decode failed:', e);
-        throw e;
-      }
-
-      const publicKey = await verifyPersonalMessageSignature(messageBytes, signature);
+      const suiClient = new SuiJsonRpcClient({
+        transport: new JsonRpcHTTPTransport({ url: config.suiRpcUrl }),
+        network: 'testnet',
+      });
+      const publicKey = await verifyPersonalMessageSignature(messageBytes, signature, { client: suiClient });
       recovered = publicKey.toSuiAddress().toLowerCase();
       console.log('[agents] SUI verify OK, recovered:', recovered);
     } else {
