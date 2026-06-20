@@ -60,7 +60,7 @@ async function getJWKS() {
 }
 
 /** Verify a Privy JWT using jose */
-async function verifyPrivyToken(token: string): Promise<{ address: string; addresses?: string[] }> {
+async function verifyPrivyToken(token: string, activeChain?: string): Promise<{ address: string; addresses?: string[] }> {
   const JWKS = await getJWKS();
   if (!JWKS) throw new Error('Privy not configured (missing PRIVY_APP_ID)');
 
@@ -69,8 +69,14 @@ async function verifyPrivyToken(token: string): Promise<{ address: string; addre
       audience: config.privyAppId,
     });
 
-    const allAddresses = extractAllWalletAddresses(payload as any);
-    const primary = allAddresses.find(a => a.startsWith('0x')) || null;
+    const allWallets = extractAllWalletAddresses(payload as any);
+    const allAddresses = allWallets.map(w => w.address);
+
+    // Pick address based on active chain if provided
+    const primary = activeChain
+      ? getAddressForChain(allWallets, activeChain)
+      : (allWallets.find(w => w.chainType === 'ethereum')?.address ?? allWallets[0]?.address ?? null);
+
     if (!primary) {
       console.warn(`[Auth] No wallet found in token. Available keys: ${Object.keys(payload).join(', ')}`);
       throw new Error('No wallet address in Privy token');
@@ -82,12 +88,20 @@ async function verifyPrivyToken(token: string): Promise<{ address: string; addre
   }
 }
 
-/** Extract all wallet addresses from Privy JWT claims */
-function extractAllWalletAddresses(payload: any): string[] {
-  const addresses: string[] = [];
+/** Wallet address with chain type info from Privy JWT */
+interface WalletAddress {
+  address: string;
+  chainType: 'ethereum' | 'sui' | string;
+}
 
-  // 1. Check for the preferred 'wallet_address' claim
-  if (typeof payload.wallet_address === 'string') addresses.push(payload.wallet_address);
+/** Extract all wallet addresses from Privy JWT claims, with chain type info */
+function extractAllWalletAddresses(payload: any): WalletAddress[] {
+  const addresses: WalletAddress[] = [];
+
+  // 1. Check for the preferred 'wallet_address' claim (assume ethereum if no chain type)
+  if (typeof payload.wallet_address === 'string') {
+    addresses.push({ address: payload.wallet_address, chainType: 'ethereum' });
+  }
 
   // 2. Check linked_accounts array
   let accounts = payload.linked_accounts;
@@ -99,17 +113,42 @@ function extractAllWalletAddresses(payload: any): string[] {
   if (Array.isArray(accounts)) {
     for (const a of accounts) {
       if (a.type === 'wallet' && typeof a.address === 'string' && a.address.startsWith('0x')) {
-        if (!addresses.includes(a.address)) addresses.push(a.address);
+        const chainType = a.chainType || a.chain_type || 'ethereum';
+        if (!addresses.some(w => w.address === a.address)) {
+          addresses.push({ address: a.address, chainType });
+        }
       }
     }
   }
 
   // 3. Last resort: check sub if it's an address
   if (typeof payload.sub === 'string' && payload.sub.startsWith('0x')) {
-    if (!addresses.includes(payload.sub)) addresses.push(payload.sub);
+    if (!addresses.some(w => w.address === payload.sub)) {
+      addresses.push({ address: payload.sub, chainType: 'ethereum' });
+    }
   }
 
   return addresses;
+}
+
+/** Get address for a specific chain type from wallet addresses */
+function getAddressForChain(wallets: WalletAddress[], chainType: string): string | null {
+  // First try exact chain type match
+  const exact = wallets.find(w => w.chainType === chainType);
+  if (exact) return exact.address;
+
+  // Fall back: for 'og' chain, prefer ethereum; for 'sui', prefer sui
+  if (chainType === 'og') {
+    const eth = wallets.find(w => w.chainType === 'ethereum');
+    if (eth) return eth.address;
+  }
+  if (chainType === 'sui') {
+    const sui = wallets.find(w => w.chainType === 'sui');
+    if (sui) return sui.address;
+  }
+
+  // Ultimate fallback: return first address
+  return wallets[0]?.address ?? null;
 }
 
 /**
@@ -154,6 +193,9 @@ export function requireAuth(req: AuthRequest, _res: Response, next: NextFunction
   const authHeader = req.headers.authorization;
   const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : undefined;
 
+  // 3. Check X-Active-Chain header (for multi-chain: 'og' or 'sui')
+  const activeChain = req.headers['x-active-chain'] as string | undefined;
+
   const candidate = apiKey || token;
   if (!candidate) {
     throw new AppError(401, 'UNAUTHORIZED', 'Authentication required');
@@ -183,8 +225,8 @@ export function requireAuth(req: AuthRequest, _res: Response, next: NextFunction
         return;
       }
 
-      // Privy JWT (browser users)
-      verifyPrivyToken(token)
+      // Privy JWT (browser users) — pass activeChain to pick correct address
+      verifyPrivyToken(token, activeChain)
         .then((user) => {
           req.user = user;
           next();
@@ -230,6 +272,7 @@ export function optionalAuth(req: AuthRequest, _res: Response, next: NextFunctio
   const authHeader = req.headers.authorization;
   const apiKey = req.headers['x-api-key'] as string | undefined;
   const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : undefined;
+  const activeChain = req.headers['x-active-chain'] as string | undefined;
   const candidate = apiKey || token;
   if (!candidate) {
     next();
@@ -265,7 +308,7 @@ export function optionalAuth(req: AuthRequest, _res: Response, next: NextFunctio
     }
 
     // Privy JWT
-    verifyPrivyToken(token)
+    verifyPrivyToken(token, activeChain)
       .then((user) => {
         req.user = user;
         next();

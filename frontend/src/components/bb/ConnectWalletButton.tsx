@@ -91,6 +91,7 @@ function EvmWalletButton({ variant }: Props) {
 
 function SuiWalletButton({ variant }: Props) {
   const { address, isConnected, connectModalOpen, setConnectModalOpen, disconnect } = useSuiWallet();
+  const { ready, authenticated: privyAuth, login: privyLogin, logout: privyLogout } = usePrivy();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const suiCurrency = getNativeCurrency('sui');
@@ -125,6 +126,29 @@ function SuiWalletButton({ variant }: Props) {
     );
   }
 
+  if (ready && !privyAuth) {
+    if (variant === 'block') {
+      return (
+        <button onClick={privyLogin} className="w-full px-4 py-2 border border-line text-sm font-mono text-ink hover:bg-surface-2 transition-colors">
+          sign_in_backend
+        </button>
+      );
+    }
+    return (
+      <div className="flex items-center gap-2">
+        <div className="flex items-center border border-line text-[11px] font-mono opacity-60">
+          <span className="px-3 py-1.5 text-ink-2 items-center gap-1.5 flex">
+            <span className="w-1.5 h-1.5 bg-blue-500 inline-block" />
+            {address ? shortenAddress(address) : 'Sui'}
+          </span>
+        </div>
+        <button onClick={privyLogin} className="px-3 py-1.5 border border-cream text-[11px] font-mono text-cream hover:bg-surface-2 transition-colors">
+          <span className="opacity-40">[</span> sign_in_backend <span className="opacity-40">]</span>
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="relative" ref={menuRef}>
       <div className="flex items-center border border-line text-[11px] font-mono">
@@ -144,7 +168,7 @@ function SuiWalletButton({ variant }: Props) {
               copy_address
             </button>
           )}
-          <button onClick={() => { disconnect(); setMenuOpen(false); }} className="block w-full text-left px-3 py-2 border-t border-line text-err hover:bg-surface-2 transition-colors">
+          <button onClick={() => { disconnect(); privyLogout(); setMenuOpen(false); }} className="block w-full text-left px-3 py-2 border-t border-line text-err hover:bg-surface-2 transition-colors">
             disconnect
           </button>
         </div>

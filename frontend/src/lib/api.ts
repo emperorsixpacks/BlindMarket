@@ -1,4 +1,4 @@
-import { API_BASE_URL } from '../config/constants';
+import { API_BASE_URL, getActiveChain } from '../config/constants';
 import type { ApiResponse, ApiErrorResponse } from '../types/api';
 
 class ApiError extends Error {
@@ -31,10 +31,16 @@ export function setAccessTokenGetter(getter: (() => Promise<string | null>) | nu
 }
 
 async function getAuthHeaders(overrideToken?: string): Promise<Record<string, string>> {
-  if (overrideToken) return { Authorization: `Bearer ${overrideToken}` };
-  if (!_getAccessToken) return {};
-  const token = await _getAccessToken();
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  const headers: Record<string, string> = {};
+  if (overrideToken) {
+    headers.Authorization = `Bearer ${overrideToken}`;
+  } else if (_getAccessToken) {
+    const token = await _getAccessToken();
+    if (token) headers.Authorization = `Bearer ${token}`;
+  }
+  // Send active chain so backend picks the right address from multi-chain Privy JWTs
+  headers['X-Active-Chain'] = getActiveChain();
+  return headers;
 }
 
 export async function get<T>(path: string): Promise<T> {
