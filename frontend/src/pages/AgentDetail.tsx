@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import { useBalance, useWalletClient } from 'wagmi';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { BrowserProvider, parseEther } from 'ethers';
-import { useCurrentAccount, useSuiClient, useSignAndExecuteTransaction } from '@mysten/dapp-kit';
+import { useCurrentAccount, useSuiClient, useSignAndExecuteTransaction, useSignPersonalMessage } from '@mysten/dapp-kit';
 import {
   Breadcrumb,
   PageHeader,
@@ -95,6 +95,7 @@ export default function AgentDetail() {
   const suiAccount = useCurrentAccount();
   const suiClient = useSuiClient();
   const { mutateAsync: signAndExecute } = useSignAndExecuteTransaction();
+  const { mutateAsync: signPersonalMessage } = useSignPersonalMessage();
 
   const [agent, setAgent] = useState<AgentDetails | null>(null);
   // Detect agent wallet type — use explicit chainType if available,
@@ -243,7 +244,6 @@ export default function AgentDetail() {
   // signing a server nonce. That adds their Privy identity to authorizedOwners,
   // after which authorizeOwner stops rejecting them. We then retry the action.
   async function handleLinkOwner() {
-    if (!walletClient || !id) return;
     setLinkStatus('signing');
     setLinkError('');
     try {
@@ -251,7 +251,25 @@ export default function AgentDetail() {
         `/api/v1/agents/${id}/link-owner/challenge`,
         {},
       );
-      const signature = await walletClient.signMessage({ message: challenge.message });
+
+      let signature: string;
+      if (isSui && suiAccount) {
+        // SUI wallet: sign with Ed25519 via SignPersonalMessage
+        const result = await signPersonalMessage({
+          message: new TextEncoder().encode(challenge.message),
+        });
+        // signature is base64 string, decode to hex for the API
+        const bin = atob(result.signature);
+        signature = '';
+        for (let i = 0; i < bin.length; i++) {
+          signature += bin.charCodeAt(i).toString(16).padStart(2, '0');
+        }
+      } else {
+        // EVM wallet: sign with wagmi/ethers (EIP-191)
+        if (!walletClient) throw new Error('Wallet not connected');
+        signature = await walletClient.signMessage({ message: challenge.message });
+      }
+
       setLinkStatus('linking');
       await authedPost(`/api/v1/agents/${id}/link-owner`, { nonce: challenge.nonce, signature });
       setLinkStatus('idle');
