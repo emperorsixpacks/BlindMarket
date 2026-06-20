@@ -329,7 +329,7 @@ export default function PostTask() {
           amountBase.toString(),
           'general',
           form.locationZone,
-          Math.floor(Date.now() / 1000) + durationSecs,
+          deadlineMs,
         );
         const result = await suiSignAndExecuteTx.mutateAsync({ transaction: suiTx });
         txHash = result.digest;
