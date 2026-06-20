@@ -102,6 +102,9 @@ export default function AgentDetail() {
   const isSui = agent?.chainType
     ? agent.chainType === 'sui'
     : agent?.walletAddress?.length === 66 && agent.walletAddress.startsWith('0x');
+
+  console.log('[AgentDetail] walletAddress:', agent?.walletAddress, 'length:', agent?.walletAddress?.length, 'chainType:', agent?.chainType, '=> isSui:', isSui);
+
   const agentCurrency = getNativeCurrency(isSui ? 'sui' : 'og');
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(false);
@@ -150,9 +153,10 @@ export default function AgentDetail() {
   useEffect(() => {
     if (!isSui || !agent?.walletAddress) { setSuiBalanceMist('0'); return; }
     let cancelled = false;
+    console.log('[AgentDetail] fetching SUI balance for', agent.walletAddress);
     suiClient.getBalance({ owner: agent.walletAddress })
-      .then(r => { if (!cancelled) setSuiBalanceMist(r.totalBalance); })
-      .catch(() => { if (!cancelled) setSuiBalanceMist('0'); });
+      .then(r => { console.log('[AgentDetail] SUI balance result:', r.totalBalance); if (!cancelled) setSuiBalanceMist(r.totalBalance); })
+      .catch(err => { console.warn('[AgentDetail] SUI balance failed:', err); if (!cancelled) setSuiBalanceMist('0'); });
     return () => { cancelled = true; };
   }, [isSui, agent?.walletAddress, suiClient]);
 

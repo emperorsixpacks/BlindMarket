@@ -40,7 +40,7 @@ function SuiWalletInner({ children }: { children: ReactNode }) {
 
 const suiNetwork = SUI_RPC_URL.includes('mainnet') ? 'mainnet' : 'testnet';
 const suiNetworks = {
-  testnet: new SuiJsonRpcClient({
+  [suiNetwork]: new SuiJsonRpcClient({
     transport: new JsonRpcHTTPTransport({ url: SUI_RPC_URL }),
     network: suiNetwork,
   }),
@@ -48,7 +48,7 @@ const suiNetworks = {
 
 export function SuiWalletProvider({ children }: { children: ReactNode }) {
   return (
-    <SuiClientProvider defaultNetwork="testnet" networks={suiNetworks}>
+    <SuiClientProvider defaultNetwork={suiNetwork} networks={suiNetworks}>
       <SuiDappKitWalletProvider>
         <SuiWalletInner>
           {children}
