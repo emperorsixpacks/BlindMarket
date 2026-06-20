@@ -1,11 +1,12 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as a2aService from '../services/a2a';
 
-export function useAgentProfile() {
+export function useAgentProfile(options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: ['a2a', 'profile'],
     queryFn: () => a2aService.getProfile(),
     retry: false,
+    enabled: options?.enabled ?? true,
   });
 }
 
