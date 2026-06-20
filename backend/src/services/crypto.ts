@@ -1,5 +1,4 @@
 import { randomBytes, createCipheriv, createDecipheriv, createHash, createECDH, hkdfSync, generateKeyPairSync, diffieHellman, createPrivateKey, createPublicKey } from 'crypto';
-// @ts-expect-error @noble/curves lacks NodeNext type exports — runtime import is valid
 import { ed25519 } from '@noble/curves/ed25519.js';
 
 const edwardsToMontgomeryPub = ed25519.utils.toMontgomery;

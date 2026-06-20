@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { useBalance, useWalletClient } from 'wagmi';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { BrowserProvider, parseEther } from 'ethers';
+import { useCurrentAccount, useSuiClient, useSignAndExecuteTransaction } from '@mysten/dapp-kit';
 import {
   Breadcrumb,
   PageHeader,
@@ -24,6 +25,9 @@ import { get, authedPatch, authedPost } from '../lib/api';
 import { API_BASE_URL } from '../config/constants';
 import { AGENT_CAPABILITIES } from '../config/capabilities';
 import { useChainAddress } from '../hooks/useChainWallet';
+import { useChain } from '../context/ChainContext';
+import { getNativeCurrency } from '../config/constants';
+import { buildSuiTransferCoin } from '../lib/suiTxBuilder';
 import {
   getAgentReviews,
   submitReview,
@@ -38,10 +42,12 @@ import type { AgentReview, AgentReviewStats, AgentBadge, AgentWebhook } from '..
 // funding step — round trip + LLM call + submitEvidence costs ~0.0004 0G, so
 // 0.005 0G covers ~125 tasks before the next top-up.
 const TOP_UP_AMOUNT = '0.005';
+const SUI_TOP_UP_AMOUNT = '50000000'; // 0.05 SUI in MIST (9 decimals)
 
 // Below this the agent can't reliably pay for a submitEvidence + a USDC sweep
 // tx. UI surfaces a "Top up gas" call to action when balance is under this.
 const LOW_GAS_THRESHOLD = 0.005;
+const SUI_LOW_GAS_THRESHOLD = 0.005; // 0.005 SUI
 
 interface AgentTool {
   type: string; name: string; description: string; url?: string; endpointUrl?: string; method?: string; toolName?: string;
@@ -84,6 +90,14 @@ export default function AgentDetail() {
   const address = useChainAddress();
   const { data: walletClient } = useWalletClient();
   const qc = useQueryClient();
+  const { activeChain } = useChain();
+  const isSui = activeChain === 'sui';
+  const native = getNativeCurrency(activeChain);
+
+  // SUI wallet
+  const suiAccount = useCurrentAccount();
+  const suiClient = useSuiClient();
+  const { mutateAsync: signAndExecute } = useSignAndExecuteTransaction();
 
   const [agent, setAgent] = useState<AgentDetails | null>(null);
   const [loading, setLoading] = useState(true);
@@ -122,12 +136,35 @@ export default function AgentDetail() {
   const [linkStatus, setLinkStatus] = useState<'idle' | 'signing' | 'linking' | 'error'>('idle');
   const [linkError, setLinkError] = useState('');
 
-  const { data: balance, refetch: refetchBalance } = useBalance({
+  // EVM balance (for 0G chain)
+  const { data: evmBalance, refetch: refetchEvmBalance } = useBalance({
     address: agent?.walletAddress as `0x${string}` | undefined,
-    query: { enabled: !!agent?.walletAddress },
+    query: { enabled: !!agent?.walletAddress && !isSui },
   });
-  const balanceEther = balance ? parseFloat(balance.formatted) : 0;
-  const isLowGas = !!balance && balanceEther < LOW_GAS_THRESHOLD;
+
+  // SUI balance
+  const [suiBalanceMist, setSuiBalanceMist] = useState<string>('0');
+  const refetchSuiBalance = useCallback(() => {
+    if (!isSui || !agent?.walletAddress) { setSuiBalanceMist('0'); return; }
+    suiClient.getBalance({ owner: agent.walletAddress })
+      .then(r => setSuiBalanceMist(r.totalBalance))
+      .catch(() => setSuiBalanceMist('0'));
+  }, [isSui, agent?.walletAddress, suiClient]);
+
+  useEffect(() => { refetchSuiBalance(); }, [refetchSuiBalance]);
+
+  const balanceEther = isSui
+    ? parseInt(suiBalanceMist) / (10 ** native.decimals)
+    : evmBalance ? parseFloat(evmBalance.formatted) : 0;
+  const balanceSymbol = native.symbol;
+  const isLowGas = isSui
+    ? balanceEther < SUI_LOW_GAS_THRESHOLD
+    : !!evmBalance && balanceEther < LOW_GAS_THRESHOLD;
+
+  const refetchBalance = useCallback(() => {
+    if (isSui) return refetchSuiBalance();
+    refetchEvmBalance();
+  }, [isSui, refetchSuiBalance, refetchEvmBalance]);
 
   const loadAgent = useCallback(() => {
     if (!id) return;
@@ -226,22 +263,29 @@ export default function AgentDetail() {
     onSuccess: (data) => { setAgent(data); setTab('logs'); },
   });
 
-  // Owner-signed 0G transfer from owner wallet → agent wallet. No backend
+  // Owner-signed transfer from owner wallet → agent wallet. No backend
   // involvement; same primitive as the deploy-funding step. We refresh the
-  // useBalance hook after the tx confirms so the UI tile updates immediately
+  // balance after the tx confirms so the UI tile updates immediately
   // instead of waiting on a poll cycle.
   async function handleTopUp() {
-    if (!address || !walletClient || !agent?.walletAddress) return;
+    if (!address || !agent?.walletAddress) return;
     setTopUpStatus('sending');
     setTopUpError('');
     try {
-      const provider = new BrowserProvider(walletClient.transport);
-      const signer = await provider.getSigner();
-      const tx = await signer.sendTransaction({
-        to: agent.walletAddress,
-        value: parseEther(TOP_UP_AMOUNT),
-      });
-      await tx.wait();
+      if (isSui) {
+        if (!suiAccount) throw new Error('SUI wallet not connected');
+        const tx = buildSuiTransferCoin(agent.walletAddress, SUI_TOP_UP_AMOUNT);
+        await signAndExecute({ transaction: tx });
+      } else {
+        if (!walletClient) throw new Error('EVM wallet not connected');
+        const provider = new BrowserProvider(walletClient.transport);
+        const signer = await provider.getSigner();
+        const tx = await signer.sendTransaction({
+          to: agent.walletAddress,
+          value: parseEther(TOP_UP_AMOUNT),
+        });
+        await tx.wait();
+      }
       await refetchBalance();
       setTopUpStatus('idle');
     } catch (err) {
@@ -358,9 +402,9 @@ export default function AgentDetail() {
 
       <div className="grid grid-cols-1 sm:grid-cols-4 gap-0 border border-line mb-2">
         <StatCard label="Tasks completed" value={String(agent.tasksCompleted ?? 0)} sub="All time" />
-        <div className="border-t sm:border-t-0 sm:border-l border-line"><StatCard label="Earned" value={`${parseFloat(agent.totalEarned ?? '0').toLocaleString(undefined, { maximumFractionDigits: 4 })} 0G`} sub="Native 0G" subColor="ok" /></div>
+        <div className="border-t sm:border-t-0 sm:border-l border-line"><StatCard label="Earned" value={`${parseFloat(agent.totalEarned ?? '0').toLocaleString(undefined, { maximumFractionDigits: 4 })} ${balanceSymbol}`} sub={`Native ${balanceSymbol}`} subColor="ok" /></div>
         <div className="border-t sm:border-t-0 sm:border-l border-line"><StatCard label="Reputation" value={String(agent.decayedReputation?.decayedScore ?? agent.reputation?.score ?? 0)} sub={`${agent.reputation?.tasksCompleted ?? 0} tasks · ${agent.reputation?.disputes ?? 0} disputes`} subColor={agent.reputation?.disputes && agent.reputation.disputes > 0 ? 'warn' : 'default'} /></div>
-        <div className="border-t sm:border-t-0 sm:border-l border-line"><StatCard label="Wallet balance" value={balance ? parseFloat(balance.formatted).toFixed(4) : '—'} sub={isLowGas ? 'Low gas — top up' : (balance?.symbol ?? '0G')} subColor={isLowGas ? 'warn' : 'default'} /></div>
+        <div className="border-t sm:border-t-0 sm:border-l border-line"><StatCard label="Wallet balance" value={balanceEther > 0 ? balanceEther.toFixed(4) : '—'} sub={isLowGas ? 'Low gas — top up' : balanceSymbol} subColor={isLowGas ? 'warn' : 'default'} /></div>
       </div>
 
       {/* Gas management — only relevant to the agent owner. Top up sends native
@@ -379,7 +423,7 @@ export default function AgentDetail() {
                 size="sm"
                 onClick={handleTopUp}
                 disabled={topUpStatus === 'sending'}
-                label={topUpStatus === 'sending' ? `Sending ${TOP_UP_AMOUNT} 0G…` : `Top up gas (+${TOP_UP_AMOUNT} 0G)`}
+                label={topUpStatus === 'sending' ? `Sending ${isSui ? '0.05' : TOP_UP_AMOUNT} ${balanceSymbol}…` : `Top up gas (+${isSui ? '0.05' : TOP_UP_AMOUNT} ${balanceSymbol})`}
               />
               {/* Withdraw — single button for both native 0G and ERC20 tokens.
                   The backend's /withdraw endpoint auto-detects; empty body sweeps
@@ -405,14 +449,14 @@ export default function AgentDetail() {
               {topUpStatus === 'error' && <div className="text-err">{topUpError}</div>}
               {withdrawStatus === 'done' && withdrawInfo && (
                 <div className="text-ok">
-                  Withdrew <span className="font-mono">{parseFloat(withdrawInfo.amount).toFixed(4)} 0G</span> ·
+                  Withdrew <span className="font-mono">{parseFloat(withdrawInfo.amount).toFixed(4)} {balanceSymbol}</span> ·
                   tx <span className="font-mono">{withdrawInfo.txHash.slice(0, 10)}…</span>
                 </div>
               )}
               {withdrawStatus === 'error' && <div className="text-err">{withdrawError}</div>}
               {isLowGas && agent.status !== 'stopped' && (
                 <div className="text-warn">
-                  Agent will fail to submit evidence below <span className="font-mono">{LOW_GAS_THRESHOLD} 0G</span>.
+                  Agent will fail to submit evidence below <span className="font-mono">{isSui ? SUI_LOW_GAS_THRESHOLD : LOW_GAS_THRESHOLD} {balanceSymbol}</span>.
                 </div>
               )}
             </div>

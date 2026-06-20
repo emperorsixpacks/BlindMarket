@@ -195,8 +195,14 @@ export default function DeployAgentForm() {
   useEffect(() => {
     if (!isSui || !address) { setSuiBalanceMist('0'); return; }
     suiClient.getBalance({ owner: address })
-      .then(r => setSuiBalanceMist(r.totalBalance))
-      .catch(() => setSuiBalanceMist('0'));
+      .then(r => {
+        console.log('[deploy] SUI balance:', r.totalBalance);
+        setSuiBalanceMist(r.totalBalance);
+      })
+      .catch(e => {
+        console.error('[deploy] SUI balance fetch failed:', e);
+        setSuiBalanceMist('0');
+      });
   }, [isSui, address, suiClient]);
 
   const ownerBalanceEther = isSui

@@ -38,8 +38,12 @@ function SuiWalletInner({ children }: { children: ReactNode }) {
   );
 }
 
+const suiNetwork = SUI_RPC_URL.includes('mainnet') ? 'mainnet' : 'testnet';
 const suiNetworks = {
-  testnet: new SuiJsonRpcClient({ transport: new JsonRpcHTTPTransport(SUI_RPC_URL), network: { chain: SUI_RPC_URL.includes('mainnet') ? 'mainnet' : 'testnet' } } as any),
+  testnet: new SuiJsonRpcClient({
+    transport: new JsonRpcHTTPTransport({ url: SUI_RPC_URL }),
+    network: suiNetwork,
+  }),
 };
 
 export function SuiWalletProvider({ children }: { children: ReactNode }) {
