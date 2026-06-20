@@ -25,7 +25,6 @@ import { get, authedPatch, authedPost } from '../lib/api';
 import { API_BASE_URL } from '../config/constants';
 import { AGENT_CAPABILITIES } from '../config/capabilities';
 import { useChainAddress } from '../hooks/useChainWallet';
-import { useChain } from '../context/ChainContext';
 import { getNativeCurrency } from '../config/constants';
 import { buildSuiTransferCoin } from '../lib/suiTxBuilder';
 import {
@@ -90,9 +89,6 @@ export default function AgentDetail() {
   const address = useChainAddress();
   const { data: walletClient } = useWalletClient();
   const qc = useQueryClient();
-  const { activeChain } = useChain();
-  const isSui = activeChain === 'sui';
-  const native = getNativeCurrency(activeChain);
 
   // SUI wallet
   const suiAccount = useCurrentAccount();
@@ -100,6 +96,11 @@ export default function AgentDetail() {
   const { mutateAsync: signAndExecute } = useSignAndExecuteTransaction();
 
   const [agent, setAgent] = useState<AgentDetails | null>(null);
+  // Detect agent wallet type from address format.
+  // SUI addresses from Ed25519Keypair.toSuiAddress() are 0x + 64 hex = 66 chars.
+  // EVM addresses are 0x + 40 hex = 42 chars.
+  const isSui = agent?.walletAddress?.length === 66 && agent.walletAddress.startsWith('0x');
+  const agentCurrency = getNativeCurrency(isSui ? 'sui' : 'og');
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
@@ -161,9 +162,9 @@ export default function AgentDetail() {
   }, [isSui, agent?.walletAddress, suiClient]);
 
   const balanceEther = isSui
-    ? parseInt(suiBalanceMist) / (10 ** native.decimals)
+    ? parseInt(suiBalanceMist) / (10 ** agentCurrency.decimals)
     : evmBalance ? parseFloat(evmBalance.formatted) : 0;
-  const balanceSymbol = native.symbol;
+  const balanceSymbol = agentCurrency.symbol;
   const isLowGas = isSui
     ? balanceEther < SUI_LOW_GAS_THRESHOLD
     : !!evmBalance && balanceEther < LOW_GAS_THRESHOLD;
