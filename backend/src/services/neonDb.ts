@@ -310,6 +310,8 @@ async function migrateRedisToPg(p: pg.Pool): Promise<void> {
     const agentKeys = keys.filter(k => !k.includes(':logs') && !k.includes(':heartbeat'));
 
     for (const key of agentKeys) {
+      const keyType = await redis.type(key);
+      if (keyType !== 'string') continue;
       const raw = await redis.get(key);
       if (!raw) continue;
       const data = JSON.parse(raw);
