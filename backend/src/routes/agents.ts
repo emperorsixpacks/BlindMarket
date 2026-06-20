@@ -16,6 +16,7 @@ import { redis } from '../services/redis.js';
 import { ethers } from 'ethers';
 import { provider } from '../services/chain.js';
 import { Ed25519PublicKey } from '@mysten/sui/keypairs/ed25519';
+import { verifyPersonalMessageSignature } from '@mysten/sui/verify';
 
 /**
  * Owner-only guard for any agent endpoint that touches funds, keys, or
@@ -461,19 +462,10 @@ agentsRouter.post('/:id/link-owner', requireAuth, async (req: AuthRequest, res) 
   let recovered: string;
   try {
     if (agent.chainType === 'sui') {
-      // SUI agent: signature is a serialized Ed25519 sig (1 flag + 32 pubkey + 64 sig)
-      const sigBytes = Buffer.from(signature, 'hex');
-      if (sigBytes.length < 97 || sigBytes[0] !== 0x00) {
-        res.status(400).json({ success: false, error: { code: 'BAD_SIGNATURE', message: 'Invalid SUI signature format' } });
-        return;
-      }
-      const publicKey = new Ed25519PublicKey(sigBytes.slice(1, 33));
+      // SUI agent: verify Ed25519 signature via the SUI SDK
+      // Accepts serialized signature as base64 string, hex string, or bytes
       const messageBytes = Buffer.from(buildLinkMessage(authed, agent.id, nonce), 'utf-8');
-      const valid = await publicKey.verifyPersonalMessage(messageBytes, sigBytes);
-      if (!valid) {
-        res.status(400).json({ success: false, error: { code: 'BAD_SIGNATURE', message: 'SUI signature verification failed' } });
-        return;
-      }
+      const publicKey = await verifyPersonalMessageSignature(messageBytes, signature);
       recovered = publicKey.toSuiAddress().toLowerCase();
     } else {
       recovered = ethers.verifyMessage(buildLinkMessage(authed, agent.id, nonce), signature).toLowerCase();
