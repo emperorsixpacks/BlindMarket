@@ -461,18 +461,30 @@ agentsRouter.post('/:id/link-owner', requireAuth, async (req: AuthRequest, res) 
   let recovered: string;
   try {
     if (agent.chainType === 'sui') {
-      // SUI agent: verify Ed25519 signature via the SUI SDK
-      // Accepts serialized signature as base64 string, hex string, or bytes
-      const messageBytes = Buffer.from(buildLinkMessage(authed, agent.id, nonce), 'utf-8');
+      // SUI agent: verify Ed25519 signature via the SUI SDK.
+      const messageStr = buildLinkMessage(authed, agent.id, nonce);
+      const messageBytes = Buffer.from(messageStr, 'utf-8');
       const publicKey = await verifyPersonalMessageSignature(messageBytes, signature);
       recovered = publicKey.toSuiAddress().toLowerCase();
     } else {
       recovered = ethers.verifyMessage(buildLinkMessage(authed, agent.id, nonce), signature).toLowerCase();
     }
   } catch (err) {
-    if (agent?.chainType === 'sui') console.error('[agents] link-owner SUI verify error:', err);
-    res.status(400).json({ success: false, error: { code: 'BAD_SIGNATURE', message: 'Signature could not be verified' } });
-    return;
+    if (agent?.chainType === 'sui') {
+      // SUI verification failed — try EVM verification as fallback
+      // (the user might have signed with their EVM wallet)
+      try {
+        recovered = ethers.verifyMessage(buildLinkMessage(authed, agent.id, nonce), signature).toLowerCase();
+      } catch {
+        console.error('[agents] link-owner SUI verify error:', err);
+        res.status(400).json({ success: false, error: { code: 'BAD_SIGNATURE', message: 'Signature could not be verified' } });
+        return;
+      }
+    } else {
+      console.error('[agents] link-owner EVM verify error:', err);
+      res.status(400).json({ success: false, error: { code: 'BAD_SIGNATURE', message: 'Signature could not be verified' } });
+      return;
+    }
   }
   if (recovered !== agent.ownerAddress.toLowerCase()) {
     const tr = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;

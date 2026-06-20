@@ -253,12 +253,12 @@ export default function AgentDetail() {
       );
 
       let signature: string;
-      if (isSui && suiAccount) {
-        // SUI wallet: sign with Ed25519 via SignPersonalMessage
+      if (isSui) {
+        // SUI wallet: try signing with @mysten/dapp-kit.
+        console.log('[link-owner] using SUI signPersonalMessage, account:', suiAccount?.address);
         const result = await signPersonalMessage({
           message: new TextEncoder().encode(challenge.message),
         });
-        // signature is base64 — send as-is; backend parseSerializedSignature expects base64
         console.log('[link-owner] SUI signature base64:', result.signature);
         signature = result.signature;
       } else {
