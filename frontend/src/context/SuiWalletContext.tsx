@@ -1,7 +1,8 @@
-import { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
 import { SuiClientProvider, WalletProvider as SuiDappKitWalletProvider, useCurrentAccount, useDisconnectWallet } from '@mysten/dapp-kit';
 import { SuiJsonRpcClient, JsonRpcHTTPTransport } from '@mysten/sui/jsonRpc';
 import { SUI_RPC_URL } from '../config/constants';
+import { useChain } from './ChainContext';
 
 interface SuiWalletContextValue {
   address: string | undefined;
@@ -18,6 +19,16 @@ function SuiWalletInner({ children }: { children: ReactNode }) {
   const account = useCurrentAccount();
   const { mutate: doDisconnect } = useDisconnectWallet();
   const [connectModalOpen, setConnectModalOpen] = useState(false);
+  const { setActiveChain } = useChain();
+  const [wasConnected, setWasConnected] = useState(false);
+
+  useEffect(() => {
+    const isConn = !!account;
+    if (isConn && !wasConnected) {
+      setActiveChain('sui');
+    }
+    setWasConnected(isConn);
+  }, [account, wasConnected, setActiveChain]);
 
   const disconnect = useCallback(() => doDisconnect(), [doDisconnect]);
   const connect = useCallback(() => setConnectModalOpen(true), []);
