@@ -260,6 +260,7 @@ export default function AgentDetail() {
         });
         // signature is base64 string, decode to hex for the API
         const bin = atob(result.signature);
+        console.log('[link-owner] base64 sig:', result.signature, 'decoded length:', bin.length, 'hex:', Array.from(bin, c => c.charCodeAt(0).toString(16).padStart(2, '0')).join(''));
         signature = '';
         for (let i = 0; i < bin.length; i++) {
           signature += bin.charCodeAt(i).toString(16).padStart(2, '0');
