@@ -144,8 +144,16 @@ const ToolSchema = z.discriminatedUnion('type', [
 const DeploySchema = z.object({
   ownerAddress: z.string().min(1),
   ownerPublicKey: z.string()
-    .regex(/^(04[0-9a-fA-F]{128}|00[0-9a-fA-F]{64}|[0-9a-fA-F]{64})$/, 'Must be uncompressed secp256k1 pubkey (04 + 128 hex chars) or Ed25519 pubkey (64 or 66 hex chars)')
-    .transform(k => k.startsWith('00') && k.length === 66 ? k.slice(2) : k),
+    .regex(/^[0-9a-fA-F]{64,130}$/, 'Must be a hex-encoded public key (64-130 hex chars)')
+    .transform(k => {
+      // Normalize: strip leading 00 (SUI Ed25519 flag byte) or 04 (secp256k1 prefix)
+      // that's already captured in the 130-char secp256k1 format.
+      // 65 bytes (130 hex, starts with 04) = secp256k1 uncompressed → keep as-is
+      // 33 bytes (66 hex, starts with 00) = SUI Ed25519 with flag → strip 00
+      // 32 bytes (64 hex) = raw Ed25519 → keep as-is
+      if (k.length === 66 && k.startsWith('00')) return k.slice(2);
+      return k;
+    }),
   name: z.string().min(1).max(80),
   instructions: z.string().min(1),
   provider: z.enum(PROVIDERS),
@@ -175,6 +183,7 @@ agentsRouter.get('/providers', (_req, res) => {
 agentsRouter.post('/deploy', async (req, res) => {
   const parsed = DeploySchema.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ success: false, error: parsed.error.flatten() }); return; }
+  console.log(`[deploy] ownerPublicKey length=${parsed.data.ownerPublicKey.length / 2} bytes, hex=${parsed.data.ownerPublicKey.slice(0, 8)}...`);
   const agent = await deployAgent(parsed.data as Parameters<typeof deployAgent>[0]);
   res.status(201).json({ success: true, data: strip(agent) });
 });

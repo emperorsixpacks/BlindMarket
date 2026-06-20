@@ -297,6 +297,7 @@ export default function DeployAgentForm() {
         // Strip the 1-byte scheme flag (0x00 for Ed25519) if present.
         const rawKey = pk.length === 33 ? pk.slice(1) : pk;
         ownerPublicKey = Array.from(rawKey).map(b => b.toString(16).padStart(2, '0')).join('');
+        console.log('[deploy] SUI publicKey:', ownerPublicKey.length / 2, 'bytes');
       } else {
         // EVM: sign message and recover secp256k1 public key
         const sig = await walletClient!.signMessage({ message: msg });
