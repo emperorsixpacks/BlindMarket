@@ -194,15 +194,11 @@ export default function DeployAgentForm() {
   const [suiBalanceMist, setSuiBalanceMist] = useState<string>('0');
   useEffect(() => {
     if (!isSui || !address) { setSuiBalanceMist('0'); return; }
+    let cancelled = false;
     suiClient.getBalance({ owner: address })
-      .then(r => {
-        console.log('[deploy] SUI balance:', r.totalBalance);
-        setSuiBalanceMist(r.totalBalance);
-      })
-      .catch(e => {
-        console.error('[deploy] SUI balance fetch failed:', e);
-        setSuiBalanceMist('0');
-      });
+      .then(r => { if (!cancelled) setSuiBalanceMist(r.totalBalance); })
+      .catch(e => { if (!cancelled) { console.error('[deploy] SUI balance fetch failed:', e); setSuiBalanceMist('0'); } });
+    return () => { cancelled = true; };
   }, [isSui, address, suiClient]);
 
   const ownerBalanceEther = isSui
@@ -244,9 +240,11 @@ export default function DeployAgentForm() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
     get<ProviderModels>('/api/v1/agents/providers')
-      .then(setProviders)
+      .then(d => { if (!cancelled) setProviders(d); })
       .catch(() => { });
+    return () => { cancelled = true; };
   }, []);
 
   function set(k: keyof typeof form, v: string) {

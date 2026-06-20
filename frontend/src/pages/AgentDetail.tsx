@@ -144,14 +144,21 @@ export default function AgentDetail() {
 
   // SUI balance
   const [suiBalanceMist, setSuiBalanceMist] = useState<string>('0');
+  useEffect(() => {
+    if (!isSui || !agent?.walletAddress) { setSuiBalanceMist('0'); return; }
+    let cancelled = false;
+    suiClient.getBalance({ owner: agent.walletAddress })
+      .then(r => { if (!cancelled) setSuiBalanceMist(r.totalBalance); })
+      .catch(() => { if (!cancelled) setSuiBalanceMist('0'); });
+    return () => { cancelled = true; };
+  }, [isSui, agent?.walletAddress, suiClient]);
+
   const refetchSuiBalance = useCallback(() => {
     if (!isSui || !agent?.walletAddress) { setSuiBalanceMist('0'); return; }
     suiClient.getBalance({ owner: agent.walletAddress })
       .then(r => setSuiBalanceMist(r.totalBalance))
       .catch(() => setSuiBalanceMist('0'));
   }, [isSui, agent?.walletAddress, suiClient]);
-
-  useEffect(() => { refetchSuiBalance(); }, [refetchSuiBalance]);
 
   const balanceEther = isSui
     ? parseInt(suiBalanceMist) / (10 ** native.decimals)
@@ -192,17 +199,20 @@ export default function AgentDetail() {
 
   useEffect(() => {
     if (!agent?.walletAddress) return;
-    getAgentBadges(agent.walletAddress).then(setBadges).catch(() => {});
+    let cancelled = false;
+    getAgentBadges(agent.walletAddress).then(b => { if (!cancelled) setBadges(b); }).catch(() => {});
+    return () => { cancelled = true; };
   }, [agent?.walletAddress]);
 
   useEffect(() => {
     if (!agent?.walletAddress) return;
+    let cancelled = false;
     getAgentReviews(agent.walletAddress, 20)
       .then((result) => {
-        setReviews(result.reviews);
-        setReviewStats(result.stats);
+        if (!cancelled) { setReviews(result.reviews); setReviewStats(result.stats); }
       })
       .catch(() => {});
+    return () => { cancelled = true; };
   }, [agent?.walletAddress]);
 
   useEffect(() => {
@@ -798,7 +808,9 @@ function AgentTasks({ agentWallet }: { agentWallet?: string }) {
       .catch(() => setTasksError(true));
   }, [agentWallet]);
 
-  useEffect(() => { loadTasks(); }, [loadTasks]);
+  useEffect(() => {
+    loadTasks();
+  }, [loadTasks]);
 
   if (tasksError && executions.length === 0) {
     return <ErrorState title="Couldn't load this agent's tasks" onRetry={() => loadTasks()} />;
@@ -852,7 +864,16 @@ function WebhookTab({ agentId: _agentId }: { agentId: string }) {
       .finally(() => setLoading(false));
   }, []);
 
-  useEffect(() => { loadHooks(); }, [loadHooks]);
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(false);
+    getWebhooks()
+      .then(h => { if (!cancelled) setHooks(h); })
+      .catch(() => { if (!cancelled) setError(true); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
 
   async function handleCreate() {
     if (!url) return;
