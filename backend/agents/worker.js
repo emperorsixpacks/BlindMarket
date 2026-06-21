@@ -1119,7 +1119,7 @@ async function runAcceptedTask(acceptedTaskHash, acceptedRootHash, acceptedWrapp
 
       const result = await generateText({
         model,
-        system: `[IDENTITY]\n${AGENT_INSTRUCTIONS}\n\n[CAPABILITIES]\nYou have access to tools. If you use a tool, you must synthesize the results into a final text summary for the user. Do not simply output the raw tool result.`,
+        system: `[IDENTITY]\n${AGENT_INSTRUCTIONS}\n\n[CAPABILITIES]\nYou have access to tools. If you use a tool, you must synthesize the results into a final text summary for the user. Do not simply output the raw tool result.\n\nWhen you need more information to complete the task, send a message with send_message, then call wait_for_reply to wait for a response before continuing.`,
         prompt: briefPlaintext,
         tools: buildTools(acceptedTaskHash),
         stopWhen: stepCountIs(10),
