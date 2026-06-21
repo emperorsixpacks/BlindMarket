@@ -113,26 +113,8 @@ export function getSuiClient() {
 let _suiSigner: import('@mysten/sui/keypairs/ed25519').Ed25519Keypair | null = null;
 let _suiSignerAddress: string | null = null;
 
-// Initialise signer eagerly at module-load time (not in async initSui) so it's
-// available before any HTTP request arrives. Supports Bech32 (suiprivkey...) and
-// raw 64-char hex. Errors are non-fatal — executeSuiTx will report the gap.
-if (config.suiAgentPrivateKey) {
-  try {
-    const raw = config.suiAgentPrivateKey;
-    const { Ed25519Keypair } = await import('@mysten/sui/keypairs/ed25519');
-    if (/^[0-9a-fA-F]{64}$/.test(raw)) {
-      const secretKey = new Uint8Array(32);
-      for (let i = 0; i < 32; i++) secretKey[i] = parseInt(raw.slice(i * 2, i * 2 + 2), 16);
-      _suiSigner = Ed25519Keypair.fromSecretKey(secretKey);
-    } else {
-      _suiSigner = Ed25519Keypair.fromSecretKey(raw);
-    }
-    _suiSignerAddress = _suiSigner.toSuiAddress();
-    console.log(`[chain] Sui signer: ${_suiSignerAddress}`);
-  } catch (err) {
-    console.error('[chain] Failed to initialise Sui signer at module load:', err);
-  }
-}
+// Eager init at module load (best-effort, caught by ensureSuiSigner on first use).
+void ensureSuiSigner().catch(() => {});
 
 export function getSuiSigner() {
   return _suiSigner;
@@ -312,12 +294,36 @@ export async function getSuiTask(taskId: bigint): Promise<{ worker: string; subm
 }
 
 /**
+ * Ensure the Sui signer is initialised (lazy on first use, guarded by try-catch
+ * so module-level top-level-await failure doesn't cascade here either).
+ */
+async function ensureSuiSigner(): Promise<void> {
+  if (_suiSigner) return;
+  if (!config.suiAgentPrivateKey) {
+    throw new Error('Sui signer not available: SUI_AGENT_PRIVATE_KEY is not set in env');
+  }
+  const raw = config.suiAgentPrivateKey.replace(/^0x/, '');
+  const { Ed25519Keypair } = await import('@mysten/sui/keypairs/ed25519');
+  if (/^[0-9a-fA-F]{64}$/.test(raw)) {
+    const secretKey = new Uint8Array(32);
+    for (let i = 0; i < 32; i++) secretKey[i] = parseInt(raw.slice(i * 2, i * 2 + 2), 16);
+    _suiSigner = Ed25519Keypair.fromSecretKey(secretKey);
+  } else {
+    _suiSigner = Ed25519Keypair.fromSecretKey(raw);
+  }
+  if (!_suiSigner) throw new Error('Ed25519Keypair.fromSecretKey returned null'); // TS narrow
+  _suiSignerAddress = _suiSigner.toSuiAddress();
+  console.log(`[chain] Sui signer (lazy): ${_suiSignerAddress}`);
+}
+
+/**
  * Execute a Sui transaction server-side using the backend Sui signer.
  * Requires SUI_AGENT_PRIVATE_KEY to be set (regardless of CHAIN_TYPE).
  */
 export async function executeSuiTx(txJson: string): Promise<{ digest: string }> {
+  await ensureSuiSigner();
   if (!_suiSigner) {
-    throw new Error('executeSuiTx: Sui signer not available (SUI_AGENT_PRIVATE_KEY not set)');
+    throw new Error('Sui signer not available (SUI_AGENT_PRIVATE_KEY not set or invalid)');
   }
 
   const { Transaction } = await import('@mysten/sui/transactions');
