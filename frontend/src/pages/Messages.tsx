@@ -38,6 +38,7 @@ export default function Messages() {
   const [replyTo, setReplyTo] = useState<string | null>(null);
   const [replyBody, setReplyBody] = useState('');
   const [replySubject, setReplySubject] = useState('');
+  const [selectedMsg, setSelectedMsg] = useState<Message | null>(null);
 
   const { data: inboxData, isLoading } = useQuery({
     queryKey: ['messages', 'inbox', selectedTaskId],
@@ -129,6 +130,7 @@ export default function Messages() {
                   key={msg.id}
                   className={`px-5 py-4 cursor-pointer hover:bg-surface-2 transition-colors ${!msg.read_at ? 'bg-cream/5' : ''}`}
                   onClick={() => {
+                    setSelectedMsg(msg);
                     setReplyTo(msg.from_address);
                     setReplySubject(msg.subject ? `Re: ${msg.subject}` : '');
                     if (!msg.read_at) markReadMutation.mutate();
@@ -190,6 +192,21 @@ export default function Messages() {
             <div className="text-[11px] font-mono font-semibold uppercase tracking-widest text-ink-3 mb-4">
               {replyTo ? `reply to ${shortAddr(replyTo)}` : 'compose'}
             </div>
+
+            {selectedMsg && (
+              <div className="mb-4 pb-4 border-b border-line">
+                {selectedMsg.subject && (
+                  <div className="text-sm font-mono font-semibold text-ink mb-2">{selectedMsg.subject}</div>
+                )}
+                <div className="text-xs font-mono text-ink-2 mb-2">{selectedMsg.body}</div>
+                <div className="flex items-center gap-2 text-[10px] font-mono text-ink-3">
+                  <span>from {shortAddr(selectedMsg.from_address)}</span>
+                  <span>·</span>
+                  <span>{timeAgo(selectedMsg.created_at)}</span>
+                </div>
+              </div>
+            )}
+
             {replyTo ? (
               <div className="space-y-3">
                 <input
@@ -215,7 +232,7 @@ export default function Messages() {
                     {sendMutation.isPending ? 'sending…' : 'send'}
                   </button>
                   <button
-                    onClick={() => { setReplyTo(null); setReplyBody(''); setReplySubject(''); }}
+                    onClick={() => { setReplyTo(null); setReplyBody(''); setReplySubject(''); setSelectedMsg(null); }}
                     className="px-4 py-2 border border-line text-ink-3 text-xs font-mono hover:border-ink-3 transition-colors"
                   >
                     cancel
