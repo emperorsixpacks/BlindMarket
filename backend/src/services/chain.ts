@@ -160,6 +160,115 @@ export async function buildSuiAssignTx(taskId: bigint, executor: string): Promis
 }
 
 /**
+ * Read a task's on-chain state from the Sui Move contract.
+ * Calls blind_escrow::get_task via devInspect and returns the relevant fields.
+ */
+export async function getSuiTask(taskId: bigint): Promise<{ worker: string; submissionAttempts: number; status: number; evidenceHash: string; deadline: number }> {
+  const { Transaction } = await import('@mysten/sui/transactions');
+  const { toBase64 } = await import('@mysten/utils');
+
+  const tx = new Transaction();
+
+  tx.moveCall({
+    target: `${config.suiPackageId}::blind_escrow::get_task` as `${string}::${string}::${string}`,
+    arguments: [
+      tx.object(config.suiBlindEscrowObjectId),
+      tx.pure.u64(taskId),
+    ],
+  });
+
+  const bytes = await tx.build();
+  const txBase64 = toBase64(new Uint8Array(bytes));
+
+  const rpcUrl = config.suiRpcUrl.replace(/\/$/, '');
+  const response = await fetch(rpcUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'sui_devInspectTransactionBlock',
+      params: [_suiSignerAddress ?? '0x0', txBase64],
+    }),
+  });
+
+  const json = await response.json() as any;
+  if (json.error) {
+    throw new Error(`getSuiTask: ${json.error.message}`);
+  }
+
+  const results = json.result?.results;
+  if (!results || results.length === 0) {
+    throw new Error(`getSuiTask: no results for task ${taskId}`);
+  }
+
+  const returnValues = results[0]?.returnValues;
+  if (!returnValues || returnValues.length === 0) {
+    throw new Error(`getSuiTask: no return values for task ${taskId}`);
+  }
+
+  // returnValues[0] = [raw_base64_bytes, type_tag_string]
+  const raw = returnValues[0][0] as string;
+  const rawBytes = Uint8Array.from(atob(raw), (c) => c.charCodeAt(0));
+
+  // Parse the Task struct from BCS.
+  // Task struct field order: agent (32B), worker (32B), token_type (vec), amount (u64),
+  // task_hash (vec), evidence_hash (vec), status (u8), category (vec),
+  // location_zone (vec), created_at (u64), deadline (u64), submission_attempts (u8), verifier (32B)
+  let offset = 0;
+  const readAddress = () => {
+    const addrBytes = rawBytes.slice(offset, offset + 32);
+    offset += 32;
+    return '0x' + Array.from(addrBytes).map((b) => b.toString(16).padStart(2, '0')).join('');
+  };
+  const readVec = () => {
+    // ULEB128 length
+    let len = 0;
+    let shift = 0;
+    while (true) {
+      const byte = rawBytes[offset++];
+      len |= (byte & 0x7f) << shift;
+      if (!(byte & 0x80)) break;
+      shift += 7;
+    }
+    const val = rawBytes.slice(offset, offset + len);
+    offset += len;
+    return val;
+  };
+  const readU64 = () => {
+    const val = Number(
+      (BigInt(rawBytes[offset]) << 0n) |
+      (BigInt(rawBytes[offset + 1]) << 8n) |
+      (BigInt(rawBytes[offset + 2]) << 16n) |
+      (BigInt(rawBytes[offset + 3]) << 24n) |
+      (BigInt(rawBytes[offset + 4]) << 32n) |
+      (BigInt(rawBytes[offset + 5]) << 40n) |
+      (BigInt(rawBytes[offset + 6]) << 48n) |
+      (BigInt(rawBytes[offset + 7]) << 56n)
+    );
+    offset += 8;
+    return val;
+  };
+  const readU8 = () => rawBytes[offset++];
+
+  readAddress(); // agent
+  const worker = readAddress();
+  readVec(); // token_type
+  readU64(); // amount
+  readVec(); // task_hash
+  const evidenceHashBytes = readVec();
+  const evidenceHash = '0x' + Array.from(evidenceHashBytes).map((b) => b.toString(16).padStart(2, '0')).join('');
+  const status = readU8();
+  readVec(); // category
+  readVec(); // location_zone
+  readU64(); // created_at
+  const deadline = readU64();
+  const submissionAttempts = readU8();
+
+  return { worker, submissionAttempts, status, evidenceHash, deadline };
+}
+
+/**
  * Execute a Sui transaction server-side using the backend Sui signer.
  * Requires CHAIN_TYPE=sui and SUI_AGENT_PRIVATE_KEY to be set.
  */

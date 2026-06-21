@@ -13,7 +13,7 @@ import { getTaskIdByHash } from '../services/escrowEvents.js';
 import * as escrowService from '../services/escrow.js';
 import * as reputationService from '../services/reputation.js';
 import * as reputationDecay from '../services/reputationDecay.js';
-import { provider, escrow } from '../services/chain.js';
+import { provider, escrow, isSui, getSuiTask } from '../services/chain.js';
 import { redis } from '../services/redis.js';
 import { ethers } from 'ethers';
 import type { AuthRequest, ApiResponse, AgentCapability } from '../types.js';
@@ -1213,7 +1213,30 @@ a2aRouter.post('/tasks/:id/submit', requireAuth, async (req: AuthRequest, res, n
     // current on-chain submissionAttempts so the state below can record which
     // round the pending evidence broadcast will become.
     let chainAttempts = 0;
-    {
+    if (isSui) {
+      try {
+        const suiTask = await getSuiTask(BigInt(onChainId));
+        chainAttempts = suiTask.submissionAttempts;
+        if (suiTask.worker.toLowerCase() !== address.toLowerCase()) {
+          await new Promise((r) => setTimeout(r, 2_000));
+          const retrySuiTask = await getSuiTask(BigInt(onChainId));
+          chainAttempts = retrySuiTask.submissionAttempts;
+          if (retrySuiTask.worker.toLowerCase() !== address.toLowerCase()) {
+            const freshState = await a2aStore.getState(taskHash);
+            if (freshState?.assignError) {
+              throw new AppError(503, 'BRIDGE_FAILED', `Assignment bridge failed — ${freshState.assignError}. Release and retry.`);
+            }
+            console.warn(`[a2a] submit: on-chain assignment not confirmed for ${taskHash} (task.worker=${retrySuiTask.worker}, caller=${address})`);
+            throw new AppError(503, 'NOT_ASSIGNED_YET', `On-chain assignment not yet confirmed — worker=${retrySuiTask.worker}, caller=${address}. Retry shortly.`);
+          }
+        }
+      } catch (err) {
+        // devInspect RPC error or task not found — assignment was confirmed at
+        // /accept time; treat as confirmed and use 0 for attempts.
+        console.warn(`[a2a] submit: Sui chain read failed for ${taskHash}:`, (err as Error).message);
+        chainAttempts = 0;
+      }
+    } else {
       const onChainTask = await escrowService.getTask(Number(onChainId));
       chainAttempts = onChainTask.submissionAttempts;
       if (onChainTask.worker.toLowerCase() !== address.toLowerCase()) {
@@ -1237,34 +1260,55 @@ a2aRouter.post('/tasks/:id/submit', requireAuth, async (req: AuthRequest, res, n
     // hasn't passed (BlindEscrow.sol submitEvidence). Check all three here so
     // a worker is never handed a signable tx that's guaranteed to revert.
     if (state.status === 'failed') {
-      const t = await escrowService.getTask(Number(onChainId));
-      if (t.status !== 3) { // 3 = Verified (failed verification)
-        throw new AppError(
-          409,
-          'NOT_RETRYABLE',
-          `Cannot retry: on-chain status is ${t.status}, expected 3 (Verified). ` +
-            'The task either settled differently or the verdict has not confirmed yet.',
-        );
+      if (isSui) {
+        // Sui retry gates: read on-chain state from Move contract.
+        try {
+          const suiTask = await getSuiTask(BigInt(onChainId));
+          if (suiTask.status !== 3) {
+            throw new AppError(409, 'NOT_RETRYABLE', `Cannot retry: on-chain status is ${suiTask.status}, expected 3 (Verified).`);
+          }
+          if (suiTask.submissionAttempts >= 3) {
+            throw new AppError(409, 'MAX_ATTEMPTS_REACHED', `No submission attempts left (${suiTask.submissionAttempts}/3).`);
+          }
+          if (BigInt(Math.floor(Date.now() / 1000)) >= BigInt(suiTask.deadline)) {
+            throw new AppError(409, 'DEADLINE_REACHED', 'The task deadline has passed.');
+          }
+          chainAttempts = suiTask.submissionAttempts;
+          console.log(`[a2a] submit: retry after failed verification for ${taskHash} on Sui (attempt ${chainAttempts + 1}/3)`);
+        } catch (err) {
+          if (err instanceof AppError) throw err;
+          console.warn(`[a2a] submit: Sui retry task read failed for ${taskHash}:`, (err as Error).message);
+          // Default to 0 on read failure — the subsequent broadcast can revert.
+          chainAttempts = 0;
+        }
+      } else {
+        const t = await escrowService.getTask(Number(onChainId));
+        if (t.status !== 3) {
+          throw new AppError(
+            409,
+            'NOT_RETRYABLE',
+            `Cannot retry: on-chain status is ${t.status}, expected 3 (Verified). ` +
+              'The task either settled differently or the verdict has not confirmed yet.',
+          );
+        }
+        if (t.submissionAttempts >= 3) {
+          throw new AppError(
+            409,
+            'MAX_ATTEMPTS_REACHED',
+            `No submission attempts left (${t.submissionAttempts}/3). The poster can reclaim escrow via claimTimeout after the deadline.`,
+          );
+        }
+        if (BigInt(Math.floor(Date.now() / 1000)) >= t.deadline) {
+          throw new AppError(
+            409,
+            'DEADLINE_REACHED',
+            'The task deadline has passed — the contract would revert DeadlineReached. The poster can reclaim escrow via claimTimeout.',
+          );
+        }
+        chainAttempts = t.submissionAttempts; // freshest read wins
       }
-      // MAX_SUBMISSION_ATTEMPTS is a contract constant (= 3); submitEvidence
-      // reverts MaxSubmissionAttemptsReached at the cap.
-      if (t.submissionAttempts >= 3) {
-        throw new AppError(
-          409,
-          'MAX_ATTEMPTS_REACHED',
-          `No submission attempts left (${t.submissionAttempts}/3). The poster can reclaim escrow via claimTimeout after the deadline.`,
-        );
-      }
-      if (BigInt(Math.floor(Date.now() / 1000)) >= t.deadline) {
-        throw new AppError(
-          409,
-          'DEADLINE_REACHED',
-          'The task deadline has passed — the contract would revert DeadlineReached. The poster can reclaim escrow via claimTimeout.',
-        );
-      }
-      chainAttempts = t.submissionAttempts; // freshest read wins
       console.log(
-        `[a2a] submit: retry after failed verification for ${taskHash} (attempt ${t.submissionAttempts + 1}/3)`,
+        `[a2a] submit: retry after failed verification for ${taskHash} (attempt ${chainAttempts + 1}/3)`,
       );
     }
 
@@ -1275,11 +1319,14 @@ a2aRouter.post('/tasks/:id/submit', requireAuth, async (req: AuthRequest, res, n
       ethers.toUtf8Bytes(JSON.stringify(resultData)),
     );
 
-    const unsignedSubmitEvidence = await escrowService.buildSubmitEvidence(
-      address,
-      Number(onChainId),
-      evidenceHash,
-    );
+    let unsignedSubmitEvidence: ethers.TransactionRequest | null = null;
+    if (!isSui) {
+      unsignedSubmitEvidence = await escrowService.buildSubmitEvidence(
+        address,
+        Number(onChainId),
+        evidenceHash,
+      );
+    }
 
     await a2aStore.updateState(taskHash, {
       status: 'submitted',
@@ -1456,15 +1503,37 @@ a2aRouter.post('/tasks/:id/finalize', requireAuth, async (req: AuthRequest, res,
         if (!ocIdA) {
           throw new AppError(503, 'NOT_INDEXED', 'On-chain taskId not yet indexed — wait a few seconds and retry');
         }
-        const tA = await escrowService.getTask(Number(ocIdA));
-        const broadcastPending =
-          state.submissionRound !== undefined && tA.submissionAttempts < state.submissionRound;
-        if (broadcastPending || (tA.status !== 2 && tA.status !== 3 && tA.status !== 4)) {
-          throw new AppError(
-            503,
-            'NOT_SUBMITTED_ON_CHAIN',
-            `SubmitEvidence not yet confirmed on-chain (status=${tA.status}, attempts=${tA.submissionAttempts}). Wait for the tx to confirm and retry.`,
-          );
+        if (isSui) {
+          try {
+            const suiTaskA = await getSuiTask(BigInt(ocIdA));
+            const broadcastPending =
+              state.submissionRound !== undefined && suiTaskA.submissionAttempts < state.submissionRound;
+            if (broadcastPending || (suiTaskA.status !== 2 && suiTaskA.status !== 3 && suiTaskA.status !== 4)) {
+              throw new AppError(
+                503,
+                'NOT_SUBMITTED_ON_CHAIN',
+                `SubmitEvidence not yet confirmed on-chain (status=${suiTaskA.status}, attempts=${suiTaskA.submissionAttempts}). Wait for the tx to confirm and retry.`,
+              );
+            }
+          } catch (err) {
+            if (err instanceof AppError) throw err;
+            throw new AppError(
+              503,
+              'ON_CHAIN_CHECK_FAILED',
+              `Could not verify on-chain submit status before finalize: ${(err as Error).message}`,
+            );
+          }
+        } else {
+          const tA = await escrowService.getTask(Number(ocIdA));
+          const broadcastPending =
+            state.submissionRound !== undefined && tA.submissionAttempts < state.submissionRound;
+          if (broadcastPending || (tA.status !== 2 && tA.status !== 3 && tA.status !== 4)) {
+            throw new AppError(
+              503,
+              'NOT_SUBMITTED_ON_CHAIN',
+              `SubmitEvidence not yet confirmed on-chain (status=${tA.status}, attempts=${tA.submissionAttempts}). Wait for the tx to confirm and retry.`,
+            );
+          }
         }
       }
       await a2aStore.updateState(taskHash, { status: 'awaiting_verification' });
@@ -1491,14 +1560,39 @@ a2aRouter.post('/tasks/:id/finalize', requireAuth, async (req: AuthRequest, res,
     const verificationResult = autoVerify(state.resultData, meta.verificationCriteria);
     const newStatus: 'verified' | 'failed' = verificationResult.passed ? 'verified' : 'failed';
 
+    if (isSui) {
+      // Sui path: no on-chain completeVerification call (backend lacks AdminCap).
+      // Run verification + update Redis state only. The on-chain settlement is
+      // handled separately (e.g., agent/poster with AdminCap calls the contract).
+      await a2aStore.updateState(taskHash, {
+        status: newStatus,
+        verificationResult,
+      });
+      if (verificationResult.passed) {
+        await recordWorkerPayout(taskHash, address, '0', 0n);
+      } else {
+        await recordWorkerDispute(taskHash, address);
+      }
+      try {
+        const { fireWebhooks } = await import('../services/webhookStore.js');
+        fireWebhooks(address, 'task_completed', { taskId: taskHash, passed: verificationResult.passed }).catch(() => {});
+      } catch { /* webhook module optional */ }
+      const body: ApiResponse = {
+        success: true,
+        data: { taskId: taskHash, status: newStatus, verificationResult },
+      };
+      res.json(body);
+      return;
+    }
+
     // Resolve + gate the on-chain task BEFORE mutating a2a state or executor
-    // stats. If the createTask event isn't indexed yet, or submitEvidence hasn't
-    // confirmed, we 503 with state still 'submitted' so the executor's retry
-    // re-runs cleanly — instead of advancing to 'verified', bumping
-    // tasksCompleted, and then losing the earnings credit to the indexing-lag
-    // race (the "3 tasks · 0 0G" bug). Without submitEvidence confirmed the
-    // bridge's completeVerification would also revert with InvalidStatus and the
-    // task would stick permanently.
+    // stats (EVM path below). If the createTask event isn't indexed yet, or
+    // submitEvidence hasn't confirmed, we 503 with state still 'submitted' so
+    // the executor's retry re-runs cleanly — instead of advancing to 'verified',
+    // bumping tasksCompleted, and then losing the earnings credit to the
+    // indexing-lag race (the "3 tasks · 0 0G" bug). Without submitEvidence
+    // confirmed the bridge's completeVerification would also revert with
+    // InvalidStatus and the task would stick permanently.
     const ocId = await getTaskIdByHash(taskHash);
     if (!ocId) {
       throw new AppError(

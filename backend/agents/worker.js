@@ -1025,11 +1025,40 @@ async function pollAndWork() {
       }
 
       // OFFER_HELD is TRANSIENT: another agent holds a short exclusive-offer
-      // window (CASCADE_OFFER_MS). It expires, then the task falls back to the
-      // open CAS race — so do NOT blacklist, or every agent that polled during
-      // someone else's window permanently skips a task it could later win.
-      // The poll cadence naturally rate-limits the retry.
+      // window (CASCADE_OFFER_MS). Wait for the window to expire, then retry
+      // the accept — the task falls back to open CAS-race after all ranked
+      // agents have had their turn, and the 12s window per agent means a
+      // simple `continue` would skip the window and rely on the 30s poll
+      // cadence, which is too slow to catch the CAS-race.
       if (acceptRes.status === 409 && err.error?.code === 'OFFER_HELD') {
+        const RETRY_DELAY = 15_000; // CASCADE_OFFER_MS (12s) + margin
+        log(`offer held for ${taskHash.slice(0, 10)}… — waiting ${RETRY_DELAY / 1000}s then retrying`);
+        await sleep(RETRY_DELAY);
+        const retryRes = await fetchWithTimeout(`${BACKEND_URL}/api/v1/a2a/tasks/${taskHash}/accept`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${AGENT_PLATFORM_TOKEN}`,
+          },
+        });
+        if (retryRes.ok) {
+          appliedTasks.add(taskHash);
+          acceptedTaskHash = taskHash;
+          try {
+            const acceptJson = await retryRes.json();
+            acceptedRootHash = acceptJson.data?.rootHash ?? null;
+            acceptedWrappedKey = acceptJson.data?.wrappedKey ?? null;
+          } catch { /* non-JSON body */ }
+          break;
+        }
+        const retryErr = await retryRes.json().catch(() => ({}));
+        if (retryRes.status === 409 && retryErr.error?.code === 'OFFER_HELD') {
+          log(`offer still held after retry for ${taskHash.slice(0, 10)}… — cascade longer than one window, moving on`);
+          continue;
+        }
+        // Other errors (ASSIGNED_ELSEWHERE, NOT_OPEN, etc.) — skip
+        log(`offer-held retry failed for ${taskHash.slice(0, 10)}…: ${retryRes.status} ${retryErr.error?.code || ''}`);
+        appliedTasks.add(taskHash);
         continue;
       }
 
@@ -1213,13 +1242,14 @@ async function runAcceptedTask(acceptedTaskHash, acceptedRootHash, acceptedWrapp
     }
     const submitJson = await submitRes.json();
     const unsignedSubmitEvidence = submitJson.data?.unsignedSubmitEvidence;
-    if (!unsignedSubmitEvidence) {
+    if (!unsignedSubmitEvidence && CHAIN_TYPE !== 'sui') {
       log(`submit response missing unsignedSubmitEvidence for ${acceptedTaskHash.slice(0, 10)}…`);
       await releaseTask(acceptedTaskHash);
       return;
     }
     const evidenceHash = submitJson.data?.evidenceHash ?? '';
     const evidenceHashHex = evidenceHash.startsWith('0x') ? evidenceHash.slice(2) : evidenceHash;
+    const onChainTaskId = submitJson.data?.onChainTaskId;
 
     let broadcastOk = false;
 
@@ -1231,6 +1261,9 @@ async function runAcceptedTask(acceptedTaskHash, acceptedRootHash, acceptedWrapp
         return;
       }
       try {
+        if (!onChainTaskId) {
+          throw new Error('submit response missing onChainTaskId for Sui submit');
+        }
         const { Transaction } = await import('@mysten/sui/transactions');
         const { SuiGrpcClient } = await import('@mysten/sui/grpc');
 
@@ -1245,7 +1278,7 @@ async function runAcceptedTask(acceptedTaskHash, acceptedRootHash, acceptedWrapp
           target: `${SUI_PACKAGE_ID}::blind_escrow::submit_evidence`,
           arguments: [
             tx.object(SUI_BLIND_ESCROW_OBJECT_ID),
-            tx.pure.u64(String(acceptedTaskHash)), // taskId from hash
+            tx.pure.u64(onChainTaskId),
             tx.pure.vector('u8', Array.from(Buffer.from(evidenceHashHex, 'hex'))),
           ],
         });
