@@ -36,12 +36,29 @@ sui client publish --gas-budget 100000000
 After publishing, you'll get output like:
 ```
 Published Objects:
-  PackageID: 0xd4296d049fbf05591b729434f9f73628f68d7fb939f24d2ac5b6c9d55ff0a44d
+  PackageID: 0xe74d57b9f55eba50b9c6f0b3c09e4892a1b00f842461df16eb5bebe02a4a3f35
   Created Objects:
-    - ObjectID: 0x642582b447f002fa7e0a6bbe8ea61915b74e46737469bdd6930600511f27402a  (BlindEscrow shared object)
-    - ObjectID: 0x606dd42af017b8093fcd8eff10ad440a2d2ad424b6f67f4ef0789c4cf51218ff  (TaskRegistry shared object)
-    - ObjectID: 0xfd56d47bf24cb3d9354b16971d43fa4a0aa72bcbbd62dbe386cb72b6d9b32a87  (BlindReputation shared object)
-    - ObjectID: 0x2161b19b1dd3c9248016d53791c0e7947231df83184dc818bd0b99b9fc364fa0  (AdminCap — transfer to backend signer)
+    - ObjectID: 0x14c90c14d60b918706e04688f1bb6df617e8134462c56822bf4d546c37a9f6ef  (BlindEscrow shared object)
+    - ObjectID: 0x379864da638d2212aa11b9048dfe7ab48860075b06f8c2470681cd052bdccdf5  (TaskRegistry shared object)
+    - ObjectID: 0x1769c6f22a00fcf4a4493c07eb7cf063915e664768a12aae61feea1b9e5e2fb7  (BlindReputation shared object)
+    - ObjectID: 0xb2af5cecccf84f5b908def68d52eee07c6cfa1f403412e31fa6b47f7786f958d  (AdminCap — kept by deployer)
+    - ObjectID: 0xc019ac36f1d073c72f9bcb89715bf8fc58b69687b26cd5dd5defa6ce64090ac2  (UpgradeCap — kept by deployer)
+```
+
+After publish, set the verifier and treasury on the escrow before the bridge
+will accept any settlement calls — they default to `0x0` and the
+verifier-gated entrypoints fail with `ENotVerifier` until set:
+
+```bash
+ESCROW=<BLIND_ESCROW_OBJECT_ID>
+ADMIN_CAP=<ADMIN_CAP_ID>
+VERIFIER=<backend SUI_AGENT_PRIVATE_KEY's address>
+TREASURY=<treasury address>
+
+sui client call --package <PACKAGE_ID> --module blind_escrow \
+  --function set_verifier --args $ESCROW $VERIFIER $ADMIN_CAP --gas-budget 10000000
+sui client call --package <PACKAGE_ID> --module blind_escrow \
+  --function set_treasury --args $ESCROW $TREASURY $ADMIN_CAP --gas-budget 10000000
 ```
 
 ## 2. Fill In Backend `.env`
@@ -54,11 +71,11 @@ CHAIN_TYPE=sui
 
 # From publish output:
 SUI_NETWORK_ID=testnet
-SUI_PACKAGE_ID=0xd4296d049fbf05591b729434f9f73628f68d7fb939f24d2ac5b6c9d55ff0a44d
-SUI_BLIND_ESCROW_OBJECT_ID=0x642582b447f002fa7e0a6bbe8ea61915b74e46737469bdd6930600511f27402a
-SUI_TASK_REGISTRY_OBJECT_ID=0x606dd42af017b8093fcd8eff10ad440a2d2ad424b6f67f4ef0789c4cf51218ff
-SUI_BLIND_REPUTATION_OBJECT_ID=0xfd56d47bf24cb3d9354b16971d43fa4a0aa72bcbbd62dbe386cb72b6d9b32a87
-SUI_ADMIN_CAP_ID=0x2161b19b1dd3c9248016d53791c0e7947231df83184dc818bd0b99b9fc364fa0
+SUI_PACKAGE_ID=0xe74d57b9f55eba50b9c6f0b3c09e4892a1b00f842461df16eb5bebe02a4a3f35
+SUI_BLIND_ESCROW_OBJECT_ID=0x14c90c14d60b918706e04688f1bb6df617e8134462c56822bf4d546c37a9f6ef
+SUI_TASK_REGISTRY_OBJECT_ID=0x379864da638d2212aa11b9048dfe7ab48860075b06f8c2470681cd052bdccdf5
+SUI_BLIND_REPUTATION_OBJECT_ID=0x1769c6f22a00fcf4a4493c07eb7cf063915e664768a12aae61feea1b9e5e2fb7
+SUI_ADMIN_CAP_ID=0xb2af5cecccf84f5b908def68d52eee07c6cfa1f403412e31fa6b47f7786f958d
 
 # RPC (use a dedicated node for production, not the public one):
 SUI_RPC_URL=https://fullnode.testnet.sui.io:443
@@ -93,11 +110,11 @@ Once deployed, update the placeholder `0x0` addresses in:
 ```typescript
 'sui-testnet': {
   // ...
-  packageId: '0xd4296d049fbf05591b729434f9f73628f68d7fb939f24d2ac5b6c9d55ff0a44d',
+  packageId: '0xe74d57b9f55eba50b9c6f0b3c09e4892a1b00f842461df16eb5bebe02a4a3f35',
   sharedObjects: {
-    blindEscrow: '0x642582b447f002fa7e0a6bbe8ea61915b74e46737469bdd6930600511f27402a',
-    taskRegistry: '0x606dd42af017b8093fcd8eff10ad440a2d2ad424b6f67f4ef0789c4cf51218ff',
-    blindReputation: '0xfd56d47bf24cb3d9354b16971d43fa4a0aa72bcbbd62dbe386cb72b6d9b32a87',
+    blindEscrow: '0x14c90c14d60b918706e04688f1bb6df617e8134462c56822bf4d546c37a9f6ef',
+    taskRegistry: '0x379864da638d2212aa11b9048dfe7ab48860075b06f8c2470681cd052bdccdf5',
+    blindReputation: '0x1769c6f22a00fcf4a4493c07eb7cf063915e664768a12aae61feea1b9e5e2fb7',
   },
 },
 ```
@@ -129,9 +146,9 @@ functions. The backend and SDK use these object IDs:
 
 | Move Module | Shared Object ID | Purpose |
 |---|---|---|
-| `blindmarket::blind_escrow` | `0x642582b447f002fa7e0a6bbe8ea61915b74e46737469bdd6930600511f27402a` | Task lifecycle |
-| `blindmarket::task_registry` | `0x606dd42af017b8093fcd8eff10ad440a2d2ad424b6f67f4ef0789c4cf51218ff` | Task discovery |
-| `blindmarket::blind_reputation` | `0xfd56d47bf24cb3d9354b16971d43fa4a0aa72bcbbd62dbe386cb72b6d9b32a87` | Worker reputation |
+| `blindmarket::blind_escrow` | `0x14c90c14d60b918706e04688f1bb6df617e8134462c56822bf4d546c37a9f6ef` | Task lifecycle |
+| `blindmarket::task_registry` | `0x379864da638d2212aa11b9048dfe7ab48860075b06f8c2470681cd052bdccdf5` | Task discovery |
+| `blindmarket::blind_reputation` | `0x1769c6f22a00fcf4a4493c07eb7cf063915e664768a12aae61feea1b9e5e2fb7` | Worker reputation |
 
 The `AdminCap` is NOT a shared object — it's an owned object held by the
 backend signer. Only the AdminCap holder can call admin functions
@@ -143,11 +160,11 @@ backend signer. Only the AdminCap holder can call admin functions
 |---|---|---|
 | `CHAIN_TYPE` | `sui` | Yes |
 | `SUI_NETWORK_ID` | `testnet` | Yes |
-| `SUI_PACKAGE_ID` | `0xd4296d049fbf05591b729434f9f73628f68d7fb939f24d2ac5b6c9d55ff0a44d` | Yes |
-| `SUI_BLIND_ESCROW_OBJECT_ID` | `0x642582b447f002fa7e0a6bbe8ea61915b74e46737469bdd6930600511f27402a` | Yes |
-| `SUI_TASK_REGISTRY_OBJECT_ID` | `0x606dd42af017b8093fcd8eff10ad440a2d2ad424b6f67f4ef0789c4cf51218ff` | Yes |
-| `SUI_BLIND_REPUTATION_OBJECT_ID` | `0xfd56d47bf24cb3d9354b16971d43fa4a0aa72bcbbd62dbe386cb72b6d9b32a87` | Yes |
-| `SUI_ADMIN_CAP_ID` | `0x2161b19b1dd3c9248016d53791c0e7947231df83184dc818bd0b99b9fc364fa0` | For admin ops |
+| `SUI_PACKAGE_ID` | `0xe74d57b9f55eba50b9c6f0b3c09e4892a1b00f842461df16eb5bebe02a4a3f35` | Yes |
+| `SUI_BLIND_ESCROW_OBJECT_ID` | `0x14c90c14d60b918706e04688f1bb6df617e8134462c56822bf4d546c37a9f6ef` | Yes |
+| `SUI_TASK_REGISTRY_OBJECT_ID` | `0x379864da638d2212aa11b9048dfe7ab48860075b06f8c2470681cd052bdccdf5` | Yes |
+| `SUI_BLIND_REPUTATION_OBJECT_ID` | `0x1769c6f22a00fcf4a4493c07eb7cf063915e664768a12aae61feea1b9e5e2fb7` | Yes |
+| `SUI_ADMIN_CAP_ID` | `0xb2af5cecccf84f5b908def68d52eee07c6cfa1f403412e31fa6b47f7786f958d` | For admin ops |
 | `SUI_AGENT_PRIVATE_KEY` | `suiprivkey...` | For server-side TX |
 | `SUI_RPC_URL` | `https://fullnode.testnet.sui.io:443` | Has default |
 | `AGENT_PRIVATE_KEY` | `suiprivkey...` | Per-agent (Sui format) |
