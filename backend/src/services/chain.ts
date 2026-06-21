@@ -181,7 +181,11 @@ export async function buildSuiCompleteVerificationTx(taskId: bigint, passed: boo
 
 /**
  * Read a task's on-chain state from the Sui Move contract.
- * Calls blind_escrow::get_task via devInspect and returns the relevant fields.
+ *
+ * Calls blind_escrow::get_task via devInspect. The Move function returns a
+ * 5-tuple `(address, u64, u8, vector<u8>, u8)` = (worker, deadline, status,
+ * evidence_hash, submission_attempts). Each tuple element arrives as its own
+ * entry in `returnValues`, BCS-encoded independently.
  */
 export async function getSuiTask(taskId: bigint): Promise<{ worker: string; submissionAttempts: number; status: number; evidenceHash: string; deadline: number }> {
   const { Transaction } = await import('@mysten/sui/transactions');
@@ -198,7 +202,7 @@ export async function getSuiTask(taskId: bigint): Promise<{ worker: string; subm
     ],
   });
 
-  const bytes = await tx.build({ client: await suiBuildClient() });
+  const bytes = await tx.build({ client: suiBuildClient() });
   const txBase64 = toBase64(new Uint8Array(bytes));
 
   const rpcUrl = config.suiRpcUrl.replace(/\/$/, '');
@@ -223,73 +227,60 @@ export async function getSuiTask(taskId: bigint): Promise<{ worker: string; subm
     throw new Error(`getSuiTask: no results for task ${taskId}`);
   }
 
-  const returnValues = results[0]?.returnValues;
-  if (!returnValues || returnValues.length === 0) {
-    throw new Error(`getSuiTask: no return values for task ${taskId}`);
+  const returnValues = results[0]?.returnValues as Array<[string | number[], string]> | undefined;
+  if (!returnValues || returnValues.length < 5) {
+    throw new Error(`getSuiTask: expected 5 return values for task ${taskId}, got ${returnValues?.length ?? 0}`);
   }
 
-  // returnValues[0] = [raw_base64_bytes, type_tag_string]
-  const raw = returnValues[0][0] as string;
-  const rawBytes = Uint8Array.from(atob(raw), (c) => c.charCodeAt(0));
-
-  // Debug: log first 64 bytes (agent + worker) so we can see the raw address bytes
-  const agentHex = Array.from(rawBytes.slice(0, 32)).map((b) => b.toString(16).padStart(2, '0')).join('');
-  const workerHex = Array.from(rawBytes.slice(32, 64)).map((b) => b.toString(16).padStart(2, '0')).join('');
-  console.log(`[getSuiTask] taskId=${taskId} rawLen=${rawBytes.length} agent=0x${agentHex} worker=0x${workerHex}`);
-
-  // Parse the Task struct from BCS.
-  // Task struct field order: agent (32B), worker (32B), token_type (vec), amount (u64),
-  // task_hash (vec), evidence_hash (vec), status (u8), category (vec),
-  // location_zone (vec), created_at (u64), deadline (u64), submission_attempts (u8), verifier (32B)
-  let offset = 0;
-  const readAddress = () => {
-    const addrBytes = rawBytes.slice(offset, offset + 32);
-    offset += 32;
-    return '0x' + Array.from(addrBytes).map((b) => b.toString(16).padStart(2, '0')).join('');
+  // Each returnValues[i] = [bytes, typeTag]. Bytes is either base64 (JSON-RPC v1)
+  // or a number[] (some clients). Normalize to Uint8Array.
+  const toBytes = (entry: [string | number[], string]): Uint8Array => {
+    const raw = entry[0];
+    if (typeof raw === 'string') {
+      return Uint8Array.from(atob(raw), (c) => c.charCodeAt(0));
+    }
+    return Uint8Array.from(raw);
   };
-  const readVec = () => {
-    // ULEB128 length
+
+  const readU64LE = (b: Uint8Array): number => Number(
+    (BigInt(b[0]) << 0n) |
+    (BigInt(b[1]) << 8n) |
+    (BigInt(b[2]) << 16n) |
+    (BigInt(b[3]) << 24n) |
+    (BigInt(b[4]) << 32n) |
+    (BigInt(b[5]) << 40n) |
+    (BigInt(b[6]) << 48n) |
+    (BigInt(b[7]) << 56n)
+  );
+
+  const readVecU8 = (b: Uint8Array): Uint8Array => {
+    // ULEB128 length prefix
     let len = 0;
     let shift = 0;
+    let offset = 0;
     while (true) {
-      const byte = rawBytes[offset++];
+      const byte = b[offset++];
       len |= (byte & 0x7f) << shift;
       if (!(byte & 0x80)) break;
       shift += 7;
     }
-    const val = rawBytes.slice(offset, offset + len);
-    offset += len;
-    return val;
+    return b.slice(offset, offset + len);
   };
-  const readU64 = () => {
-    const val = Number(
-      (BigInt(rawBytes[offset]) << 0n) |
-      (BigInt(rawBytes[offset + 1]) << 8n) |
-      (BigInt(rawBytes[offset + 2]) << 16n) |
-      (BigInt(rawBytes[offset + 3]) << 24n) |
-      (BigInt(rawBytes[offset + 4]) << 32n) |
-      (BigInt(rawBytes[offset + 5]) << 40n) |
-      (BigInt(rawBytes[offset + 6]) << 48n) |
-      (BigInt(rawBytes[offset + 7]) << 56n)
-    );
-    offset += 8;
-    return val;
-  };
-  const readU8 = () => rawBytes[offset++];
 
-  readAddress(); // agent
-  const worker = readAddress();
-  readVec(); // token_type
-  readU64(); // amount
-  readVec(); // task_hash
-  const evidenceHashBytes = readVec();
-  const evidenceHash = '0x' + Array.from(evidenceHashBytes).map((b) => b.toString(16).padStart(2, '0')).join('');
-  const status = readU8();
-  readVec(); // category
-  readVec(); // location_zone
-  readU64(); // created_at
-  const deadline = readU64();
-  const submissionAttempts = readU8();
+  const toHex = (b: Uint8Array): string =>
+    '0x' + Array.from(b).map((x) => x.toString(16).padStart(2, '0')).join('');
+
+  const workerBytes = toBytes(returnValues[0]);
+  const deadlineBytes = toBytes(returnValues[1]);
+  const statusBytes = toBytes(returnValues[2]);
+  const evidenceBytes = toBytes(returnValues[3]);
+  const attemptsBytes = toBytes(returnValues[4]);
+
+  const worker = toHex(workerBytes);
+  const deadline = readU64LE(deadlineBytes);
+  const status = statusBytes[0];
+  const evidenceHash = toHex(readVecU8(evidenceBytes));
+  const submissionAttempts = attemptsBytes[0];
 
   return { worker, submissionAttempts, status, evidenceHash, deadline };
 }

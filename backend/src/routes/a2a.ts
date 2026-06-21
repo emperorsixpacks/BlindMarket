@@ -1462,8 +1462,18 @@ a2aRouter.post('/tasks/:id/release', requireAuth, async (req: AuthRequest, res, 
     if (onChainId) {
       let onChainStatus: number;
       try {
-        const onChainTask = await escrowService.getTask(Number(onChainId));
-        onChainStatus = onChainTask.status;
+        // escrowService.getTask reads from the EVM BlindEscrow ABI and throws
+        // on Sui deployments (the EVM contract handle is a Proxy stub when
+        // CHAIN_TYPE=sui). Branch on caller address shape: EVM 20-byte hex →
+        // EVM read; everything else → Sui devInspect of blind_escrow::get_task.
+        // STATUS_FUNDED == 0 on both chains, so the downstream gate is correct.
+        if (ethers.isAddress(address)) {
+          const onChainTask = await escrowService.getTask(Number(onChainId));
+          onChainStatus = onChainTask.status;
+        } else {
+          const suiTask = await getSuiTask(BigInt(onChainId));
+          onChainStatus = suiTask.status;
+        }
       } catch (err) {
         throw new AppError(
           503,

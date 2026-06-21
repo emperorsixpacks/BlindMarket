@@ -275,6 +275,11 @@ if (!IS_EVM_AGENT) {
       : AGENT_PRIVATE_KEY.startsWith('0x')
         ? AGENT_PRIVATE_KEY.slice(2)
         : AGENT_PRIVATE_KEY;
+    // Ed25519Keypair.fromSecretKey accepts a `suiprivkey...` bech32 string OR
+    // a 32-byte Uint8Array — NOT a raw hex string. agentRunner provisions the
+    // key as raw hex (services/agentRunner.ts:152), so wrap in Buffer first or
+    // the SDK throws silently and every later Sui broadcast dies with "signer
+    // not initialised".
     const keypair = Ed25519Keypair.fromSecretKey(
       privKey.startsWith('suiprivkey') ? privKey : Buffer.from(privKey, 'hex'),
     );

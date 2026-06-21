@@ -591,8 +591,27 @@ module blindmarket::blind_escrow {
     //  View functions (read-only queries)
     // ═══════════════════════════════════════════════════════════════════════
 
-    public fun get_task(escrow: &BlindEscrow, task_id: u64): &Task {
-        table::borrow(&escrow.tasks, task_id)
+    /// View accessor for off-chain readers (backend devInspect).
+    ///
+    /// Returns a tuple of copy+drop scalars instead of `&Task` because
+    /// programmable transactions cannot return references to non-droppable
+    /// structs — `Task` has only `store`, so `&Task` fails Sui's static
+    /// `InvalidPublicFunctionReturnType` check during devInspect.
+    ///
+    /// Tuple shape: (worker, deadline, status, evidence_hash, submission_attempts).
+    /// Backend BCS parser in chain.ts::getSuiTask expects this exact order.
+    public fun get_task(
+        escrow: &BlindEscrow,
+        task_id: u64,
+    ): (address, u64, u8, vector<u8>, u8) {
+        let task = table::borrow(&escrow.tasks, task_id);
+        (
+            task.worker,
+            task.deadline,
+            task.status,
+            task.evidence_hash,
+            task.submission_attempts,
+        )
     }
 
     public fun is_task_expired(escrow: &BlindEscrow, task_id: u64, ctx: &TxContext): bool {
