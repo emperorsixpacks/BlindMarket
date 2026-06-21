@@ -1754,7 +1754,8 @@ function connectWebSocket() {
   });
 
   wsClient.on('disconnect', (reason) => {
-    log(`WS disconnected: ${reason}`);
+    log(`WS disconnected: ${reason} — running fallback poll`);
+    pollAndWork().catch(() => {});
   });
 
   wsClient.on('connect_error', (err) => {
@@ -1869,8 +1870,8 @@ if (process.env.NODE_ENV !== 'test') {
     await ensureRegisteredAsA2AExecutor();
     // Connect WebSocket for push-based assignment (instant task offers)
     connectWebSocket();
-    // Keep a long-interval poll as safety net for missed WS events
-    setInterval(() => { pollAndWork().catch(() => {}); }, 5 * 60 * 1000);
+    // Keep poll as safety net for missed WS events
+    setInterval(() => { pollAndWork().catch(() => {}); }, POLL_INTERVAL_MS);
     // Run initial poll to catch any tasks posted before WS connected
     pollAndWork().catch(() => {});
   })();
