@@ -188,6 +188,7 @@ export async function getSuiTask(taskId: bigint): Promise<{ worker: string; subm
   const { toBase64 } = await import('@mysten/utils');
 
   const tx = new Transaction();
+  tx.setSender(_suiSignerAddress ?? '0x0000000000000000000000000000000000000000000000000000000000000000');
 
   tx.moveCall({
     target: `${config.suiPackageId}::blind_escrow::get_task` as `${string}::${string}::${string}`,
@@ -197,7 +198,7 @@ export async function getSuiTask(taskId: bigint): Promise<{ worker: string; subm
     ],
   });
 
-  const bytes = await tx.build();
+  const bytes = await tx.build({ client: await suiBuildClient() });
   const txBase64 = toBase64(new Uint8Array(bytes));
 
   const rpcUrl = config.suiRpcUrl.replace(/\/$/, '');
@@ -316,6 +317,14 @@ async function ensureSuiSigner(): Promise<void> {
   console.log(`[chain] Sui signer (lazy): ${_suiSignerAddress}`);
 }
 
+// Reuse the gRPC client for Transaction.build (has core.resolveTransactionPlugin).
+function suiBuildClient(): import('@mysten/sui/grpc').SuiGrpcClient {
+  if (!_suiClient) {
+    throw new Error('Sui client not initialised for tx building');
+  }
+  return _suiClient;
+}
+
 /**
  * Execute a Sui transaction server-side using the backend Sui signer.
  * Requires SUI_AGENT_PRIVATE_KEY to be set (regardless of CHAIN_TYPE).
@@ -332,7 +341,7 @@ export async function executeSuiTx(txJson: string): Promise<{ digest: string }> 
   const tx = Transaction.from(txJson);
   tx.setSenderIfNotSet(_suiSigner.toSuiAddress());
 
-  const bytes = await tx.build();
+  const bytes = await tx.build({ client: await suiBuildClient() });
   const { signature } = await _suiSigner.signTransaction(bytes);
 
   const txBase64 = toBase64(new Uint8Array(bytes));
