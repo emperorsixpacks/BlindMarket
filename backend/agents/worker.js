@@ -1052,67 +1052,107 @@ async function runAcceptedTask(acceptedTaskHash, acceptedRootHash, acceptedWrapp
     log(`working on task ${acceptedTaskHash.slice(0, 10)}…`);
     log(`LLM prompt: "${briefPlaintext.slice(0, 200)}${briefPlaintext.length > 200 ? '…' : ''}"`);
     const llmStartedAt = Date.now();
-
     let text = '';
     let llmElapsed = '0.0';
     let toolCalls = [];
 
     try {
-      // 0G Compute auth is handled by the model's own fetch (see getModel /
-      // ogComputeFetch); other providers authenticate with their API key.
       const model = getModel();
+      const MAX_TURNS = 5;
+      const WAIT_TIMEOUT_MS = 10 * 60 * 1000;
+      const WAIT_POLL_MS = 15_000;
+      let prompt = briefPlaintext;
+      let turn = 0;
 
-      const result = await generateText({
-        model,
-        system: `[IDENTITY]\n${AGENT_INSTRUCTIONS}\n\n[CAPABILITIES]\nYou have access to tools. If you use a tool, you must synthesize the results into a final text summary for the user. Do not simply output the raw tool result.`,
-        prompt: briefPlaintext,
-        tools: buildTools(acceptedTaskHash),
-        // AI SDK v6: `maxSteps` was removed; the default is stepCountIs(1),
-        // which would stop after one step and never let the model synthesize
-        // tool results into a final answer. Allow up to 10 tool-loop steps.
-        stopWhen: stepCountIs(10),
-      });
+      while (turn < MAX_TURNS) {
+        turn++;
+        const result = await generateText({
+          model,
+          system: `[IDENTITY]\n${AGENT_INSTRUCTIONS}\n\n[CAPABILITIES]\nYou have access to tools. If you use a tool, you must synthesize the results into a final text summary for the user. Do not simply output the raw tool result.`,
+          prompt,
+          tools: buildTools(acceptedTaskHash),
+          stopWhen: stepCountIs(10),
+        });
 
-      text = result.text;
-      llmElapsed = ((Date.now() - llmStartedAt) / 1000).toFixed(1);
-      toolCalls = result.toolCalls || [];
+        text = result.text;
+        if (turn === 1) llmElapsed = ((Date.now() - llmStartedAt) / 1000).toFixed(1);
+        toolCalls = result.toolCalls || [];
 
-      log(`LLM finished for ${acceptedTaskHash.slice(0, 10)}… in ${llmElapsed}s (${text.length} chars)`);
-      log(`LLM finish reason: ${result.finishReason}`);
+        log(`LLM turn ${turn} for ${acceptedTaskHash.slice(0, 10)}… (${text.length} chars, finish=${result.finishReason})`);
 
-      if (toolCalls.length > 0) {
-        log(`LLM made ${toolCalls.length} tool call(s): ${toolCalls.map(tc => {
-          if (!tc) return 'null-tool-call';
-          const name = tc.toolName || 'unknown-tool';
-          const args = tc.input ? JSON.stringify(tc.input) : 'no-args';
-          const argsPreview = args.length > 50 ? args.slice(0, 50) + '…' : args;
-          return `${name}(${argsPreview})`;
-        }).join(', ')}`);
-      }
-
-      if (result.toolResults && result.toolResults.length > 0) {
-        log(`LLM received ${result.toolResults.length} tool result(s).`);
-      }
-      // AI SDK v6 surfaces tool execution failures as `tool-error` content
-      // parts — there is no `isError` flag on toolResults. `content` is a
-      // discriminated union, so narrowing on `type` exposes toolName/error.
-      for (const part of result.content || []) {
-        if (part.type === 'tool-error') {
-          log(`ERROR in tool ${part.toolName}: ${JSON.stringify(part.error)}`);
+        if (toolCalls.length > 0) {
+          log(`LLM tool calls: ${toolCalls.map(tc => {
+            if (!tc) return 'null';
+            const name = tc.toolName || 'unknown';
+            const args = tc.input ? JSON.stringify(tc.input) : '';
+            return `${name}(${args.length > 50 ? args.slice(0, 50) + '…' : args})`;
+          }).join(', ')}`);
         }
-      }
 
-      if (text.length === 0 && toolCalls.length === 0) {
-        log(`WARNING: LLM returned an empty string with no tool calls. Final result object: ${JSON.stringify({
-          finishReason: result.finishReason,
-          usage: result.usage,
-          hasToolCalls: toolCalls.length > 0,
-          hasToolResults: (result.toolResults || []).length > 0
-        })}`);
-      } else if (text.length === 0 && toolCalls.length > 0) {
-        log(`LLM finished with tool calls, but no text output yet. This is expected if more steps are needed.`);
-      } else {
-        log(`LLM response: "${text.slice(0, 200)}${text.length > 200 ? '…' : ''}"`);
+        if (result.toolResults && result.toolResults.length > 0) {
+          log(`LLM received ${result.toolResults.length} tool result(s).`);
+        }
+        for (const part of result.content || []) {
+          if (part.type === 'tool-error') {
+            log(`ERROR in tool ${part.toolName}: ${JSON.stringify(part.error)}`);
+          }
+        }
+
+        if (text.length === 0 && toolCalls.length === 0) {
+          log(`WARNING: LLM returned empty string with no tool calls (finishReason=${result.finishReason})`);
+        } else {
+          log(`LLM response: "${text.slice(0, 200)}${text.length > 200 ? '…' : ''}"`);
+        }
+
+        // Check if agent sent a message asking for info and is waiting for a reply
+        const sentMessage = toolCalls.some(tc => tc?.toolName === 'send_message');
+        const isWaiting = sentMessage && /awaiting|waiting (for|on|reply)|i (have )?(asked|sent|messaged)|sent a message|(need|require).*(more|info|clarif|respond|addition)|please.*(provid|send|reply|clarif)/i.test(text);
+
+        if (!isWaiting) break;
+
+        log(`agent is waiting for a reply — polling inbox (turn ${turn}/${MAX_TURNS})`);
+
+        // Mark all current unread messages as read so we only catch new ones
+        try {
+          await fetchWithTimeout(`${BACKEND_URL}/api/v1/messages/read`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${AGENT_PLATFORM_TOKEN}` },
+            body: JSON.stringify({ taskId: acceptedTaskHash }),
+          });
+        } catch {}
+
+        const deadline = Date.now() + WAIT_TIMEOUT_MS;
+        let reply = null;
+
+        while (Date.now() < deadline) {
+          await sleep(WAIT_POLL_MS);
+          try {
+            const res = await fetchWithTimeout(`${BACKEND_URL}/api/v1/messages/inbox?taskId=${acceptedTaskHash}&unreadOnly=true`, {
+              headers: { 'Authorization': `Bearer ${AGENT_PLATFORM_TOKEN}` },
+            });
+            if (res.ok) {
+              const msgs = (await res.json()).data?.messages || [];
+              if (msgs.length > 0) {
+                reply = msgs[0];
+                log(`received reply for ${acceptedTaskHash.slice(0, 10)}…: "${reply.body.slice(0, 120)}${reply.body.length > 120 ? '…' : ''}"`);
+                // Mark reply as read
+                fetchWithTimeout(`${BACKEND_URL}/api/v1/messages/read`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${AGENT_PLATFORM_TOKEN}` },
+                  body: JSON.stringify({ taskId: acceptedTaskHash }),
+                }).catch(() => {});
+                break;
+              }
+            }
+          } catch {}
+        }
+
+        if (!reply) {
+          log(`no reply received for ${acceptedTaskHash.slice(0, 10)}… within ${WAIT_TIMEOUT_MS / 60000}min — submitting`);
+          break;
+        }
+
+        prompt = `[ORIGINAL BRIEF]\n${briefPlaintext}\n\n[CONVERSATION TURN ${turn}]\nAgent: ${text}\nPoster: ${reply.body}\n\nContinue working on the task. If you need more info, send another message. Otherwise produce your final answer.`;
       }
     } catch (llmErr) {
       log(`LLM ERROR for ${acceptedTaskHash.slice(0, 10)}…: ${llmErr.message}`);
