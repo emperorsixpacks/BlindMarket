@@ -407,6 +407,73 @@ export async function listOpenTasks(): Promise<Array<{ meta: A2ATaskMeta; state:
   return out;
 }
 
+/**
+ * Scan all a2a:state:* keys and repair the a2a:open set so it's consistent
+ * with actual task state. Tasks with state.status === 'open' and
+ * meta.targetExecutorType === 'agent' that are missing from a2a:open get added.
+ * Tasks in a2a:open whose state isn't 'open' (or meta isn't 'agent') get removed.
+ * Returns counts of repairs made. Intended for periodic maintenance (expiry
+ * sweep) or manual trigger when tasks appear stranded.
+ */
+export async function resyncOpenIndex(): Promise<{ added: number; removed: number }> {
+  let added = 0;
+  let removed = 0;
+  let cursor = '0';
+
+  const stateKeys: string[] = [];
+  do {
+    const [nextCursor, keys] = await redis.scan(cursor, 'MATCH', 'a2a:state:*', 'COUNT', 200);
+    cursor = nextCursor;
+    stateKeys.push(...keys);
+  } while (cursor !== '0');
+
+  if (stateKeys.length === 0) return { added, removed };
+
+  const pipe = redis.pipeline();
+  const taskIds: string[] = [];
+  for (const key of stateKeys) {
+    const tid = key.replace('a2a:state:', '');
+    taskIds.push(tid);
+    pipe.get(key);
+    pipe.get(`a2a:meta:${tid}`);
+  }
+  const results = await pipe.exec();
+  if (!results) return { added, removed };
+
+  const shouldBeOpen = new Set<string>();
+  for (let i = 0; i < taskIds.length; i++) {
+    const stateRaw = results[i * 2]?.[1] as string | null;
+    const metaRaw = results[i * 2 + 1]?.[1] as string | null;
+    if (!stateRaw || !metaRaw) continue;
+    try {
+      const state = JSON.parse(stateRaw) as A2ATaskState;
+      const meta = JSON.parse(metaRaw) as A2ATaskMeta;
+      if (state.status === 'open' && meta.targetExecutorType === 'agent') {
+        shouldBeOpen.add(taskIds[i].toLowerCase());
+      }
+    } catch {
+      // malformed JSON — skip
+    }
+  }
+
+  const currentOpen = new Set(await redis.smembers(KEY.open));
+  const toAdd = [...shouldBeOpen].filter((id) => !currentOpen.has(id));
+  const toRemove = [...currentOpen].filter((id) => !shouldBeOpen.has(id));
+
+  if (toAdd.length > 0) {
+    added = toAdd.length;
+    await redis.sadd(KEY.open, ...toAdd);
+    console.log(`[a2aStore] resync: added ${added} open tasks to a2a:open`);
+  }
+  if (toRemove.length > 0) {
+    removed = toRemove.length;
+    await redis.srem(KEY.open, ...toRemove);
+    console.log(`[a2aStore] resync: removed ${removed} stale tasks from a2a:open`);
+  }
+
+  return { added, removed };
+}
+
 /** Browse open agent-targeted tasks, optionally filtered by capabilities. */
 export async function browseAgentTasks(
   capabilities?: AgentCapability[],

@@ -73,6 +73,12 @@ export async function sweepExpiredTasks(): Promise<void> {
   if (inFlight) return;
   inFlight = true;
   try {
+    // Repair the open index before sweeping so tasks stranded from a2a:open
+    // are re-discovered (and can be expired if past deadline).
+    await a2aStore.resyncOpenIndex().catch((err) =>
+      console.warn(`[a2aExpirySweep] resyncOpenIndex error:`, (err as Error).message),
+    );
+
     const open = await a2aStore.listOpenTasks();
     if (open.length === 0) return;
 

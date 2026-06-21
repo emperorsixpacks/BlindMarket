@@ -342,7 +342,12 @@ function isTransientAssignmentRevert(err) {
   }
   return false;
 }
-const appliedTasks = new Set();
+const appliedTasks = new Map();
+const APPLIED_TASK_TTL_MS = 30 * 60 * 1000; // retry rejected tasks after 30 min
+function isAppliedTaskStale(taskHash) {
+  const added = appliedTasks.get(taskHash);
+  return added && (Date.now() - added) >= APPLIED_TASK_TTL_MS;
+}
 
 const bidPlacedTasks = new Set();
 // NEEDS_WRAP backoff cap. A task we can't accept until the poster wraps the AES
@@ -940,7 +945,14 @@ async function pollAndWork() {
       return;
     }
 
-    const available = entries.filter(e => !appliedTasks.has(e.meta.taskId));
+    const available = entries.filter(e => {
+      if (!appliedTasks.has(e.meta.taskId)) return true;
+      if (isAppliedTaskStale(e.meta.taskId)) {
+        appliedTasks.delete(e.meta.taskId);
+        return true;
+      }
+      return false;
+    });
     if (available.length === 0) {
       log(`found ${entries.length} open tasks, but already touched all of them`);
       return;
@@ -961,7 +973,7 @@ async function pollAndWork() {
         },
       });
       if (acceptRes.ok) {
-        appliedTasks.add(taskHash);
+        appliedTasks.set(taskHash, Date.now());
         acceptedTaskHash = taskHash;
         try {
           const acceptJson = await acceptRes.json();
@@ -994,7 +1006,7 @@ async function pollAndWork() {
         const polls = (needsWrapPolls.get(taskHash) ?? 0) + 1;
         needsWrapPolls.set(taskHash, polls);
         if (polls > MAX_NEEDS_WRAP_POLLS) {
-          appliedTasks.add(taskHash);
+          appliedTasks.set(taskHash, Date.now());
           log(`giving up on ${taskHash.slice(0, 10)}… after ${MAX_NEEDS_WRAP_POLLS} polls awaiting a wrapped brief key — the poster never wrapped it to our bid (likely their browser is gone and no custody key is set). They can re-wrap from their dashboard or cancel to reclaim escrow.`);
           continue;
         }
@@ -1014,7 +1026,7 @@ async function pollAndWork() {
               const bidErr = await bidRes.json().catch(() => ({}));
               log(`bid failed for ${taskHash.slice(0, 10)}…: ${bidRes.status} ${bidErr.error?.code || ''}`);
               if (bidRes.status === 403 || bidRes.status === 400) {
-                appliedTasks.add(taskHash);
+                appliedTasks.set(taskHash, Date.now());
               }
             }
           } catch (bidErr) {
@@ -1042,7 +1054,7 @@ async function pollAndWork() {
           },
         });
         if (retryRes.ok) {
-          appliedTasks.add(taskHash);
+          appliedTasks.set(taskHash, Date.now());
           acceptedTaskHash = taskHash;
           try {
             const acceptJson = await retryRes.json();
@@ -1058,12 +1070,12 @@ async function pollAndWork() {
         }
         // Other errors (ASSIGNED_ELSEWHERE, NOT_OPEN, etc.) — skip
         log(`offer-held retry failed for ${taskHash.slice(0, 10)}…: ${retryRes.status} ${retryErr.error?.code || ''}`);
-        appliedTasks.add(taskHash);
+        appliedTasks.set(taskHash, Date.now());
         continue;
       }
 
       if (acceptRes.status === 403 || acceptRes.status === 409) {
-        appliedTasks.add(taskHash);
+        appliedTasks.set(taskHash, Date.now());
         continue;
       }
       return;
@@ -1864,7 +1876,8 @@ function deriveAddressFromPubkey(pubkeyHex) {
 // Returns true if a task was accepted (and will be worked on the current
 // microtask); false if the task was skipped.
 async function tryAcceptTask(taskHash) {
-  if (appliedTasks.has(taskHash)) return false;
+  if (appliedTasks.has(taskHash) && !isAppliedTaskStale(taskHash)) return false;
+  appliedTasks.delete(taskHash); // clear stale entry so accept runs fresh
   log(`accepting task ${taskHash.slice(0, 10)}…`);
 
   const acceptRes = await fetchWithTimeout(`${BACKEND_URL}/api/v1/a2a/tasks/${taskHash}/accept`, {
@@ -1876,7 +1889,7 @@ async function tryAcceptTask(taskHash) {
   });
 
   if (acceptRes.ok) {
-    appliedTasks.add(taskHash);
+    appliedTasks.set(taskHash, Date.now());
     let rootHash = null;
     let wrappedKey = null;
     try {
@@ -1912,7 +1925,7 @@ async function tryAcceptTask(taskHash) {
           bidPlacedTasks.add(taskHash);
           log(`bid registered on ${taskHash.slice(0, 10)}… — awaiting wrap`);
         } else {
-          appliedTasks.add(taskHash);
+          appliedTasks.set(taskHash, Date.now());
         }
       } catch { /* network error */ }
     }
@@ -1922,7 +1935,7 @@ async function tryAcceptTask(taskHash) {
     // race and this agent should still be willing to take it (the poll loop
     // will retry it naturally).
   } else if (acceptRes.status === 403 || acceptRes.status === 409) {
-    appliedTasks.add(taskHash);
+    appliedTasks.set(taskHash, Date.now());
   }
   return false;
 }
@@ -1933,7 +1946,8 @@ async function acceptFromWs(taskHash) {
     log(`WS accept skipped for ${taskHash.slice(0, 10)}…: another task in progress`);
     return;
   }
-  if (appliedTasks.has(taskHash)) return;
+  if (appliedTasks.has(taskHash) && !isAppliedTaskStale(taskHash)) return;
+  appliedTasks.delete(taskHash);
   _working = true;
   try {
     await tryAcceptTask(taskHash);
