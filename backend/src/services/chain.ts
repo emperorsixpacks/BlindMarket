@@ -139,24 +139,71 @@ export async function initSui(): Promise<void> {
 }
 
 /**
- * Build a Sui Move call transaction (unsigned).
- * Returns JSON that the worker/agent can sign and execute.
- *
- * TODO: wire after Move contracts deployed and package ID known.
+ * Build a Sui Move call transaction JSON (unsigned) that can be signed
+ * and executed via executeSuiTx or by the agent's wallet.
  */
-export async function buildSuiMoveCallTx(_params: {
-  moduleName: string;
-  functionName: string;
-  args: unknown[];
-  typeArgs?: string[];
-}): Promise<Record<string, unknown>> {
-  throw new Error('buildSuiMoveCallTx: Sui contract interaction not yet wired. Deploy Move contracts first.');
+export async function buildSuiAssignTx(taskId: bigint, executor: string): Promise<string> {
+  const { Transaction } = await import('@mysten/sui/transactions');
+  const tx = new Transaction();
+
+  tx.moveCall({
+    target: `${config.suiPackageId}::blind_escrow::marketplace_assign` as `${string}::${string}::${string}`,
+    arguments: [
+      tx.object(config.suiBlindEscrowObjectId),
+      tx.object(config.suiTaskRegistryObjectId),
+      tx.pure.u64(taskId),
+      tx.pure.address(executor),
+    ],
+  });
+
+  return tx.toJSON();
 }
 
 /**
- * Execute a Sui transaction server-side.
- * TODO: wire after Move contracts deployed.
+ * Execute a Sui transaction server-side using the backend Sui signer.
+ * Requires CHAIN_TYPE=sui and SUI_AGENT_PRIVATE_KEY to be set.
  */
-export async function executeSuiTx(_txJson: Record<string, unknown>): Promise<{ digest: string }> {
-  throw new Error('executeSuiTx: Sui contract interaction not yet wired. Deploy Move contracts first.');
+export async function executeSuiTx(txJson: string): Promise<{ digest: string }> {
+  if (!_suiSigner) {
+    throw new Error('executeSuiTx: Sui signer not available (SUI_AGENT_PRIVATE_KEY not set)');
+  }
+
+  const { Transaction } = await import('@mysten/sui/transactions');
+  const { fromBase64, toBase64 } = await import('@mysten/utils');
+
+  const tx = Transaction.from(txJson);
+  tx.setSenderIfNotSet(_suiSigner.toSuiAddress());
+
+  const bytes = await tx.build();
+  const { signature } = await _suiSigner.signTransaction(bytes);
+
+  const txBase64 = toBase64(new Uint8Array(bytes));
+
+  const rpcUrl = config.suiRpcUrl.replace(/\/$/, '');
+  const response = await fetch(rpcUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'sui_executeTransactionBlock',
+      params: [
+        txBase64,
+        [signature],
+        { showEffects: true, showEvents: true, showObjectChanges: true },
+      ],
+    }),
+  });
+
+  const json = await response.json() as any;
+  if (json.error) {
+    throw new Error(`Sui tx failed: ${json.error.message}`);
+  }
+
+  const digest: string | undefined = json.result?.digest;
+  if (!digest) {
+    throw new Error('Sui tx executed but no digest returned');
+  }
+
+  return { digest };
 }

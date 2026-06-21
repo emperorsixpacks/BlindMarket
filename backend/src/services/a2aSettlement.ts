@@ -26,7 +26,9 @@
  */
 
 import type { ContractTransactionResponse } from 'ethers';
-import { escrowAsMarketplace, marketplaceSigner, isSui } from './chain.js';
+import { isAddress } from 'ethers';
+import { escrowAsMarketplace, marketplaceSigner, isSui, buildSuiAssignTx, executeSuiTx } from './chain.js';
+import { config } from '../config.js';
 import { getTaskIdByHash } from './escrowEvents.js';
 import * as a2aStore from './a2aStore.js';
 import { rooms } from './socket.js';
@@ -191,6 +193,11 @@ export async function settleAssignment(taskHash: string, executor: string): Prom
     return { success: false, error: msg };
   }
 
+  // Sui settlement path — call marketplace_assign on the Sui Move contract
+  if (!isAddress(executor)) {
+    return settleSuiAssignment(taskHash, executor);
+  }
+
   const taskId = await waitForTaskId(taskHash);
   if (taskId === null) {
     const msg = `hash2id lookup timed out — createTask event never seen by indexer (taskHash=${taskHash.slice(0, 10)}…)`;
@@ -246,6 +253,42 @@ export async function settleAssignment(taskHash: string, executor: string): Prom
   }
 
   return { success: true, txHash: tx.hash };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Sui settlement path
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function settleSuiAssignment(taskHash: string, executor: string): Promise<SettleResult> {
+  if (!isSui) {
+    console.warn(
+      `[a2aSettlement] executor ${executor.slice(0, 10)}… is a Sui address but CHAIN_TYPE is not 'sui' — ` +
+        'set CHAIN_TYPE=sui in env and ensure Move contracts are deployed',
+    );
+    return { success: true };
+  }
+
+  const taskId = await waitForTaskId(taskHash);
+  if (taskId === null) {
+    const msg = `hash2id lookup timed out (taskHash=${taskHash.slice(0, 10)}…)`;
+    console.error(`[a2aSettlement] ${msg}`);
+    await safePersistAssignError(taskHash, msg);
+    return { success: false, error: msg };
+  }
+
+  try {
+    const txJson = await buildSuiAssignTx(BigInt(taskId), executor);
+    const { digest } = await executeSuiTx(txJson);
+    console.log(`[a2aSettlement] Sui marketplace_assign broadcast taskId=${taskId} digest=${digest}`);
+
+    await a2aStore.updateState(taskHash, { assignTxHash: digest, assignError: undefined });
+    return { success: true, txHash: digest };
+  } catch (err) {
+    const msg = (err as Error).message;
+    console.error(`[a2aSettlement] Sui assignment failed for hash=${taskHash.slice(0, 10)}…:`, msg);
+    await safePersistAssignError(taskHash, msg);
+    return { success: false, error: msg };
+  }
 }
 
 // Writing to Redis can itself fail (network blip, key missing if releaseToOpen
