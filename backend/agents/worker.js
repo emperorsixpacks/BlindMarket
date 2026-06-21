@@ -275,13 +275,16 @@ if (!IS_EVM_AGENT) {
       : AGENT_PRIVATE_KEY.startsWith('0x')
         ? AGENT_PRIVATE_KEY.slice(2)
         : AGENT_PRIVATE_KEY;
-    const keypair = Ed25519Keypair.fromSecretKey(privKey);
+    const keypair = Ed25519Keypair.fromSecretKey(
+      privKey.startsWith('suiprivkey') ? privKey : Buffer.from(privKey, 'hex'),
+    );
     suiSigner = { keypair, address: keypair.toSuiAddress() };
     log(`Sui agent wallet: ${suiSigner.address}`);
   } catch (e) {
-    log(`Sui signer init failed — @mysten/sui not installed or key invalid: ${e.message}`);
+    log(`Sui signer init failed (${e.message}) — falling back to EVM signer`);
   }
-} else if (AGENT_PRIVATE_KEY) {
+}
+if (!suiSigner && AGENT_PRIVATE_KEY) {
   try {
     const provider = new ethers.JsonRpcProvider(OG_RPC_URL, OG_CHAIN_ID);
     signerWallet = new ethers.Wallet(
@@ -1309,13 +1312,8 @@ async function runAcceptedTask(acceptedTaskHash, acceptedRootHash, acceptedWrapp
 
     let broadcastOk = false;
 
-    if (!IS_EVM_AGENT) {
+    if (suiSigner) {
       // Sui path: execute submitEvidence via Move call on BlindEscrow.
-      if (!suiSigner) {
-        log(`cannot broadcast submitEvidence on Sui: signer not initialised`);
-        await releaseTask(acceptedTaskHash);
-        return;
-      }
       try {
         if (!onChainTaskId) {
           throw new Error('submit response missing onChainTaskId for Sui submit');
