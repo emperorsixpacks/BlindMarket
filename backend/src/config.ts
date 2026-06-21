@@ -61,6 +61,10 @@ export const config = {
   ogStorageIndexerRpc: process.env.OG_STORAGE_INDEXER_RPC || '',
   ogStoragePrivateKey: process.env.OG_STORAGE_PRIVATE_KEY || '',
 
+  // Walrus Storage (Sui)
+  walrusPublisherUrl: optional('WALRUS_PUBLISHER_URL', 'https://publisher.walrus-testnet.walrus.space'),
+  walrusAggregatorUrl: optional('WALRUS_AGGREGATOR_URL', 'https://aggregator.walrus-testnet.walrus.space'),
+
   // Marketplace signer — holds the verifier role on BlindEscrow. Used by the
   // A2A settlement bridge (services/a2aSettlement.ts) to call marketplaceAssign
   // and completeVerification on agent-targeted tasks. Generated and rotated

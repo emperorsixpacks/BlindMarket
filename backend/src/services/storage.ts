@@ -97,10 +97,13 @@ function safePath(rootHash: string): string | null {
 // ── Public API ──
 
 /**
- * Upload an encrypted blob to 0G Storage (or local fallback).
- * Returns the root hash (sha256 for local, merkle root for 0G).
+ * Upload an encrypted blob to 0G Storage / Walrus (or local fallback).
+ * Returns the root hash / blobId.
  */
 export async function upload(data: Buffer): Promise<{ rootHash: string; txHash?: string }> {
+  if (config.chainType === 'sui') {
+    return uploadWalrus(data);
+  }
   if (!is0gConfigured()) {
     return uploadLocal(data);
   }
@@ -108,15 +111,70 @@ export async function upload(data: Buffer): Promise<{ rootHash: string; txHash?:
 }
 
 /**
- * Download an encrypted blob by root hash.
+ * Download an encrypted blob by root hash / blobId.
  * Returns the raw encrypted bytes or null if not found.
  */
 export async function download(rootHash: string): Promise<Buffer | null> {
+  if (config.chainType === 'sui') {
+    return downloadWalrus(rootHash);
+  }
   if (!is0gConfigured()) {
     return downloadLocal(rootHash);
   }
   return download0g(rootHash);
 }
+
+// ── Walrus Storage implementation ──
+
+async function uploadWalrus(data: Buffer): Promise<{ rootHash: string; txHash?: string }> {
+  const url = `${config.walrusPublisherUrl}/v1/blobs`;
+  const response = await fetch(url, {
+    method: 'PUT',
+    body: data as any,
+    headers: {
+      'Content-Type': 'application/octet-stream',
+    },
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    console.error('Walrus upload failed:', text);
+    throw new Error(`Walrus upload failed: ${response.statusText} - ${text}`);
+  }
+
+  const json = (await response.json()) as any;
+  let blobId: string | undefined;
+
+  if (json.newlyCreated && json.newlyCreated.blobObject) {
+    blobId = json.newlyCreated.blobObject.blobId;
+  } else if (json.alreadyCertified) {
+    blobId = json.alreadyCertified.blobId;
+  }
+
+  if (!blobId) {
+    console.error('Walrus upload returned unexpected response:', json);
+    throw new Error('Walrus upload failed: blobId not found in response');
+  }
+
+  return { rootHash: blobId };
+}
+
+async function downloadWalrus(blobId: string): Promise<Buffer | null> {
+  const url = `${config.walrusAggregatorUrl}/v1/blobs/${blobId}`;
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      console.error(`Walrus download failed for ${blobId}:`, response.statusText);
+      return null;
+    }
+    const arrayBuffer = await response.arrayBuffer();
+    return Buffer.from(arrayBuffer);
+  } catch (e) {
+    console.error(`Walrus download exception for ${blobId}:`, e);
+    return null;
+  }
+}
+
 
 // ── 0G Storage implementation ──
 
