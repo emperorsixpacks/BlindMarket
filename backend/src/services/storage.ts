@@ -1,28 +1,43 @@
-import { Indexer, MemData, StorageNode } from '@0gfoundation/0g-storage-ts-sdk';
+import { Indexer, MemData, StorageNode as ESMStorageNode } from '@0gfoundation/0g-storage-ts-sdk';
 import { ethers } from 'ethers';
 import { createHash, randomBytes } from 'crypto';
 import { writeFileSync, readFileSync, mkdirSync, existsSync, unlinkSync } from 'fs';
 import { join, resolve } from 'path';
 import { tmpdir } from 'os';
 import { config } from '../config.js';
+import { createRequire } from 'module';
 
-// Monkey-patch StorageNode.prototype.getStatus to handle cases where a testnet
+// Monkey-patch both ESM and CJS StorageNode.prototype.getStatus to handle cases where a testnet
 // storage node returns the mainnet Flow contract address (0x62D4144dB0F0a6fBBaeb6296c785C71B3D57C526)
 // which causes estimateGas to revert on the testnet RPC since no code is deployed there.
-const originalGetStatus = StorageNode.prototype.getStatus;
-StorageNode.prototype.getStatus = async function () {
-  const status = await originalGetStatus.apply(this);
-  if (status && status.networkIdentity) {
-    const chainId = status.networkIdentity.chainId;
-    const flowAddress = status.networkIdentity.flowAddress;
-    // If the chain is 0G Testnet (16602) but the node returns the mainnet Flow address
-    if ((chainId === 16602 || config.ogChainId === 16602) && flowAddress && flowAddress.toLowerCase() === '0x62d4144db0f0a6fbbaeb6296c785c71b3d57c526') {
-      console.warn(`[0G Storage Patch] Overriding incorrect mainnet flow address ${flowAddress} with testnet flow address on node ${this.url}`);
-      status.networkIdentity.flowAddress = '0x22e03a6a89b950f1c82ec5e74f8eca321a105296';
+const patchStorageNode = (StorageNodeClass: any) => {
+  if (!StorageNodeClass || !StorageNodeClass.prototype) return;
+  const originalGetStatus = StorageNodeClass.prototype.getStatus;
+  StorageNodeClass.prototype.getStatus = async function () {
+    const status = await originalGetStatus.apply(this);
+    if (status && status.networkIdentity) {
+      const chainId = status.networkIdentity.chainId;
+      const flowAddress = status.networkIdentity.flowAddress;
+      // If the chain is 0G Testnet (16602) but the node returns the mainnet Flow address
+      if ((chainId === 16602 || config.ogChainId === 16602) && flowAddress && flowAddress.toLowerCase() === '0x62d4144db0f0a6fbbaeb6296c785c71b3d57c526') {
+        console.warn(`[0G Storage Patch] Overriding incorrect mainnet flow address ${flowAddress} with testnet flow address on node ${this.url}`);
+        status.networkIdentity.flowAddress = '0x22e03a6a89b950f1c82ec5e74f8eca321a105296';
+      }
     }
-  }
-  return status;
+    return status;
+  };
 };
+
+patchStorageNode(ESMStorageNode);
+
+try {
+  const require = createRequire(import.meta.url);
+  const CJSStorageNode = require('@0gfoundation/0g-storage-ts-sdk').StorageNode;
+  patchStorageNode(CJSStorageNode);
+} catch (e) {
+  // Fallback if require is not supported/fails
+}
+
 
 
 /**
