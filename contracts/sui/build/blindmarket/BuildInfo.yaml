@@ -19,7 +19,7 @@ compiled_package_info:
       lint: false
     modes: []
     force_lock_file: false
-    root_as_zero: false
+    root_as_zero: true
     environment: ~
     set_unpublished_deps_to_zero: false
     pubfile_path: ~

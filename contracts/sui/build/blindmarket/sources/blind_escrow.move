@@ -17,11 +17,13 @@ module blindmarket::blind_escrow {
     use sui::sui::SUI;
 
     use blindmarket::types::{Self, TaskMeta};
+    use blindmarket::task_registry;
 
     // ── Error codes ────────────────────────────────────────────────────────
 
     const ENotAgent: u64 = 1;
     const ENotWorker: u64 = 2;
+    const ENotVerifier: u64 = 3;
     const ENotPendingAdmin: u64 = 4;
     const EZeroAddress: u64 = 5;
     const EInvalidStatus: u64 = 10;
@@ -272,6 +274,35 @@ module blindmarket::blind_escrow {
 
         let meta = table::borrow_mut(&mut escrow.task_metas, task_id);
         types::set_task_meta_open(meta, false);
+
+        event::emit(WorkerAssigned { task_id, worker });
+    }
+
+    /// Assign a worker via the marketplace/verifier. Mirrors the EVM
+    /// marketplaceAssign — lets the verifier assign workers for A2A tasks
+    /// without requiring the task agent to sign.
+    public entry fun marketplace_assign(
+        escrow: &mut BlindEscrow,
+        registry: &mut task_registry::TaskRegistry,
+        task_id: u64,
+        worker: address,
+        ctx: &TxContext,
+    ) {
+        assert!(ctx.sender() == escrow.verifier, ENotVerifier);
+        let task = table::borrow_mut(&mut escrow.tasks, task_id);
+
+        assert!(worker != @0x0, EZeroAddress);
+        assert!(worker != task.agent, ESelfAssignment);
+        assert!(task.status == STATUS_FUNDED, EInvalidStatus);
+        assert!(tx_context::epoch_timestamp_ms(ctx) < task.deadline, EDeadlineNotReached);
+
+        task.worker = worker;
+        task.status = STATUS_ASSIGNED;
+
+        let meta = table::borrow_mut(&mut escrow.task_metas, task_id);
+        types::set_task_meta_open(meta, false);
+
+        task_registry::close_task(registry, task_id);
 
         event::emit(WorkerAssigned { task_id, worker });
     }

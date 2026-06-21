@@ -2,8 +2,9 @@
 name = "blindmarket"
 edition = "2024.beta"
 license = "MIT"
+published-at = "0xf292fed1e23e5f8f6de0990f30e09dda18e57ed3c9a5c87e728efbfeea109c0d"
 
 [addresses]
-blindmarket = "0x0"
+blindmarket = "0xd4296d049fbf05591b729434f9f73628f68d7fb939f24d2ac5b6c9d55ff0a44d"
 
 [dependencies]
