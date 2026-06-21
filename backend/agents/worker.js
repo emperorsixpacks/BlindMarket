@@ -98,10 +98,11 @@ const AGENT_PRIVATE_KEY = process.env.AGENT_PRIVATE_KEY ?? '';
 const AGENT_PUBLIC_KEY = process.env.AGENT_PUBLIC_KEY || derivePublicKeyHex(AGENT_PRIVATE_KEY);
 const OG_RPC_URL = process.env.OG_RPC_URL ?? 'https://evmrpc-testnet.0g.ai';
 const OG_CHAIN_ID = Number(process.env.OG_CHAIN_ID ?? 16602);
-// Chain type — 'evm' (default, 0G) or 'sui'. Determines which chain adapter the
-// worker uses for on-chain operations (submitEvidence, delegate_to_agent, etc.).
-const CHAIN_TYPE = (process.env.CHAIN_TYPE ?? 'evm').toLowerCase();
-// Sui chain config (used when CHAIN_TYPE=sui).
+// Wallet address from agent registration — determines chain automatically.
+// EVM = 20-byte address (42 chars with 0x), Sui = 32-byte (66 chars with 0x).
+const AGENT_WALLET_ADDR = process.env.AGENT_WALLET || '';
+const IS_EVM_AGENT = AGENT_WALLET_ADDR.length === 42 && ethers.isAddress(AGENT_WALLET_ADDR);
+// Sui chain config (used for Sui agents).
 const SUI_NETWORK_ID = process.env.SUI_NETWORK_ID ?? 'testnet';
 const SUI_RPC_URL = process.env.SUI_RPC_URL ?? 'https://fullnode.testnet.sui.io:443';
 const SUI_PACKAGE_ID = process.env.SUI_PACKAGE_ID ?? '0x0';
@@ -263,9 +264,9 @@ if (agentCapabilities.length === 0) {
 }
 
 let signerWallet = null;
-let suiSigner = null;       // SuiSigner instance (when CHAIN_TYPE=sui)
+let suiSigner = null;       // SuiSigner instance (when agent uses Sui chain)
 
-if (CHAIN_TYPE === 'sui') {
+if (!IS_EVM_AGENT) {
   try {
     // Dynamic import of Sui modules — available when @mysten/sui is installed.
     const { Ed25519Keypair } = await import('@mysten/sui/keypairs/ed25519');
@@ -515,7 +516,7 @@ export function buildTools(currentTaskHash = null) {
         // 2. Upload the encrypted blob to storage.
         const upRes = await fetchWithTimeout(`${BACKEND_URL}/api/v1/storage/upload`, {
           method: 'POST', headers: jsonAuth,
-          body: JSON.stringify({ data: ciphertext.toString('base64'), chainType: CHAIN_TYPE }),
+          body: JSON.stringify({ data: ciphertext.toString('base64'), chainType: IS_EVM_AGENT ? 'evm' : 'sui' }),
         });
         if (!upRes.ok) return `Delegation failed: storage upload ${upRes.status}`;
         const rootHash = (await upRes.json()).data?.rootHash;
@@ -1297,7 +1298,7 @@ async function runAcceptedTask(acceptedTaskHash, acceptedRootHash, acceptedWrapp
     }
     const submitJson = await submitRes.json();
     const unsignedSubmitEvidence = submitJson.data?.unsignedSubmitEvidence;
-    if (!unsignedSubmitEvidence && CHAIN_TYPE !== 'sui') {
+    if (!unsignedSubmitEvidence && IS_EVM_AGENT) {
       log(`submit response missing unsignedSubmitEvidence for ${acceptedTaskHash.slice(0, 10)}…`);
       await releaseTask(acceptedTaskHash);
       return;
@@ -1308,7 +1309,7 @@ async function runAcceptedTask(acceptedTaskHash, acceptedRootHash, acceptedWrapp
 
     let broadcastOk = false;
 
-    if (CHAIN_TYPE === 'sui') {
+    if (!IS_EVM_AGENT) {
       // Sui path: execute submitEvidence via Move call on BlindEscrow.
       if (!suiSigner) {
         log(`cannot broadcast submitEvidence on Sui: signer not initialised`);
