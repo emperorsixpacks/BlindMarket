@@ -1257,10 +1257,12 @@ a2aRouter.post('/tasks/:id/submit', requireAuth, async (req: AuthRequest, res, n
         const normalizedCaller = normalizeSuiAddr(address);
         const suiTask = await getSuiTask(BigInt(onChainId));
         chainAttempts = suiTask.submissionAttempts;
+        console.log(`[a2a] submit: on-chain worker=${suiTask.worker}, caller=${address}, normalizedCaller=${normalizedCaller}, match=${suiTask.worker.toLowerCase() === normalizedCaller}`);
         if (suiTask.worker.toLowerCase() !== normalizedCaller) {
           await new Promise((r) => setTimeout(r, 2_000));
           const retrySuiTask = await getSuiTask(BigInt(onChainId));
           chainAttempts = retrySuiTask.submissionAttempts;
+          console.log(`[a2a] submit: retry on-chain worker=${retrySuiTask.worker}, normalizedCaller=${normalizeSuiAddr(address)}, match=${retrySuiTask.worker.toLowerCase() === normalizeSuiAddr(address)}`);
           if (retrySuiTask.worker.toLowerCase() !== normalizedCaller) {
             const freshState = await a2aStore.getState(taskHash);
             if (freshState?.assignError) {

@@ -278,8 +278,9 @@ async function settleSuiAssignment(taskHash: string, executor: string): Promise<
 
   try {
     const txJson = await buildSuiAssignTx(BigInt(taskId), executor);
+    console.log(`[a2aSettlement] calling marketplace_assign taskId=${taskId} executor=${executor}`);
     const { digest } = await executeSuiTx(txJson);
-    console.log(`[a2aSettlement] Sui marketplace_assign broadcast taskId=${taskId} digest=${digest}`);
+    console.log(`[a2aSettlement] Sui marketplace_assign broadcast taskId=${taskId} executor=${executor} digest=${digest}`);
 
     await a2aStore.updateState(taskHash, { assignTxHash: digest, assignError: undefined });
     return { success: true, txHash: digest };

@@ -238,6 +238,11 @@ export async function getSuiTask(taskId: bigint): Promise<{ worker: string; subm
   const raw = returnValues[0][0] as string;
   const rawBytes = Uint8Array.from(atob(raw), (c) => c.charCodeAt(0));
 
+  // Debug: log first 64 bytes (agent + worker) so we can see the raw address bytes
+  const agentHex = Array.from(rawBytes.slice(0, 32)).map((b) => b.toString(16).padStart(2, '0')).join('');
+  const workerHex = Array.from(rawBytes.slice(32, 64)).map((b) => b.toString(16).padStart(2, '0')).join('');
+  console.log(`[getSuiTask] taskId=${taskId} rawLen=${rawBytes.length} agent=0x${agentHex} worker=0x${workerHex}`);
+
   // Parse the Task struct from BCS.
   // Task struct field order: agent (32B), worker (32B), token_type (vec), amount (u64),
   // task_hash (vec), evidence_hash (vec), status (u8), category (vec),
@@ -344,9 +349,13 @@ export async function executeSuiTx(txJson: string): Promise<{ digest: string }> 
   // Check Move-level execution status — the RPC may return 200 even when
   // the transaction aborts (e.g. function precondition fails).
   const effectStatus = json.result?.effects?.status;
-  if (effectStatus?.status === 'failure') {
+  if (!effectStatus) {
+    console.warn(`[chain] executeSuiTx: no effect status in response for ${digest} — treating as success`);
+  } else if (effectStatus.status === 'failure') {
     const errMsg = effectStatus.error || 'unknown Move-level error';
     throw new Error(`Sui tx ${digest} failed at execution: ${errMsg}`);
+  } else if (effectStatus.status === 'success') {
+    console.log(`[chain] executeSuiTx: ${digest} succeeded`);
   }
 
   return { digest };
