@@ -429,6 +429,42 @@ a2aRouter.post('/tasks/:id/accept', requireAuth, async (req: AuthRequest, res, n
     // the Redis server. Loser gets 409, no on-chain side effect — preserves
     // the invariant that the executor in Redis matches the one in the bridge
     // tx (and thereby the on-chain t.worker).
+    //
+    // Idempotent path: if the caller is already the recorded executor (resume
+    // after restart), skip the CAS and re-confirm on-chain assignment.
+    const currentState = await a2aStore.getState(taskId);
+    if (currentState?.executorAddress?.toLowerCase() === address.toLowerCase() &&
+        (currentState.status === 'accepted' || currentState.status === 'in_progress')) {
+      console.log(`[a2a] accept: already accepted by ${address} for ${taskId} — re-confirming on-chain assignment`);
+      // Re-check on-chain assignment; the settleAssignment call is idempotent
+      // (alreadyAssigned returns success true).
+      const reSettleResult = await settleAssignment(taskId, address);
+      if (!reSettleResult.success) {
+        if (reSettleResult.expired || reSettleResult.cancelled) {
+          throw new AppError(409, 'TASK_EXPIRED', 'Task is no longer available on-chain.');
+        }
+        throw new AppError(503, 'SETTLEMENT_FAILED', `On-chain assignment re-check failed: ${reSettleResult.error}.`);
+      }
+      // Return the same shape as a fresh accept so the caller doesn't need
+      // to distinguish fresh vs resumed. The wrapped key may have been
+      // persisted already; best-effort re-read from meta.
+      const currentMeta = await a2aStore.getMeta(taskId);
+      const wrappedKey = currentMeta?.wrappedKeys?.[addrLc];
+      const body: ApiResponse = {
+        success: true,
+        data: {
+          taskId,
+          status: 'accepted',
+          rootHash: currentMeta?.rootHash,
+          wrappedKey,
+          alreadySettled: reSettleResult.alreadySettled ?? true,
+          assignTxHash: reSettleResult.txHash,
+        },
+      };
+      res.json(body);
+      return;
+    }
+
     const accept = await a2aStore.tryAccept(taskId, address, new Date().toISOString());
     if (!accept.ok) {
       console.warn(`[a2a] accept: CAS lost for ${taskId}, currentStatus=${accept.currentStatus}`);
