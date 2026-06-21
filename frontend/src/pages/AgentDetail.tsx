@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { useBalance, useWalletClient } from 'wagmi';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -111,6 +111,8 @@ export default function AgentDetail() {
   const [fetchError, setFetchError] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
   const [tab, setTab] = useState<Tab>('logs');
+  const [autoScroll, setAutoScroll] = useState(true);
+  const logContainerRef = useRef<HTMLDivElement>(null);
 
   // Edit state
   const [editInstructions, setEditInstructions] = useState('');
@@ -231,6 +233,26 @@ export default function AgentDetail() {
     };
     return () => es.close();
   }, [id]);
+
+  // Auto-scroll to bottom when new logs arrive
+  useEffect(() => {
+    if (autoScroll && logContainerRef.current) {
+      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+    }
+  }, [logs, autoScroll]);
+
+  const scrollToBottom = () => {
+    if (logContainerRef.current) {
+      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+      setAutoScroll(true);
+    }
+  };
+
+  const handleLogScroll = () => {
+    if (!logContainerRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = logContainerRef.current;
+    setAutoScroll(scrollTop + clientHeight >= scrollHeight - 20);
+  };
 
   const action = useMutation({
     mutationFn: (act: 'start' | 'pause' | 'stop' | 'restart') =>
@@ -576,9 +598,18 @@ export default function AgentDetail() {
             ))}
           </div>
 
-          <div className="flex-1 p-5 overflow-y-auto max-h-[520px]">
+          <div className="flex-1 p-5 overflow-y-auto max-h-[520px]" ref={logContainerRef} onScroll={handleLogScroll}>
             {tab === 'logs' && (
-              logs.length > 0 ? logs.map((line, i) => {
+              <>
+              {!autoScroll && logs.length > 0 && (
+                <button
+                  onClick={scrollToBottom}
+                  className="sticky bottom-2 left-1/2 -translate-x-1/2 z-10 px-3 py-1 text-xs font-mono bg-surface-3 hover:bg-surface-4 text-ink-2 rounded-full border border-line shadow-lg transition-all"
+                >
+                  ↓ Scroll to bottom
+                </button>
+              )}
+              {logs.length > 0 ? logs.map((line, i) => {
                 // Strip any leftover ANSI escape sequences from older buffered
                 // log lines (the worker no longer emits them when forked, but
                 // Redis may still hold pre-fix entries until the ring rotates).
@@ -594,12 +625,10 @@ export default function AgentDetail() {
                   <div key={i} className={`px-3 py-1.5 text-xs font-mono flex gap-3 ${isErr ? 'text-err bg-err/10' : 'text-ink-3 hover:bg-surface-2'}`}>
                     {tsMatch ? (
                       <>
-                        {/* Local-time render of the UTC stamp so the time the
-                            user reads matches the wall clock they're looking
-                            at. We keep the iso form in the title for the
-                            "what time was this in UTC?" power use case. */}
+                        {/* Show both date and local time so the log timeline is
+                            unambiguous across restarts and multi-day runs. */}
                         <span className="text-ink-3/60 shrink-0" title={tsMatch[1]}>
-                          {new Date(tsMatch[1].replace('Z', '').replace(' ', 'T') + 'Z').toLocaleTimeString([], { hour12: false })}
+                          {new Date(tsMatch[1].replace('Z', '').replace(' ', 'T') + 'Z').toLocaleString([], { hour12: false })}
                         </span>
                         <span className="break-all">{tsMatch[2]}</span>
                       </>
@@ -616,7 +645,8 @@ export default function AgentDetail() {
                     ? 'Live output will stream here as the agent works.'
                     : 'Start the agent to begin streaming its logs.'}
                 />
-              )
+              )}
+              </>
             )}
 
             {tab === 'tools' && (

@@ -1111,7 +1111,7 @@ async function downloadAndDecryptBrief(rootHash, wrappedKeyHex) {
   return aesDecrypt(Buffer.from(b64, 'base64'), aesKey).toString('utf8');
 }
 
-async function runAcceptedTask(acceptedTaskHash, acceptedRootHash, acceptedWrappedKey) {
+async function runAcceptedTask(acceptedTaskHash, acceptedRootHash, acceptedWrappedKey, resumeContext) {
   try {
     const taskStartedAt = Date.now();
 
@@ -1120,6 +1120,10 @@ async function runAcceptedTask(acceptedTaskHash, acceptedRootHash, acceptedWrapp
       try {
         briefPlaintext = await downloadAndDecryptBrief(acceptedRootHash, acceptedWrappedKey);
         log(`decrypted brief for ${acceptedTaskHash.slice(0, 10)}… (${briefPlaintext.length} chars)`);
+        if (resumeContext) {
+          briefPlaintext += resumeContext;
+          log(`resume context appended (${resumeContext.length} chars)`);
+        }
       } catch (e) {
         log(`brief decrypt failed for ${acceptedTaskHash.slice(0, 10)}…: ${e.message}`);
         // Don't strand the task in 'accepted' — hand it back. If the chain is
@@ -1474,7 +1478,30 @@ async function resumeAssignedTasks() {
         }
       } else {
         log(`resuming assigned task ${taskHash.slice(0, 10)}… (status=${state.status}, attempt ${attempts + 1}/${MAX_RESUME_ATTEMPTS})`);
-        await runAcceptedTask(taskHash, meta.rootHash, wrappedKey);
+        // Fetch any existing message thread so the agent can continue where
+        // it left off (e.g. after a server restart during wait_for_reply).
+        let resumeContext = '';
+        try {
+          const msgRes = await fetchWithTimeout(
+            `${BACKEND_URL}/api/v1/messages/inbox?taskId=${taskHash}`,
+            { headers: { 'Authorization': `Bearer ${AGENT_PLATFORM_TOKEN}` } },
+            10_000,
+          );
+          if (msgRes.ok) {
+            const msgJson = await msgRes.json();
+            const msgs = msgJson.data?.messages;
+            if (Array.isArray(msgs) && msgs.length > 0) {
+              const lines = msgs.map((m) => {
+                const who = m.sender === 'user' ? '[User]' : '[You]';
+                return `${who} ${m.subject || ''}: ${m.body || ''}`;
+              });
+              resumeContext = '\n\n[PREVIOUS CONVERSATION]\n' + lines.join('\n') + '\n\nYou were waiting for a reply. The conversation above shows what happened so far. Continue where you left off.';
+            }
+          }
+        } catch (e) {
+          log(`resume: message fetch failed for ${taskHash.slice(0, 10)}…: ${e.message}`);
+        }
+        await runAcceptedTask(taskHash, meta.rootHash, wrappedKey, resumeContext || undefined);
       }
     } finally {
       resumingTasks.delete(taskHash);
