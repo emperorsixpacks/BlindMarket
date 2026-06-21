@@ -113,6 +113,27 @@ export function getSuiClient() {
 let _suiSigner: import('@mysten/sui/keypairs/ed25519').Ed25519Keypair | null = null;
 let _suiSignerAddress: string | null = null;
 
+// Initialise signer eagerly at module-load time (not in async initSui) so it's
+// available before any HTTP request arrives. Supports Bech32 (suiprivkey...) and
+// raw 64-char hex. Errors are non-fatal — executeSuiTx will report the gap.
+if (config.suiAgentPrivateKey) {
+  try {
+    const raw = config.suiAgentPrivateKey;
+    const { Ed25519Keypair } = await import('@mysten/sui/keypairs/ed25519');
+    if (/^[0-9a-fA-F]{64}$/.test(raw)) {
+      const secretKey = new Uint8Array(32);
+      for (let i = 0; i < 32; i++) secretKey[i] = parseInt(raw.slice(i * 2, i * 2 + 2), 16);
+      _suiSigner = Ed25519Keypair.fromSecretKey(secretKey);
+    } else {
+      _suiSigner = Ed25519Keypair.fromSecretKey(raw);
+    }
+    _suiSignerAddress = _suiSigner.toSuiAddress();
+    console.log(`[chain] Sui signer: ${_suiSignerAddress}`);
+  } catch (err) {
+    console.error('[chain] Failed to initialise Sui signer at module load:', err);
+  }
+}
+
 export function getSuiSigner() {
   return _suiSigner;
 }
@@ -121,32 +142,8 @@ export function getSuiSignerAddress() {
   return _suiSignerAddress;
 }
 
-/** Initialise Sui chain — call once at boot (after config loaded). */
+/** Initialise Sui gRPC client (non-blocking — signer is already set at module level). */
 export async function initSui(): Promise<void> {
-  // Initialise Sui signer from private key (separate try-catch from gRPC so each
-  // can fail independently). Supports both Bech32 (suiprivkey…) and raw 64-char
-  // hex string formats.
-  if (config.suiAgentPrivateKey) {
-    try {
-      const { Ed25519Keypair } = await import('@mysten/sui/keypairs/ed25519');
-      const raw = config.suiAgentPrivateKey;
-      // If it's a 64-char hex string (no Bech32 prefix), convert to Uint8Array
-      // first — Ed25519Keypair.fromSecretKey(string) expects Bech32 format only.
-      if (/^[0-9a-fA-F]{64}$/.test(raw)) {
-        const secretKey = new Uint8Array(32);
-        for (let i = 0; i < 32; i++) secretKey[i] = parseInt(raw.slice(i * 2, i * 2 + 2), 16);
-        _suiSigner = Ed25519Keypair.fromSecretKey(secretKey);
-      } else {
-        _suiSigner = Ed25519Keypair.fromSecretKey(raw);
-      }
-      _suiSignerAddress = _suiSigner.toSuiAddress();
-      console.log(`[chain] Sui signer: ${_suiSignerAddress}`);
-    } catch (err) {
-      console.error('[chain] Failed to initialise Sui signer:', err);
-    }
-  }
-
-  // Initialise Sui gRPC client (non-blocking)
   try {
     const { SuiGrpcClient } = await import('@mysten/sui/grpc');
     _suiClient = new SuiGrpcClient({
