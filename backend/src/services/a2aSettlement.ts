@@ -27,8 +27,7 @@
 
 import type { ContractTransactionResponse } from 'ethers';
 import { isAddress } from 'ethers';
-import { escrowAsMarketplace, marketplaceSigner, isSui, buildSuiAssignTx, buildSuiCompleteVerificationTx, executeSuiTx, getSuiTask } from './chain.js';
-import { config } from '../config.js';
+import { escrowAsMarketplace, marketplaceSigner, buildSuiAssignTx, buildSuiCompleteVerificationTx, executeSuiTx, getSuiTask } from './chain.js';
 import { getTaskIdByHash } from './escrowEvents.js';
 import * as a2aStore from './a2aStore.js';
 import { rooms } from './socket.js';
@@ -63,13 +62,6 @@ function enqueueSignerTx<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 function bridgeReady(): boolean {
-  if (isSui) {
-    console.warn(
-      '[a2aSettlement] bridge on Sui not yet supported — Move contracts must be deployed and Sui settlement path wired. ' +
-        'Tasks will accept/submit off-chain but won\'t settle on-chain.',
-    );
-    return false;
-  }
   if (!escrowAsMarketplace || !marketplaceSigner) {
     console.error(
       '[a2aSettlement] bridge disabled — MARKETPLACE_SIGNER_PRIVATE_KEY is not set in backend env. ' +
@@ -260,15 +252,6 @@ export async function settleAssignment(taskHash: string, executor: string): Prom
 // ═══════════════════════════════════════════════════════════════════════════
 
 async function settleSuiAssignment(taskHash: string, executor: string): Promise<SettleResult> {
-  if (!isSui) {
-    const msg =
-      `executor ${executor.slice(0, 10)}… is a Sui address but CHAIN_TYPE=${config.chainType} — ` +
-      'set CHAIN_TYPE=sui in env so the Move contract handles settlement';
-    console.error(`[a2aSettlement] ${msg}`);
-    await safePersistAssignError(taskHash, msg);
-    return { success: false, error: msg };
-  }
-
   const taskId = await waitForTaskId(taskHash);
   if (taskId === null) {
     const msg = `hash2id lookup timed out (taskHash=${taskHash.slice(0, 10)}…)`;
@@ -294,13 +277,6 @@ async function settleSuiAssignment(taskHash: string, executor: string): Promise<
 }
 
 async function settleSuiVerification(taskHash: string, passed: boolean): Promise<SettleResult> {
-  if (!isSui) {
-    console.warn(
-      `[a2aSettlement] settleSuiVerification called but CHAIN_TYPE is not 'sui'`,
-    );
-    return { success: false, error: 'Not a Sui chain' };
-  }
-
   const taskId = await waitForTaskId(taskHash);
   if (taskId === null) {
     const msg = `hash2id lookup timed out (taskHash=${taskHash.slice(0, 10)}…)`;
@@ -397,7 +373,10 @@ export async function settleVerification(taskHash: string, passed: boolean): Pro
     return { success: false, error: msg };
   }
 
-  if (isSui) {
+  // Determine chain from the executor's address (Sui addresses aren't valid EVM addresses)
+  const _vState = await a2aStore.getState(taskHash).catch(() => null);
+  const _vExecutor = _vState?.executorAddress;
+  if (_vExecutor && !isAddress(_vExecutor)) {
     return settleSuiVerification(taskHash, passed);
   }
 

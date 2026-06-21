@@ -107,7 +107,6 @@ export async function getTokenDecimals(tokenAddress: string): Promise<number> {
 let _suiClient: import('@mysten/sui/grpc').SuiGrpcClient | null = null;
 
 export function getSuiClient() {
-  if (!isSui) return null;
   return _suiClient;
 }
 
@@ -124,8 +123,6 @@ export function getSuiSignerAddress() {
 
 /** Initialise Sui chain — call once at boot (after config loaded). */
 export async function initSui(): Promise<void> {
-  if (!isSui) return;
-
   try {
     const { SuiGrpcClient } = await import('@mysten/sui/grpc');
     _suiClient = new SuiGrpcClient({

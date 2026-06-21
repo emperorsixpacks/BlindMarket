@@ -13,7 +13,7 @@ import { getTaskIdByHash } from '../services/escrowEvents.js';
 import * as escrowService from '../services/escrow.js';
 import * as reputationService from '../services/reputation.js';
 import * as reputationDecay from '../services/reputationDecay.js';
-import { provider, escrow, isSui, getSuiTask, normalizeSuiAddr } from '../services/chain.js';
+import { provider, escrow, getSuiTask, normalizeSuiAddr } from '../services/chain.js';
 import { redis } from '../services/redis.js';
 import { ethers } from 'ethers';
 import type { AuthRequest, ApiResponse, AgentCapability } from '../types.js';
@@ -1252,7 +1252,7 @@ a2aRouter.post('/tasks/:id/submit', requireAuth, async (req: AuthRequest, res, n
     // current on-chain submissionAttempts so the state below can record which
     // round the pending evidence broadcast will become.
     let chainAttempts = 0;
-    if (isSui) {
+    if (!ethers.isAddress(address)) {
       try {
         const normalizedCaller = normalizeSuiAddr(address);
         const suiTask = await getSuiTask(BigInt(onChainId));
@@ -1302,7 +1302,7 @@ a2aRouter.post('/tasks/:id/submit', requireAuth, async (req: AuthRequest, res, n
     // hasn't passed (BlindEscrow.sol submitEvidence). Check all three here so
     // a worker is never handed a signable tx that's guaranteed to revert.
     if (state.status === 'failed') {
-      if (isSui) {
+      if (!ethers.isAddress(address)) {
         // Sui retry gates: read on-chain state from Move contract.
         try {
           const suiTask = await getSuiTask(BigInt(onChainId));
@@ -1362,7 +1362,7 @@ a2aRouter.post('/tasks/:id/submit', requireAuth, async (req: AuthRequest, res, n
     );
 
     let unsignedSubmitEvidence: ethers.TransactionRequest | null = null;
-    if (!isSui) {
+    if (ethers.isAddress(address)) {
       unsignedSubmitEvidence = await escrowService.buildSubmitEvidence(
         address,
         Number(onChainId),
@@ -1545,7 +1545,7 @@ a2aRouter.post('/tasks/:id/finalize', requireAuth, async (req: AuthRequest, res,
         if (!ocIdA) {
           throw new AppError(503, 'NOT_INDEXED', 'On-chain taskId not yet indexed — wait a few seconds and retry');
         }
-        if (isSui) {
+        if (!ethers.isAddress(address)) {
           try {
             const suiTaskA = await getSuiTask(BigInt(ocIdA));
             const broadcastPending =
@@ -1602,7 +1602,7 @@ a2aRouter.post('/tasks/:id/finalize', requireAuth, async (req: AuthRequest, res,
     const verificationResult = autoVerify(state.resultData, meta.verificationCriteria);
     const newStatus: 'verified' | 'failed' = verificationResult.passed ? 'verified' : 'failed';
 
-    if (isSui) {
+    if (!ethers.isAddress(address)) {
       // Sui path: call marketplace_complete_verification via the settlement
       // bridge (gated by verifier address, not AdminCap).
       const onChainIdSui = await getTaskIdByHash(taskHash);
