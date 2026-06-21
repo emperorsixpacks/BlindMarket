@@ -123,6 +123,30 @@ export function getSuiSignerAddress() {
 
 /** Initialise Sui chain — call once at boot (after config loaded). */
 export async function initSui(): Promise<void> {
+  // Initialise Sui signer from private key (separate try-catch from gRPC so each
+  // can fail independently). Supports both Bech32 (suiprivkey…) and raw 64-char
+  // hex string formats.
+  if (config.suiAgentPrivateKey) {
+    try {
+      const { Ed25519Keypair } = await import('@mysten/sui/keypairs/ed25519');
+      const raw = config.suiAgentPrivateKey;
+      // If it's a 64-char hex string (no Bech32 prefix), convert to Uint8Array
+      // first — Ed25519Keypair.fromSecretKey(string) expects Bech32 format only.
+      if (/^[0-9a-fA-F]{64}$/.test(raw)) {
+        const secretKey = new Uint8Array(32);
+        for (let i = 0; i < 32; i++) secretKey[i] = parseInt(raw.slice(i * 2, i * 2 + 2), 16);
+        _suiSigner = Ed25519Keypair.fromSecretKey(secretKey);
+      } else {
+        _suiSigner = Ed25519Keypair.fromSecretKey(raw);
+      }
+      _suiSignerAddress = _suiSigner.toSuiAddress();
+      console.log(`[chain] Sui signer: ${_suiSignerAddress}`);
+    } catch (err) {
+      console.error('[chain] Failed to initialise Sui signer:', err);
+    }
+  }
+
+  // Initialise Sui gRPC client (non-blocking)
   try {
     const { SuiGrpcClient } = await import('@mysten/sui/grpc');
     _suiClient = new SuiGrpcClient({
@@ -130,15 +154,8 @@ export async function initSui(): Promise<void> {
       baseUrl: config.suiRpcUrl,
     });
     console.log(`[chain] Sui gRPC client connected to ${config.suiNetworkId}`);
-
-    if (config.suiAgentPrivateKey) {
-      const { Ed25519Keypair } = await import('@mysten/sui/keypairs/ed25519');
-      _suiSigner = Ed25519Keypair.fromSecretKey(config.suiAgentPrivateKey);
-      _suiSignerAddress = _suiSigner.toSuiAddress();
-      console.log(`[chain] Sui signer: ${_suiSignerAddress}`);
-    }
   } catch (err) {
-    console.error('[chain] Failed to initialise Sui — @mysten/sui may not be installed:', err);
+    console.error('[chain] Failed to initialise Sui gRPC client:', err);
   }
 }
 
@@ -299,7 +316,7 @@ export async function getSuiTask(taskId: bigint): Promise<{ worker: string; subm
 
 /**
  * Execute a Sui transaction server-side using the backend Sui signer.
- * Requires CHAIN_TYPE=sui and SUI_AGENT_PRIVATE_KEY to be set.
+ * Requires SUI_AGENT_PRIVATE_KEY to be set (regardless of CHAIN_TYPE).
  */
 export async function executeSuiTx(txJson: string): Promise<{ digest: string }> {
   if (!_suiSigner) {
