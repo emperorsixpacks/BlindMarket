@@ -302,7 +302,10 @@ module blindmarket::blind_escrow {
         let meta = table::borrow_mut(&mut escrow.task_metas, task_id);
         types::set_task_meta_open(meta, false);
 
-        task_registry::close_task(registry, task_id);
+        // Close the task in the public registry if it was published there.
+        if (task_registry::task_exists(registry, task_id)) {
+            task_registry::close_task(registry, task_id);
+        };
 
         event::emit(WorkerAssigned { task_id, worker });
     }

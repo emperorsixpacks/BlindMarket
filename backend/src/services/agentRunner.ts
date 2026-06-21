@@ -276,7 +276,7 @@ export async function startAgent(id: string, opts?: { skipResume?: boolean }): P
       AGENT_PUBLIC_KEY: agent.publicKey ?? '',
       OG_RPC_URL: config.ogRpcUrl,
       OG_CHAIN_ID: String(config.ogChainId),
-      CHAIN_TYPE: config.chainType,
+      CHAIN_TYPE: agent.chainType ?? config.chainType,
       // Sui chain config (used when CHAIN_TYPE=sui)
       SUI_NETWORK_ID: config.suiNetworkId,
       SUI_RPC_URL: config.suiRpcUrl,
