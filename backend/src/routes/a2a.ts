@@ -887,6 +887,7 @@ a2aRouter.post('/tasks/index', requireAuth, async (req: AuthRequest, res, next) 
       const createdEvent = txBlock.events?.find((e: any) => e.type === eventType);
 
       if (!createdEvent) {
+        console.warn(`[a2a] Sui TaskCreated event not found. Expected: "${eventType}". Found events:`, txBlock.events?.map((e: any) => e.type));
         throw new AppError(
           409,
           'NO_TASK_CREATED',
