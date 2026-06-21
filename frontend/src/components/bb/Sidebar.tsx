@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { useQuery } from '@tanstack/react-query';
 import { LogoMark } from './LogoMark';
 import { Icon } from './Icon';
-import { get } from '../../lib/api';
+import { get, authedGet } from '../../lib/api';
 import { useSocket } from '../../hooks/useSocket';
 import { isMainnet } from '../../config/constants';
 
@@ -68,8 +68,6 @@ export function Sidebar({ open, onClose }: SidebarProps) {
       openTasks: number;
       activeAgents: number;
       activeValidators: number;
-      // Platform totals surfaced in the live-stats widget below. Optional so a
-      // stale backend that predates these fields still renders (shows "—").
       completedTasks?: number;
       registeredUsers?: number;
       totalAgents?: number;
@@ -77,6 +75,15 @@ export function Sidebar({ open, onClose }: SidebarProps) {
     }>('/api/v1/stats'),
   });
   useSocket('platform', { 'stats:update': () => refetch() });
+
+  const { data: unreadData } = useQuery({
+    queryKey: ['messages', 'unread-count'],
+    queryFn: () => authedGet<{ count: number }>('/api/v1/messages/unread-count'),
+    refetchInterval: 30_000,
+  });
+  useSocket('platform', { 'message:new': () => refetch() });
+
+  const unreadCount = unreadData?.count ?? 0;
 
   // Live platform counts for the footer widget. `activeWorkers` is the backend
   // alias of activeAgents (agents currently running); totalAgents is all agents
@@ -162,6 +169,11 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                       <Icon name={item.icon} size={17} />
                     </span>
                     <span className="relative">{item.label}</span>
+                    {item.to === '/messages' && unreadCount > 0 && (
+                      <span className="relative ml-auto min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-cream text-bg text-[10px] font-semibold leading-none px-1">
+                        {unreadCount > 99 ? '99+' : unreadCount}
+                      </span>
+                    )}
                   </Link>
                 );
               })}

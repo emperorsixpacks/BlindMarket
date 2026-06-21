@@ -39,6 +39,7 @@ export default function Messages() {
   const [replyBody, setReplyBody] = useState('');
   const [replySubject, setReplySubject] = useState('');
   const [selectedMsg, setSelectedMsg] = useState<Message | null>(null);
+  const [replyTaskId, setReplyTaskId] = useState<string | undefined>(undefined);
 
   const { data: inboxData, isLoading } = useQuery({
     queryKey: ['messages', 'inbox', selectedTaskId],
@@ -78,7 +79,7 @@ export default function Messages() {
     if (!replyTo || !replyBody.trim()) return;
     sendMutation.mutate({
       to: replyTo,
-      taskId: selectedTaskId,
+      taskId: replyTaskId || selectedTaskId,
       subject: replySubject || undefined,
       body: replyBody.trim(),
     });
@@ -133,6 +134,7 @@ export default function Messages() {
                     setSelectedMsg(msg);
                     setReplyTo(msg.from_address);
                     setReplySubject(msg.subject ? `Re: ${msg.subject}` : '');
+                    setReplyTaskId(msg.task_id ?? undefined);
                     if (!msg.read_at) markReadMutation.mutate();
                   }}
                 >
@@ -232,7 +234,7 @@ export default function Messages() {
                     {sendMutation.isPending ? 'sending…' : 'send'}
                   </button>
                   <button
-                    onClick={() => { setReplyTo(null); setReplyBody(''); setReplySubject(''); setSelectedMsg(null); }}
+                    onClick={() => { setReplyTo(null); setReplyBody(''); setReplySubject(''); setSelectedMsg(null); setReplyTaskId(undefined); }}
                     className="px-4 py-2 border border-line text-ink-3 text-xs font-mono hover:border-ink-3 transition-colors"
                   >
                     cancel
