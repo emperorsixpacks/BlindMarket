@@ -1209,7 +1209,8 @@ async function runAcceptedTask(acceptedTaskHash, acceptedRootHash, acceptedWrapp
             log(`[tool ${si + 1}] ${tc.toolName}(${args.length > 100 ? args.slice(0, 100) + '…' : args})`);
           }
           for (const tr of step.toolResults || []) {
-            const resultStr = typeof tr.result === 'string' ? tr.result : JSON.stringify(tr.result);
+            let resultStr = typeof tr.result === 'string' ? tr.result : JSON.stringify(tr.result);
+            if (!resultStr) resultStr = String(tr.result);
             log(`[result ${si + 1}] ${resultStr.slice(0, 200)}${resultStr.length > 200 ? '…' : ''}`);
           }
         }
