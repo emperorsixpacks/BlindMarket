@@ -13,7 +13,7 @@ import { getTaskIdByHash } from '../services/escrowEvents.js';
 import * as escrowService from '../services/escrow.js';
 import * as reputationService from '../services/reputation.js';
 import * as reputationDecay from '../services/reputationDecay.js';
-import { provider, escrow, isSui, getSuiTask } from '../services/chain.js';
+import { provider, escrow, isSui, getSuiTask, normalizeSuiAddr } from '../services/chain.js';
 import { redis } from '../services/redis.js';
 import { ethers } from 'ethers';
 import type { AuthRequest, ApiResponse, AgentCapability } from '../types.js';
@@ -1254,13 +1254,14 @@ a2aRouter.post('/tasks/:id/submit', requireAuth, async (req: AuthRequest, res, n
     let chainAttempts = 0;
     if (isSui) {
       try {
+        const normalizedCaller = normalizeSuiAddr(address);
         const suiTask = await getSuiTask(BigInt(onChainId));
         chainAttempts = suiTask.submissionAttempts;
-        if (suiTask.worker.toLowerCase() !== address.toLowerCase()) {
+        if (suiTask.worker.toLowerCase() !== normalizedCaller) {
           await new Promise((r) => setTimeout(r, 2_000));
           const retrySuiTask = await getSuiTask(BigInt(onChainId));
           chainAttempts = retrySuiTask.submissionAttempts;
-          if (retrySuiTask.worker.toLowerCase() !== address.toLowerCase()) {
+          if (retrySuiTask.worker.toLowerCase() !== normalizedCaller) {
             const freshState = await a2aStore.getState(taskHash);
             if (freshState?.assignError) {
               throw new AppError(503, 'BRIDGE_FAILED', `Assignment bridge failed — ${freshState.assignError}. Release and retry.`);

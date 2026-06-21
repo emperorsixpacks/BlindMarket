@@ -1184,6 +1184,25 @@ async function runAcceptedTask(acceptedTaskHash, acceptedRootHash, acceptedWrapp
       log(`LLM finished for ${acceptedTaskHash.slice(0, 10)}… in ${llmElapsed}s (${text.length} chars)`);
       log(`LLM finish reason: ${result.finishReason}`);
 
+      // Log the agent's full thought process step by step
+      if (result.steps && result.steps.length > 0) {
+        for (let si = 0; si < result.steps.length; si++) {
+          const step = result.steps[si];
+          const stepText = step.text?.trim();
+          if (stepText) {
+            log(`[thought ${si + 1}/${result.steps.length}] ${stepText.slice(0, 500)}${stepText.length > 500 ? '…' : ''}`);
+          }
+          for (const tc of step.toolCalls || []) {
+            const args = tc.args ? JSON.stringify(tc.args) : (tc.input ? JSON.stringify(tc.input) : '');
+            log(`[tool ${si + 1}] ${tc.toolName}(${args.length > 100 ? args.slice(0, 100) + '…' : args})`);
+          }
+          for (const tr of step.toolResults || []) {
+            const resultStr = typeof tr.result === 'string' ? tr.result : JSON.stringify(tr.result);
+            log(`[result ${si + 1}] ${resultStr.slice(0, 200)}${resultStr.length > 200 ? '…' : ''}`);
+          }
+        }
+      }
+
       if (toolCalls.length > 0) {
         log(`LLM tool calls: ${toolCalls.map(tc => {
           if (!tc) return 'null';

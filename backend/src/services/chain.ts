@@ -7,6 +7,13 @@ import { config } from '../config.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const abiDir = join(__dirname, '..', 'abi');
 
+/** Normalize a Sui address to zero-padded 64-char hex form (Sui canonical). */
+export function normalizeSuiAddr(addr: string): string {
+  let hex = addr.startsWith('0x') ? addr.slice(2) : addr;
+  hex = hex.padStart(64, '0');
+  return '0x' + hex.toLowerCase();
+}
+
 function loadAbi(name: string): ethers.InterfaceAbi {
   return JSON.parse(readFileSync(join(abiDir, `${name}.json`), 'utf-8')) as ethers.InterfaceAbi;
 }
@@ -332,6 +339,14 @@ export async function executeSuiTx(txJson: string): Promise<{ digest: string }> 
   const digest: string | undefined = json.result?.digest;
   if (!digest) {
     throw new Error('Sui tx executed but no digest returned');
+  }
+
+  // Check Move-level execution status — the RPC may return 200 even when
+  // the transaction aborts (e.g. function precondition fails).
+  const effectStatus = json.result?.effects?.status;
+  if (effectStatus?.status === 'failure') {
+    const errMsg = effectStatus.error || 'unknown Move-level error';
+    throw new Error(`Sui tx ${digest} failed at execution: ${errMsg}`);
   }
 
   return { digest };
