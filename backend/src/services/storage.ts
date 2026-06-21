@@ -100,8 +100,9 @@ function safePath(rootHash: string): string | null {
  * Upload an encrypted blob to 0G Storage / Walrus (or local fallback).
  * Returns the root hash / blobId.
  */
-export async function upload(data: Buffer): Promise<{ rootHash: string; txHash?: string }> {
-  if (config.chainType === 'sui') {
+export async function upload(data: Buffer, overrideChainType?: string): Promise<{ rootHash: string; txHash?: string }> {
+  const chainType = overrideChainType ?? config.chainType;
+  if (chainType === 'sui') {
     return uploadWalrus(data);
   }
   if (!is0gConfigured()) {
@@ -114,8 +115,18 @@ export async function upload(data: Buffer): Promise<{ rootHash: string; txHash?:
  * Download an encrypted blob by root hash / blobId.
  * Returns the raw encrypted bytes or null if not found.
  */
-export async function download(rootHash: string): Promise<Buffer | null> {
-  if (config.chainType === 'sui') {
+export async function download(rootHash: string, overrideChainType?: string): Promise<Buffer | null> {
+  let chainType = overrideChainType;
+  if (!chainType) {
+    // Auto-detect: if it looks like a Walrus base64url blobId but not an EVM 64-char hex string
+    if (/^[A-Za-z0-9_-]{32,66}$/.test(rootHash) && !/^(0x)?[0-9a-fA-F]{64}$/.test(rootHash)) {
+      chainType = 'sui';
+    } else {
+      chainType = config.chainType;
+    }
+  }
+
+  if (chainType === 'sui') {
     return downloadWalrus(rootHash);
   }
   if (!is0gConfigured()) {

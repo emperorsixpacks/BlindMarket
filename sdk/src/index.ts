@@ -414,9 +414,9 @@ export class BlindMarket {
 
   // ── Storage ─────────────────────────────────────────────────────────────
 
-  /** Upload an encrypted blob to 0G Storage. */
-  async uploadBlob(data: Hex): Promise<StorageUploadResult> {
-    return this.req<StorageUploadResult>('POST', '/api/v1/storage/upload', { data });
+  /** Upload an encrypted blob to 0G Storage / Walrus. */
+  async uploadBlob(data: Hex, chainType?: 'evm' | 'sui'): Promise<StorageUploadResult> {
+    return this.req<StorageUploadResult>('POST', '/api/v1/storage/upload', { data, chainType });
   }
 
   /** Download a blob by root hash. */

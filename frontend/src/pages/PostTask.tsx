@@ -189,7 +189,7 @@ export default function PostTask() {
       //    has no pointer to fetch the encrypted blob.
       const uploadResp = await authedPost<{ rootHash: string; txHash?: string }>(
         '/api/v1/storage/upload',
-        { data: blob },
+        { data: blob, chainType: activeChain },
         token,
       );
       const rootHash = uploadResp.rootHash;

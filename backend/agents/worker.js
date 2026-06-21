@@ -507,10 +507,10 @@ export function buildTools(currentTaskHash = null) {
         const ciphertext = aesEncrypt(Buffer.from(taskDescription, 'utf8'), aesKey);
         const taskHash = '0x' + sha256Hex(ciphertext);
 
-        // 2. Upload the encrypted blob to 0G Storage.
+        // 2. Upload the encrypted blob to storage.
         const upRes = await fetchWithTimeout(`${BACKEND_URL}/api/v1/storage/upload`, {
           method: 'POST', headers: jsonAuth,
-          body: JSON.stringify({ data: ciphertext.toString('base64') }),
+          body: JSON.stringify({ data: ciphertext.toString('base64'), chainType: CHAIN_TYPE }),
         });
         if (!upRes.ok) return `Delegation failed: storage upload ${upRes.status}`;
         const rootHash = (await upRes.json()).data?.rootHash;
