@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { Breadcrumb, PageHeader, Panel } from '../components/bb';
 import { authedGet, authedPost } from '../lib/api';
+import { useSocket } from '../hooks/useSocket';
 
 interface Message {
   id: number;
@@ -40,6 +41,8 @@ export default function Messages() {
   const [replySubject, setReplySubject] = useState('');
   const [selectedMsg, setSelectedMsg] = useState<Message | null>(null);
   const [replyTaskId, setReplyTaskId] = useState<string | undefined>(undefined);
+
+  useSocket('platform', { 'message:new': () => qc.invalidateQueries({ queryKey: ['messages'] }) });
 
   const { data: inboxData, isLoading } = useQuery({
     queryKey: ['messages', 'inbox', selectedTaskId],

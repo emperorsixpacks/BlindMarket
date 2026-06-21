@@ -5,6 +5,7 @@ import type { AuthRequest } from '../types.js';
 import * as messageStore from '../services/messageStore.js';
 import * as a2aStore from '../services/a2aStore.js';
 import { loadAgent } from '../services/deployedAgentStore.js';
+import { emit } from '../services/socket.js';
 import type { ApiResponse } from '../types.js';
 
 export const messagesRouter = Router();
@@ -73,6 +74,11 @@ messagesRouter.post('/send', requireAuth, async (req: AuthRequest, res, next) =>
       const { fireWebhooks } = await import('../services/webhookStore.js');
       fireWebhooks(resolvedTo, 'message_received', { from, taskId, subject }).catch(() => {});
     } catch { /* webhook module optional */ }
+
+    // Notify via Socket.IO for real-time UI updates
+    try {
+      emit('platform', 'message:new', { to: resolvedTo, from, taskId });
+    } catch { /* socket may not be initialized */ }
     res.json({ success: true, data: msg } as ApiResponse);
   } catch (err) {
     next(err);
