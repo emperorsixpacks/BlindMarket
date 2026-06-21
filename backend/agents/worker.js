@@ -780,6 +780,64 @@ export function buildTools(currentTaskHash = null) {
     },
   });
 
+  // Wait for a reply from the task poster. Call AFTER send_message when you need
+  // more information to complete the task. Blocks until a reply arrives (or timeout).
+  tools.wait_for_reply = tool({
+    description: [
+      'Wait for a reply from the task poster or the person you messaged.',
+      'Use AFTER calling send_message when you need more information to complete the task.',
+      'This tool polls for new messages and returns the first reply received.',
+      'After receiving the reply, continue working on the task with the new information.',
+      'If no reply arrives within the timeout, the tool returns a timeout message.',
+    ].join(' '),
+    inputSchema: z.object({
+      taskId: z.string().optional().describe('Task ID to wait for replies on (defaults to current task).'),
+      timeoutMinutes: z.number().min(1).max(30).optional().describe('Maximum minutes to wait (default 10, max 30).'),
+    }),
+    execute: async (args) => {
+      const targetTaskId = args.taskId || currentTaskHash;
+      const timeoutMs = Math.min((args.timeoutMinutes || 10) * 60 * 1000, 30 * 60 * 1000);
+      const pollMs = 15_000;
+      const deadline = Date.now() + timeoutMs;
+
+      // Mark current unread as read so we only catch NEW replies
+      try {
+        await fetchWithTimeout(`${BACKEND_URL}/api/v1/messages/read`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${AGENT_PLATFORM_TOKEN}` },
+          body: JSON.stringify({ taskId: targetTaskId }),
+        });
+      } catch {}
+
+      log(`wait_for_reply: polling inbox for ${targetTaskId.slice(0, 10)}… (${timeoutMs / 60000}min timeout)`);
+
+      while (Date.now() < deadline) {
+        await sleep(pollMs);
+        try {
+          const res = await fetchWithTimeout(`${BACKEND_URL}/api/v1/messages/inbox?taskId=${targetTaskId}&unreadOnly=true`, {
+            headers: { 'Authorization': `Bearer ${AGENT_PLATFORM_TOKEN}` },
+          });
+          if (res.ok) {
+            const msgs = (await res.json()).data?.messages || [];
+            if (msgs.length > 0) {
+              const reply = msgs[0];
+              log(`wait_for_reply: received reply for ${targetTaskId.slice(0, 10)}…`);
+              fetchWithTimeout(`${BACKEND_URL}/api/v1/messages/read`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${AGENT_PLATFORM_TOKEN}` },
+                body: JSON.stringify({ taskId: targetTaskId }),
+              }).catch(() => {});
+              return `Reply received from ${reply.from_address?.slice(0, 10)}…: "${reply.body}"`;
+            }
+          }
+        } catch {}
+      }
+
+      log(`wait_for_reply: timeout for ${targetTaskId.slice(0, 10)}… after ${timeoutMs / 60000}min`);
+      return 'No reply received within the timeout period. Proceed with the information you have, or send another message.';
+    },
+  });
+
   return tools;
 }
 
@@ -1058,101 +1116,44 @@ async function runAcceptedTask(acceptedTaskHash, acceptedRootHash, acceptedWrapp
 
     try {
       const model = getModel();
-      const MAX_TURNS = 5;
-      const WAIT_TIMEOUT_MS = 10 * 60 * 1000;
-      const WAIT_POLL_MS = 15_000;
-      let prompt = briefPlaintext;
-      let turn = 0;
 
-      while (turn < MAX_TURNS) {
-        turn++;
-        const result = await generateText({
-          model,
-          system: `[IDENTITY]\n${AGENT_INSTRUCTIONS}\n\n[CAPABILITIES]\nYou have access to tools. If you use a tool, you must synthesize the results into a final text summary for the user. Do not simply output the raw tool result.`,
-          prompt,
-          tools: buildTools(acceptedTaskHash),
-          stopWhen: stepCountIs(10),
-        });
+      const result = await generateText({
+        model,
+        system: `[IDENTITY]\n${AGENT_INSTRUCTIONS}\n\n[CAPABILITIES]\nYou have access to tools. If you use a tool, you must synthesize the results into a final text summary for the user. Do not simply output the raw tool result.`,
+        prompt: briefPlaintext,
+        tools: buildTools(acceptedTaskHash),
+        stopWhen: stepCountIs(10),
+      });
 
-        text = result.text;
-        if (turn === 1) llmElapsed = ((Date.now() - llmStartedAt) / 1000).toFixed(1);
-        toolCalls = result.toolCalls || [];
+      text = result.text;
+      llmElapsed = ((Date.now() - llmStartedAt) / 1000).toFixed(1);
+      toolCalls = result.toolCalls || [];
 
-        log(`LLM turn ${turn} for ${acceptedTaskHash.slice(0, 10)}… (${text.length} chars, finish=${result.finishReason})`);
+      log(`LLM finished for ${acceptedTaskHash.slice(0, 10)}… in ${llmElapsed}s (${text.length} chars)`);
+      log(`LLM finish reason: ${result.finishReason}`);
 
-        if (toolCalls.length > 0) {
-          log(`LLM tool calls: ${toolCalls.map(tc => {
-            if (!tc) return 'null';
-            const name = tc.toolName || 'unknown';
-            const args = tc.input ? JSON.stringify(tc.input) : '';
-            return `${name}(${args.length > 50 ? args.slice(0, 50) + '…' : args})`;
-          }).join(', ')}`);
+      if (toolCalls.length > 0) {
+        log(`LLM tool calls: ${toolCalls.map(tc => {
+          if (!tc) return 'null';
+          const name = tc.toolName || 'unknown';
+          const args = tc.input ? JSON.stringify(tc.input) : '';
+          return `${name}(${args.length > 50 ? args.slice(0, 50) + '…' : args})`;
+        }).join(', ')}`);
+      }
+
+      if (result.toolResults && result.toolResults.length > 0) {
+        log(`LLM received ${result.toolResults.length} tool result(s).`);
+      }
+      for (const part of result.content || []) {
+        if (part.type === 'tool-error') {
+          log(`ERROR in tool ${part.toolName}: ${JSON.stringify(part.error)}`);
         }
+      }
 
-        if (result.toolResults && result.toolResults.length > 0) {
-          log(`LLM received ${result.toolResults.length} tool result(s).`);
-        }
-        for (const part of result.content || []) {
-          if (part.type === 'tool-error') {
-            log(`ERROR in tool ${part.toolName}: ${JSON.stringify(part.error)}`);
-          }
-        }
-
-        if (text.length === 0 && toolCalls.length === 0) {
-          log(`WARNING: LLM returned empty string with no tool calls (finishReason=${result.finishReason})`);
-        } else {
-          log(`LLM response: "${text.slice(0, 200)}${text.length > 200 ? '…' : ''}"`);
-        }
-
-        // Check if agent sent a message asking for info and is waiting for a reply
-        const sentMessage = toolCalls.some(tc => tc?.toolName === 'send_message');
-        const isWaiting = sentMessage && /awaiting|waiting (for|on|reply)|i (have )?(asked|sent|messaged)|sent a message|(need|require).*(more|info|clarif|respond|addition)|please.*(provid|send|reply|clarif)/i.test(text);
-
-        if (!isWaiting) break;
-
-        log(`agent is waiting for a reply — polling inbox (turn ${turn}/${MAX_TURNS})`);
-
-        // Mark all current unread messages as read so we only catch new ones
-        try {
-          await fetchWithTimeout(`${BACKEND_URL}/api/v1/messages/read`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${AGENT_PLATFORM_TOKEN}` },
-            body: JSON.stringify({ taskId: acceptedTaskHash }),
-          });
-        } catch {}
-
-        const deadline = Date.now() + WAIT_TIMEOUT_MS;
-        let reply = null;
-
-        while (Date.now() < deadline) {
-          await sleep(WAIT_POLL_MS);
-          try {
-            const res = await fetchWithTimeout(`${BACKEND_URL}/api/v1/messages/inbox?taskId=${acceptedTaskHash}&unreadOnly=true`, {
-              headers: { 'Authorization': `Bearer ${AGENT_PLATFORM_TOKEN}` },
-            });
-            if (res.ok) {
-              const msgs = (await res.json()).data?.messages || [];
-              if (msgs.length > 0) {
-                reply = msgs[0];
-                log(`received reply for ${acceptedTaskHash.slice(0, 10)}…: "${reply.body.slice(0, 120)}${reply.body.length > 120 ? '…' : ''}"`);
-                // Mark reply as read
-                fetchWithTimeout(`${BACKEND_URL}/api/v1/messages/read`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${AGENT_PLATFORM_TOKEN}` },
-                  body: JSON.stringify({ taskId: acceptedTaskHash }),
-                }).catch(() => {});
-                break;
-              }
-            }
-          } catch {}
-        }
-
-        if (!reply) {
-          log(`no reply received for ${acceptedTaskHash.slice(0, 10)}… within ${WAIT_TIMEOUT_MS / 60000}min — submitting`);
-          break;
-        }
-
-        prompt = `[ORIGINAL BRIEF]\n${briefPlaintext}\n\n[CONVERSATION TURN ${turn}]\nAgent: ${text}\nPoster: ${reply.body}\n\nContinue working on the task. If you need more info, send another message. Otherwise produce your final answer.`;
+      if (text.length === 0 && toolCalls.length === 0) {
+        log(`WARNING: LLM returned empty string with no tool calls (finishReason=${result.finishReason})`);
+      } else {
+        log(`LLM response: "${text.slice(0, 200)}${text.length > 200 ? '…' : ''}"`);
       }
     } catch (llmErr) {
       log(`LLM ERROR for ${acceptedTaskHash.slice(0, 10)}…: ${llmErr.message}`);
