@@ -261,11 +261,12 @@ export async function settleAssignment(taskHash: string, executor: string): Prom
 
 async function settleSuiAssignment(taskHash: string, executor: string): Promise<SettleResult> {
   if (!isSui) {
-    console.warn(
-      `[a2aSettlement] executor ${executor.slice(0, 10)}… is a Sui address but CHAIN_TYPE is not 'sui' — ` +
-        'set CHAIN_TYPE=sui in env and ensure Move contracts are deployed',
-    );
-    return { success: true };
+    const msg =
+      `executor ${executor.slice(0, 10)}… is a Sui address but CHAIN_TYPE=${config.chainType} — ` +
+      'set CHAIN_TYPE=sui in env so the Move contract handles settlement';
+    console.error(`[a2aSettlement] ${msg}`);
+    await safePersistAssignError(taskHash, msg);
+    return { success: false, error: msg };
   }
 
   const taskId = await waitForTaskId(taskHash);
