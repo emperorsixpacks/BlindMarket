@@ -598,15 +598,18 @@ export default function AgentDetail() {
             ))}
           </div>
 
-          <div className="flex-1 p-5 overflow-y-auto max-h-[520px]" ref={logContainerRef} onScroll={handleLogScroll}>
+          <div className="flex-1 p-5 overflow-y-auto max-h-[520px] relative" ref={logContainerRef} onScroll={handleLogScroll}>
             {tab === 'logs' && (
               <>
               {!autoScroll && logs.length > 0 && (
                 <button
                   onClick={scrollToBottom}
-                  className="sticky bottom-2 left-1/2 -translate-x-1/2 z-10 px-3 py-1 text-xs font-mono bg-surface-3 hover:bg-surface-4 text-ink-2 rounded-full border border-line shadow-lg transition-all"
+                  className="absolute bottom-4 right-4 z-10 w-8 h-8 flex items-center justify-center bg-surface-4 hover:bg-surface-5 text-ink-1 rounded-full border border-line shadow-lg transition-all hover:scale-110"
+                  title="Scroll to bottom"
                 >
-                  ↓ Scroll to bottom
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M3 6l5 5 5-5" />
+                  </svg>
                 </button>
               )}
               {logs.length > 0 ? logs.map((line, i) => {
