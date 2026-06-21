@@ -884,7 +884,14 @@ a2aRouter.post('/tasks/index', requireAuth, async (req: AuthRequest, res, next) 
 
       // 2. Parse Sui events to find the TaskCreated event
       const eventType = `${config.suiPackageId}::blind_escrow::TaskCreated`;
-      const createdEvent = txBlock.events?.find((e: any) => e.type === eventType);
+      let createdEvent = txBlock.events?.find((e: any) => e.type === eventType);
+      // Fallback: accept events from any package version (handles pre-upgrade tasks)
+      if (!createdEvent) {
+        createdEvent = txBlock.events?.find((e: any) => e.type.endsWith('::blind_escrow::TaskCreated'));
+        if (createdEvent) {
+          console.warn(`[a2a] Using TaskCreated from different package: ${createdEvent.type} (configured: ${eventType})`);
+        }
+      }
 
       if (!createdEvent) {
         console.warn(`[a2a] Sui TaskCreated event not found. Expected: "${eventType}". Found events:`, txBlock.events?.map((e: any) => e.type));
