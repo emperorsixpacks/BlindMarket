@@ -83,6 +83,11 @@ export const config = {
   // RPC for compute network (defaults to testnet)
   ogComputeRpcUrl: optional('OG_COMPUTE_RPC_URL', 'https://evmrpc-testnet.0g.ai'),
 
+  // Cascade exclusive-offer system. When disabled, tasks go straight to
+  // CAS-race broadcast (first-come-first-served). Disable for single-agent
+  // deployments to skip the 12s exclusive-offer window.
+  cascadeEnabled: optional('CASCADE_ENABLED', 'true').toLowerCase() === 'true',
+
   // Key custody / late-joiner re-wrap (docs/TEE-REWRAP-SPEC.md). DEFAULT OFF.
   // When enabled, posters seal the brief AES key to a platform-held custody key
   // so an agent that registers AFTER a task was posted can be served a

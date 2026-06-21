@@ -1123,7 +1123,10 @@ a2aRouter.post('/tasks/index', requireAuth, async (req: AuthRequest, res, next) 
     // finds zero matches) does the task fall back to CAS-race broadcast.
     // Non-blocking: if scoring fails, the task is already in a2a:open for
     // CAS-race fallback.
-    if (requiredCaps.length > 0) {
+    // When CASCADE_ENABLED=false, skip straight to CAS-race broadcast.
+    if (!config.cascadeEnabled || requiredCaps.length === 0) {
+      emitTaskAvailable(taskHash, requiredCaps.length > 0 ? { requiredCapabilities: requiredCaps } : {});
+    } else if (requiredCaps.length > 0) {
       const taskRewardWei = onChainAmount;
       rankAgents(requiredCaps, taskRewardWei).then((ranked) => {
         if (ranked.length === 0) {
