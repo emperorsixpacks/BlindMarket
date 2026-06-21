@@ -1561,15 +1561,23 @@ a2aRouter.post('/tasks/:id/finalize', requireAuth, async (req: AuthRequest, res,
     const newStatus: 'verified' | 'failed' = verificationResult.passed ? 'verified' : 'failed';
 
     if (isSui) {
-      // Sui path: no on-chain completeVerification call (backend lacks AdminCap).
-      // Run verification + update Redis state only. The on-chain settlement is
-      // handled separately (e.g., agent/poster with AdminCap calls the contract).
+      // Sui path: call marketplace_complete_verification via the settlement
+      // bridge (gated by verifier address, not AdminCap).
+      const onChainIdSui = await getTaskIdByHash(taskHash);
+      const settle = await settleVerification(taskHash, verificationResult.passed);
+      if (!settle.success) {
+        throw new AppError(
+          503,
+          'SETTLEMENT_FAILED',
+          `On-chain completeVerification failed: ${settle.error}. State unchanged — retry.`,
+        );
+      }
       await a2aStore.updateState(taskHash, {
         status: newStatus,
         verificationResult,
       });
       if (verificationResult.passed) {
-        await recordWorkerPayout(taskHash, address, '0', 0n);
+        await recordWorkerPayout(taskHash, address, onChainIdSui ?? '0', 0n);
       } else {
         await recordWorkerDispute(taskHash, address);
       }

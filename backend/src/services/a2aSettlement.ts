@@ -27,7 +27,7 @@
 
 import type { ContractTransactionResponse } from 'ethers';
 import { isAddress } from 'ethers';
-import { escrowAsMarketplace, marketplaceSigner, isSui, buildSuiAssignTx, executeSuiTx } from './chain.js';
+import { escrowAsMarketplace, marketplaceSigner, isSui, buildSuiAssignTx, buildSuiCompleteVerificationTx, executeSuiTx, getSuiTask } from './chain.js';
 import { config } from '../config.js';
 import { getTaskIdByHash } from './escrowEvents.js';
 import * as a2aStore from './a2aStore.js';
@@ -291,6 +291,61 @@ async function settleSuiAssignment(taskHash: string, executor: string): Promise<
   }
 }
 
+async function settleSuiVerification(taskHash: string, passed: boolean): Promise<SettleResult> {
+  if (!isSui) {
+    console.warn(
+      `[a2aSettlement] settleSuiVerification called but CHAIN_TYPE is not 'sui'`,
+    );
+    return { success: false, error: 'Not a Sui chain' };
+  }
+
+  const taskId = await waitForTaskId(taskHash);
+  if (taskId === null) {
+    const msg = `hash2id lookup timed out (taskHash=${taskHash.slice(0, 10)}…)`;
+    console.error(`[a2aSettlement] ${msg}`);
+    await safePersistVerifyError(taskHash, msg);
+    return { success: false, error: msg };
+  }
+
+  try {
+    const txJson = await buildSuiCompleteVerificationTx(BigInt(taskId), passed);
+    const { digest } = await executeSuiTx(txJson);
+    console.log(`[a2aSettlement] Sui marketplace_complete_verification broadcast taskId=${taskId} passed=${passed} digest=${digest}`);
+
+    await a2aStore.updateState(taskHash, { verifyTxHash: digest, verifyError: undefined });
+
+    if (passed) {
+      rooms.tasks('task:completed', { taskId });
+      rooms.task(taskId, 'task:completed', { taskId });
+    }
+
+    return { success: true, txHash: digest };
+  } catch (err) {
+    const msg = (err as Error).message;
+    console.error(`[a2aSettlement] Sui verification failed for hash=${taskHash.slice(0, 10)}…:`, msg);
+    if (msg.includes('InvalidStatus')) {
+      // Already settled — check outcome and report
+      try {
+        const suiTask = await getSuiTask!(BigInt(taskId));
+        const status = suiTask.status;
+        if (status === (passed ? 4 : 3)) {
+          console.log(`[a2aSettlement] Sui verification skipped — task ${taskId} already settled with matching outcome (status=${status})`);
+          return { success: true, alreadySettled: true };
+        }
+        const errMsg = `task ${taskId} already settled with status=${status}, does not match passed=${passed}`;
+        await safePersistVerifyError(taskHash, errMsg);
+        return { success: false, error: errMsg };
+      } catch (readErr) {
+        const errMsg = `Sui InvalidStatus and follow-up read failed: ${(readErr as Error).message}`;
+        await safePersistVerifyError(taskHash, errMsg);
+        return { success: false, error: errMsg };
+      }
+    }
+    await safePersistVerifyError(taskHash, msg);
+    return { success: false, error: msg };
+  }
+}
+
 // Writing to Redis can itself fail (network blip, key missing if releaseToOpen
 // raced us). Don't let the bookkeeping write blow up the bridge — the bridge
 // is already in an error path, surfacing a second error here just buries the
@@ -338,6 +393,10 @@ export async function settleVerification(taskHash: string, passed: boolean): Pro
     const msg = 'Bridge disabled: MARKETPLACE_SIGNER_PRIVATE_KEY not set';
     await safePersistVerifyError(taskHash, msg);
     return { success: false, error: msg };
+  }
+
+  if (isSui) {
+    return settleSuiVerification(taskHash, passed);
   }
 
   try {

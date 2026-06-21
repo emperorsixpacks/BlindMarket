@@ -160,6 +160,26 @@ export async function buildSuiAssignTx(taskId: bigint, executor: string): Promis
 }
 
 /**
+ * Build a Sui Move call transaction for marketplace_complete_verification.
+ * The backend Sui signer (verifier address) signs and executes this.
+ */
+export async function buildSuiCompleteVerificationTx(taskId: bigint, passed: boolean): Promise<string> {
+  const { Transaction } = await import('@mysten/sui/transactions');
+  const tx = new Transaction();
+
+  tx.moveCall({
+    target: `${config.suiPackageId}::blind_escrow::marketplace_complete_verification` as `${string}::${string}::${string}`,
+    arguments: [
+      tx.object(config.suiBlindEscrowObjectId),
+      tx.pure.u64(taskId),
+      tx.pure.bool(passed),
+    ],
+  });
+
+  return tx.toJSON();
+}
+
+/**
  * Read a task's on-chain state from the Sui Move contract.
  * Calls blind_escrow::get_task via devInspect and returns the relevant fields.
  */

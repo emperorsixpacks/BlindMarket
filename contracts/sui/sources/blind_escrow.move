@@ -307,6 +307,50 @@ module blindmarket::blind_escrow {
         event::emit(WorkerAssigned { task_id, worker });
     }
 
+    /// Complete verification gated by the marketplace verifier address
+    /// (escrow.verifier) instead of AdminCap. The marketplace backend signs
+    /// this after auto-verify passes, so it does not need the AdminCap object.
+    public entry fun marketplace_complete_verification(
+        escrow: &mut BlindEscrow,
+        task_id: u64,
+        passed: bool,
+        ctx: &mut TxContext,
+    ) {
+        assert!(ctx.sender() == escrow.verifier, ENotVerifier);
+        let task = table::borrow_mut(&mut escrow.tasks, task_id);
+        assert!(task.status == STATUS_SUBMITTED, EInvalidStatus);
+
+        let amount = *table::borrow(&escrow.task_amounts, task_id);
+        let amount_ref = table::borrow_mut(&mut escrow.task_amounts, task_id);
+
+        if (passed) {
+            task.status = STATUS_COMPLETED;
+            let fee = amount * escrow.fee_bps / 10000;
+            let worker_payout = amount - fee;
+            let worker_addr = task.worker;
+
+            let worker_balance = balance::split(&mut escrow.escrow_balance, worker_payout);
+            transfer::public_transfer(coin::from_balance(worker_balance, ctx), worker_addr);
+
+            if (fee > 0 && escrow.treasury != @0x0) {
+                let fee_balance = balance::split(&mut escrow.escrow_balance, fee);
+                transfer::public_transfer(coin::from_balance(fee_balance, ctx), escrow.treasury);
+            };
+
+            event::emit(TaskCompleted { task_id, worker_payout, platform_fee: fee });
+        } else {
+            task.status = STATUS_VERIFIED;
+            let agent_addr = task.agent;
+
+            let refund = balance::split(&mut escrow.escrow_balance, amount);
+            transfer::public_transfer(coin::from_balance(refund, ctx), agent_addr);
+
+            event::emit(VerificationCompleted { task_id, passed: false });
+        };
+
+        *amount_ref = 0;
+    }
+
     /// Submit an evidence hash. Caller must be the worker.
     public entry fun submit_evidence(
         escrow: &mut BlindEscrow,
