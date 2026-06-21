@@ -101,7 +101,7 @@ const OG_CHAIN_ID = Number(process.env.OG_CHAIN_ID ?? 16602);
 // Wallet address from agent registration — determines chain automatically.
 // EVM = 20-byte address (42 chars with 0x), Sui = 32-byte (66 chars with 0x).
 const AGENT_WALLET_ADDR = process.env.AGENT_WALLET || '';
-const IS_EVM_AGENT = AGENT_WALLET_ADDR.length === 42 && ethers.isAddress(AGENT_WALLET_ADDR);
+const IS_EVM_AGENT = !AGENT_WALLET_ADDR || (AGENT_WALLET_ADDR.length === 42 && ethers.isAddress(AGENT_WALLET_ADDR));
 // Sui chain config (used for Sui agents).
 const SUI_NETWORK_ID = process.env.SUI_NETWORK_ID ?? 'testnet';
 const SUI_RPC_URL = process.env.SUI_RPC_URL ?? 'https://fullnode.testnet.sui.io:443';
