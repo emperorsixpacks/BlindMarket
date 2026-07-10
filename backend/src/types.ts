@@ -425,9 +425,6 @@ export interface DeployedAgent {
   // Minimum reward in wei (decimal string). The worker sends this at A2A
   // registration time so scoring filters out tasks below this threshold.
   minReward?: string;
-  // Which blockchain this agent was deployed on — 'evm' (0G) or 'sui'.
-  // Absent on legacy agents deployed before this field was added.
-  chainType?: 'evm' | 'sui';
 }
 
 export interface TaskForensicRequirement {

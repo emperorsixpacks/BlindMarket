@@ -29,10 +29,3 @@ export function resolveNetwork(arg: NetworkName | Network): Network {
 export function isEVMNetwork(network: Network): network is Network & { chainType: 'evm' } {
   return network.chainType === 'evm';
 }
-
-/**
- * Type guard: check if a Network is a Sui network.
- */
-export function isSuiNetwork(network: Network): network is Network & { chainType: 'sui' } {
-  return network.chainType === 'sui';
-}

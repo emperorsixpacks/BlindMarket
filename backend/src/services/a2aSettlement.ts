@@ -27,7 +27,7 @@
 
 import type { ContractTransactionResponse } from 'ethers';
 import { isAddress } from 'ethers';
-import { escrowAsMarketplace, marketplaceSigner, buildSuiAssignTx, buildSuiCompleteVerificationTx, executeSuiTx, getSuiTask } from './chain.js';
+import { escrowAsMarketplace, marketplaceSigner } from './chain.js';
 import { getTaskIdByHash } from './escrowEvents.js';
 import * as a2aStore from './a2aStore.js';
 import { rooms } from './socket.js';
@@ -185,9 +185,10 @@ export async function settleAssignment(taskHash: string, executor: string): Prom
     return { success: false, error: msg };
   }
 
-  // Sui settlement path — call marketplace_assign on the Sui Move contract
   if (!isAddress(executor)) {
-    return settleSuiAssignment(taskHash, executor);
+    const msg = `Executor address is not a valid EVM address: ${executor}`;
+    await safePersistAssignError(taskHash, msg);
+    return { success: false, error: msg };
   }
 
   const taskId = await waitForTaskId(taskHash);
@@ -247,83 +248,6 @@ export async function settleAssignment(taskHash: string, executor: string): Prom
   return { success: true, txHash: tx.hash };
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Sui settlement path
-// ═══════════════════════════════════════════════════════════════════════════
-
-async function settleSuiAssignment(taskHash: string, executor: string): Promise<SettleResult> {
-  const taskId = await waitForTaskId(taskHash);
-  if (taskId === null) {
-    const msg = `hash2id lookup timed out (taskHash=${taskHash.slice(0, 10)}…)`;
-    console.error(`[a2aSettlement] ${msg}`);
-    await safePersistAssignError(taskHash, msg);
-    return { success: false, error: msg };
-  }
-
-  try {
-    const txJson = await buildSuiAssignTx(BigInt(taskId), executor);
-    console.log(`[a2aSettlement] calling marketplace_assign taskId=${taskId} executor=${executor}`);
-    const { digest } = await executeSuiTx(txJson);
-    console.log(`[a2aSettlement] Sui marketplace_assign broadcast taskId=${taskId} executor=${executor} digest=${digest}`);
-
-    await a2aStore.updateState(taskHash, { assignTxHash: digest, assignError: undefined });
-    return { success: true, txHash: digest };
-  } catch (err) {
-    const msg = (err as Error).message;
-    console.error(`[a2aSettlement] Sui assignment failed for hash=${taskHash.slice(0, 10)}…:`, msg);
-    await safePersistAssignError(taskHash, msg);
-    return { success: false, error: msg };
-  }
-}
-
-async function settleSuiVerification(taskHash: string, passed: boolean): Promise<SettleResult> {
-  const taskId = await waitForTaskId(taskHash);
-  if (taskId === null) {
-    const msg = `hash2id lookup timed out (taskHash=${taskHash.slice(0, 10)}…)`;
-    console.error(`[a2aSettlement] ${msg}`);
-    await safePersistVerifyError(taskHash, msg);
-    return { success: false, error: msg };
-  }
-
-  try {
-    const txJson = await buildSuiCompleteVerificationTx(BigInt(taskId), passed);
-    const { digest } = await executeSuiTx(txJson);
-    console.log(`[a2aSettlement] Sui marketplace_complete_verification broadcast taskId=${taskId} passed=${passed} digest=${digest}`);
-
-    await a2aStore.updateState(taskHash, { verifyTxHash: digest, verifyError: undefined });
-
-    if (passed) {
-      rooms.tasks('task:completed', { taskId });
-      rooms.task(taskId, 'task:completed', { taskId });
-    }
-
-    return { success: true, txHash: digest };
-  } catch (err) {
-    const msg = (err as Error).message;
-    console.error(`[a2aSettlement] Sui verification failed for hash=${taskHash.slice(0, 10)}…:`, msg);
-    if (msg.includes('InvalidStatus')) {
-      // Already settled — check outcome and report
-      try {
-        const suiTask = await getSuiTask!(BigInt(taskId));
-        const status = suiTask.status;
-        if (status === (passed ? 4 : 3)) {
-          console.log(`[a2aSettlement] Sui verification skipped — task ${taskId} already settled with matching outcome (status=${status})`);
-          return { success: true, alreadySettled: true };
-        }
-        const errMsg = `task ${taskId} already settled with status=${status}, does not match passed=${passed}`;
-        await safePersistVerifyError(taskHash, errMsg);
-        return { success: false, error: errMsg };
-      } catch (readErr) {
-        const errMsg = `Sui InvalidStatus and follow-up read failed: ${(readErr as Error).message}`;
-        await safePersistVerifyError(taskHash, errMsg);
-        return { success: false, error: errMsg };
-      }
-    }
-    await safePersistVerifyError(taskHash, msg);
-    return { success: false, error: msg };
-  }
-}
-
 // Writing to Redis can itself fail (network blip, key missing if releaseToOpen
 // raced us). Don't let the bookkeeping write blow up the bridge — the bridge
 // is already in an error path, surfacing a second error here just buries the
@@ -373,11 +297,12 @@ export async function settleVerification(taskHash: string, passed: boolean): Pro
     return { success: false, error: msg };
   }
 
-  // Determine chain from the executor's address (Sui addresses aren't valid EVM addresses)
   const _vState = await a2aStore.getState(taskHash).catch(() => null);
   const _vExecutor = _vState?.executorAddress;
   if (_vExecutor && !isAddress(_vExecutor)) {
-    return settleSuiVerification(taskHash, passed);
+    const msg = `Executor address is not a valid EVM address: ${_vExecutor}`;
+    await safePersistVerifyError(taskHash, msg);
+    return { success: false, error: msg };
   }
 
   try {

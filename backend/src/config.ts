@@ -24,19 +24,8 @@ export const config = {
   allowInsecureLocalVerify: optional('ALLOW_INSECURE_LOCAL_VERIFY', 'false').toLowerCase() === 'true',
 
   // 0G Chain
-  chainType: optional('CHAIN_TYPE', 'evm') as 'evm' | 'sui',
   ogRpcUrl: optional('OG_RPC_URL', IS_PROD ? 'https://evmrpc.0g.ai' : 'https://evmrpc-testnet.0g.ai'),
   ogChainId: parseInt(optional('OG_CHAIN_ID', IS_PROD ? '16661' : '16602'), 10),
-
-  // Sui Chain
-  suiRpcUrl: optional('SUI_RPC_URL', 'https://fullnode.testnet.sui.io:443'),
-  suiNetworkId: optional('SUI_NETWORK_ID', 'testnet') as 'mainnet' | 'testnet' | 'devnet' | 'local',
-  suiPackageId: optional('SUI_PACKAGE_ID', '0x0'),
-  suiBlindEscrowObjectId: optional('SUI_BLIND_ESCROW_OBJECT_ID', '0x0'),
-  suiTaskRegistryObjectId: optional('SUI_TASK_REGISTRY_OBJECT_ID', '0x0'),
-  suiBlindReputationObjectId: optional('SUI_BLIND_REPUTATION_OBJECT_ID', '0x0'),
-  suiAdminCapId: optional('SUI_ADMIN_CAP_ID', '0x0'),
-  suiAgentPrivateKey: process.env.SUI_AGENT_PRIVATE_KEY || '',
 
   // Contracts
   blindEscrowAddress: optional('BLIND_ESCROW_ADDRESS', IS_PROD ? '0x3d0374963DaaD43e31d42373eb11156A8e8ce2Ff' : '0x7B420523E2b5d6C0f0e5deF75b1D9a901167f041'),
@@ -60,10 +49,6 @@ export const config = {
   // 0G Storage (Phase 3)
   ogStorageIndexerRpc: process.env.OG_STORAGE_INDEXER_RPC || '',
   ogStoragePrivateKey: process.env.OG_STORAGE_PRIVATE_KEY || '',
-
-  // Walrus Storage (Sui)
-  walrusPublisherUrl: optional('WALRUS_PUBLISHER_URL', 'https://publisher.walrus-testnet.walrus.space'),
-  walrusAggregatorUrl: optional('WALRUS_AGGREGATOR_URL', 'https://aggregator.walrus-testnet.walrus.space'),
 
   // Marketplace signer — holds the verifier role on BlindEscrow. Used by the
   // A2A settlement bridge (services/a2aSettlement.ts) to call marketplaceAssign
@@ -132,11 +117,8 @@ export function assertBootConfig(): void {
     // (it would act on mainnet task ids against testnet escrow). Refuse, unless
     // the operator explicitly opts into a non-mainnet prod deploy.
     const allowNonMainnet = process.env.ALLOW_NONMAINNET_PROD === 'true';
-    if (config.chainType === 'evm' && config.ogChainId !== MAINNET_CHAIN_ID && !allowNonMainnet) {
+    if (config.ogChainId !== MAINNET_CHAIN_ID && !allowNonMainnet) {
       fatals.push(`OG_CHAIN_ID=${config.ogChainId} in production — expected mainnet ${MAINNET_CHAIN_ID}. Refusing to boot a production backend against a non-mainnet chain (set ALLOW_NONMAINNET_PROD=true to override for staging).`);
-    }
-    if (config.chainType === 'sui' && config.suiNetworkId === 'testnet' && !allowNonMainnet) {
-      fatals.push(`SUI_NETWORK_ID=${config.suiNetworkId} in production — refusing to boot production backend against Sui testnet (set ALLOW_NONMAINNET_PROD=true to override).`);
     }
 
     // Degraded-but-not-fatal: the bridge being optional is an existing design

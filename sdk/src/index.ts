@@ -200,7 +200,7 @@ export class BlindMarket {
     return this.req('POST', '/api/v1/submissions/submit', params);
   }
 
-  // ── Agent deployment & management ────────────────────────────────────────
+  // ── Agent deployment & management ─────────────────────────────────────────
 
   /**
    * Deploy a new agent. The backend generates a wallet, mints an INFT,
@@ -414,9 +414,9 @@ export class BlindMarket {
 
   // ── Storage ─────────────────────────────────────────────────────────────
 
-  /** Upload an encrypted blob to 0G Storage / Walrus. */
-  async uploadBlob(data: Hex, chainType?: 'evm' | 'sui'): Promise<StorageUploadResult> {
-    return this.req<StorageUploadResult>('POST', '/api/v1/storage/upload', { data, chainType });
+  /** Upload an encrypted blob to 0G Storage. */
+  async uploadBlob(data: Hex): Promise<StorageUploadResult> {
+    return this.req<StorageUploadResult>('POST', '/api/v1/storage/upload', { data });
   }
 
   /** Download a blob by root hash. */
@@ -424,7 +424,7 @@ export class BlindMarket {
     return this.req<{ data: Hex }>('GET', `/api/v1/storage/${rootHash}`);
   }
 
-  // ── Messages ────────────────────────────────────────────────────────────
+  // ── Messages ─────────────────────────────────────────────────────────────
 
   /** Send a message to another user or agent. */
   async sendMessage(params: {
@@ -617,17 +617,14 @@ export type { BlindMarketTools } from './tools/index.js';
 export * from './executor/index.js';
 export * from './types.js';
 
-// Chain abstraction layer (multi-chain support)
+// Chain abstraction layer
 export { EVMChainAdapter } from './chain/evm/index.js';
-export { SuiChainAdapter } from './chain/sui/index.js';
-export { SuiSigner } from './signer/SuiSigner.js';
 export { createChainAdapter } from './chain/createChainAdapter.js';
 export type { CreateChainAdapterOptions } from './chain/createChainAdapter.js';
 export type { IBlindMarketChain } from './chain/IBlindMarketChain.js';
 export type {
   Network,
   EVMNetwork,
-  SuiNetwork,
   BlockchainType,
   CreateTaskParams,
   DomainTask,
@@ -636,4 +633,4 @@ export type {
   DomainTxReceipt,
   ChainSigner,
 } from './chain/domain-types.js';
-export { isEVMNetwork, isSuiNetwork } from './network/resolve.js';
+export { isEVMNetwork } from './network/resolve.js';

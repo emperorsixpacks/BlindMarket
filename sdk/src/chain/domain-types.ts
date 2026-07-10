@@ -5,7 +5,7 @@ import type { Address, Hex, TaskId, TaskStatus } from '../types.js';
 // blockchain. Each chain adapter translates between these and its native
 // contract types.
 
-export type BlockchainType = 'evm' | 'sui';
+export type BlockchainType = 'evm';
 
 /** Base fields shared by all chain network configs. */
 export interface NetworkBase {
@@ -29,22 +29,8 @@ export interface EVMNetwork extends NetworkBase {
   broker?: string;
 }
 
-/** Sui chain network config. */
-export interface SuiNetwork extends NetworkBase {
-  chainType: 'sui';
-  /** Sui network identifier (e.g. 'mainnet', 'testnet', 'devnet'). */
-  networkId: 'mainnet' | 'testnet' | 'devnet' | 'local';
-  packageId: string;
-  sharedObjects: {
-    blindEscrow: string;
-    taskRegistry: string;
-    blindReputation: string;
-    agentNft?: string;
-  };
-}
-
 /** Union of all supported chain network configs. */
-export type Network = EVMNetwork | SuiNetwork;
+export type Network = EVMNetwork;
 
 /** Parameters for creating a task on any chain. */
 export interface CreateTaskParams {
@@ -97,7 +83,6 @@ export interface DomainReputation {
 export interface DomainTxReceipt {
   hash: string;
   blockNumber?: number;
-  digest?: string;  // Sui uses digests instead of block numbers
 }
 
 /** Signer abstraction that works across chains. */

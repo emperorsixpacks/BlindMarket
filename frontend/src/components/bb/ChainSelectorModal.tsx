@@ -13,17 +13,6 @@ const chains = [
       </svg>
     ),
   },
-  {
-    id: 'sui' as const,
-    name: 'Sui Chain',
-    description: 'Move-based — fast, parallel execution. Tasks settle in SUI tokens with low fees.',
-    icon: (
-      <svg viewBox="0 0 40 40" className="w-10 h-10" fill="none">
-        <circle cx="20" cy="20" r="18" stroke="currentColor" strokeWidth="2" className="text-ink-2" />
-        <path d="M14 26c0-6 6-14 6-14s6 8 6 14a6 6 0 01-12 0z" stroke="currentColor" strokeWidth="2" className="text-cream" />
-      </svg>
-    ),
-  },
 ];
 
 export function ChainSelectorModal() {

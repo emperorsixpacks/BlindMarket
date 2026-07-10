@@ -3,7 +3,6 @@ import { useParams } from 'react-router-dom';
 import { useBalance, useWalletClient } from 'wagmi';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { BrowserProvider, parseEther } from 'ethers';
-import { useCurrentAccount, useSuiClient, useSignAndExecuteTransaction, useSignPersonalMessage } from '@mysten/dapp-kit';
 import {
   Breadcrumb,
   PageHeader,
@@ -26,7 +25,6 @@ import { API_BASE_URL } from '../config/constants';
 import { AGENT_CAPABILITIES } from '../config/capabilities';
 import { useChainAddress } from '../hooks/useChainWallet';
 import { getNativeCurrency } from '../config/constants';
-import { buildSuiTransferCoin } from '../lib/suiTxBuilder';
 import {
   getAgentReviews,
   submitReview,
@@ -37,16 +35,16 @@ import {
 } from '../services/marketplace';
 import type { AgentReview, AgentReviewStats, AgentBadge, AgentWebhook } from '../services/marketplace';
 
+import AgentMetricsPanel from '../components/AgentMetricsPanel';
+
 // Top-up amount when the agent runs low on gas. Same default as the deploy
 // funding step — round trip + LLM call + submitEvidence costs ~0.0004 0G, so
 // 0.005 0G covers ~125 tasks before the next top-up.
 const TOP_UP_AMOUNT = '0.005';
-const SUI_TOP_UP_AMOUNT = '50000000'; // 0.05 SUI in MIST (9 decimals)
 
 // Below this the agent can't reliably pay for a submitEvidence + a USDC sweep
 // tx. UI surfaces a "Top up gas" call to action when balance is under this.
 const LOW_GAS_THRESHOLD = 0.005;
-const SUI_LOW_GAS_THRESHOLD = 0.005; // 0.005 SUI
 
 interface AgentTool {
   type: string; name: string; description: string; url?: string; endpointUrl?: string; method?: string; toolName?: string;
@@ -59,12 +57,9 @@ interface AgentDetails {
   tasksCompleted?: number; totalEarned?: string; tools?: AgentTool[];
   capabilities?: string[];
   minReward?: string;
-  chainType?: 'evm' | 'sui';
   reputation?: { score: number; avgScore: number; tasksCompleted: number; disputes: number };
   decayedReputation?: { rawScore: number; decayedScore: number; tasksCompleted: number; disputes: number };
 }
-
-import AgentMetricsPanel from '../components/AgentMetricsPanel';
 
 type Tab = 'logs' | 'tools' | 'tasks' | 'reviews' | 'webhooks' | 'edit' | 'metrics';
 
@@ -91,22 +86,7 @@ export default function AgentDetail() {
   const { data: walletClient } = useWalletClient();
   const qc = useQueryClient();
 
-  // SUI wallet
-  const suiAccount = useCurrentAccount();
-  const suiClient = useSuiClient();
-  const { mutateAsync: signAndExecute } = useSignAndExecuteTransaction();
-  const { mutateAsync: signPersonalMessage } = useSignPersonalMessage();
-
   const [agent, setAgent] = useState<AgentDetails | null>(null);
-  // Detect agent wallet type — use explicit chainType if available,
-  // fall back to address format detection for legacy agents.
-  const isSui = agent?.chainType
-    ? agent.chainType === 'sui'
-    : agent?.walletAddress?.length === 66 && agent.walletAddress.startsWith('0x');
-
-  console.log('[AgentDetail] walletAddress:', agent?.walletAddress, 'length:', agent?.walletAddress?.length, 'chainType:', agent?.chainType, '=> isSui:', isSui);
-
-  const agentCurrency = getNativeCurrency(isSui ? 'sui' : 'og');
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
@@ -148,40 +128,17 @@ export default function AgentDetail() {
   // EVM balance (for 0G chain)
   const { data: evmBalance, refetch: refetchEvmBalance } = useBalance({
     address: agent?.walletAddress as `0x${string}` | undefined,
-    query: { enabled: !!agent?.walletAddress && !isSui },
+    query: { enabled: !!agent?.walletAddress },
   });
 
-  // SUI balance
-  const [suiBalanceMist, setSuiBalanceMist] = useState<string>('0');
-  useEffect(() => {
-    if (!isSui || !agent?.walletAddress) { setSuiBalanceMist('0'); return; }
-    let cancelled = false;
-    console.log('[AgentDetail] fetching SUI balance for', agent.walletAddress);
-    suiClient.getBalance({ owner: agent.walletAddress })
-      .then(r => { console.log('[AgentDetail] SUI balance result:', r.totalBalance); if (!cancelled) setSuiBalanceMist(r.totalBalance); })
-      .catch(err => { console.warn('[AgentDetail] SUI balance failed:', err); if (!cancelled) setSuiBalanceMist('0'); });
-    return () => { cancelled = true; };
-  }, [isSui, agent?.walletAddress, suiClient]);
-
-  const refetchSuiBalance = useCallback(() => {
-    if (!isSui || !agent?.walletAddress) { setSuiBalanceMist('0'); return; }
-    suiClient.getBalance({ owner: agent.walletAddress })
-      .then(r => setSuiBalanceMist(r.totalBalance))
-      .catch(() => setSuiBalanceMist('0'));
-  }, [isSui, agent?.walletAddress, suiClient]);
-
-  const balanceEther = isSui
-    ? parseInt(suiBalanceMist) / (10 ** agentCurrency.decimals)
-    : evmBalance ? parseFloat(evmBalance.formatted) : 0;
+  const balanceEther = evmBalance ? parseFloat(evmBalance.formatted) : 0;
+  const agentCurrency = getNativeCurrency('og');
   const balanceSymbol = agentCurrency.symbol;
-  const isLowGas = isSui
-    ? balanceEther < SUI_LOW_GAS_THRESHOLD
-    : !!evmBalance && balanceEther < LOW_GAS_THRESHOLD;
+  const isLowGas = !!evmBalance && balanceEther < LOW_GAS_THRESHOLD;
 
   const refetchBalance = useCallback(() => {
-    if (isSui) return refetchSuiBalance();
     refetchEvmBalance();
-  }, [isSui, refetchSuiBalance, refetchEvmBalance]);
+  }, [refetchEvmBalance]);
 
   const loadAgent = useCallback(() => {
     if (!id) return;
@@ -260,48 +217,6 @@ export default function AgentDetail() {
     onSuccess: (data) => { setAgent(data); qc.invalidateQueries({ queryKey: ['my-agents'] }); },
   });
 
-  // Signature-gated owner-link recovery. When start/stop 403s because the agent
-  // was deployed with a different wallet than the current Privy sign-in, the
-  // user proves control of the owner wallet (their active wagmi wallet) by
-  // signing a server nonce. That adds their Privy identity to authorizedOwners,
-  // after which authorizeOwner stops rejecting them. We then retry the action.
-  async function handleLinkOwner() {
-    setLinkStatus('signing');
-    setLinkError('');
-    try {
-      const challenge = await authedPost<{ nonce: string; message: string; ownerAddress: string }>(
-        `/api/v1/agents/${id}/link-owner/challenge`,
-        {},
-      );
-
-      let signature: string;
-      if (isSui) {
-        // SUI wallet: try signing with @mysten/dapp-kit.
-        console.log('[link-owner] using SUI signPersonalMessage, account:', suiAccount?.address);
-        const result = await signPersonalMessage({
-          message: new TextEncoder().encode(challenge.message),
-        });
-        console.log('[link-owner] SUI signature base64:', result.signature);
-        signature = result.signature;
-      } else {
-        // EVM wallet: sign with wagmi/ethers (EIP-191)
-        if (!walletClient) throw new Error('Wallet not connected');
-        signature = await walletClient.signMessage({ message: challenge.message });
-      }
-
-      setLinkStatus('linking');
-      await authedPost(`/api/v1/agents/${id}/link-owner`, { nonce: challenge.nonce, signature });
-      setLinkStatus('idle');
-      // Refresh the record (now carries authorizedOwners) and retry whatever
-      // action triggered the lock-out (defaults to start).
-      try { setAgent(await get<AgentDetails>(`/api/v1/agents/${id}`)); } catch { /* non-blocking */ }
-      action.mutate(action.variables ?? 'start');
-    } catch (err) {
-      setLinkError((err as Error).message || 'Could not link this wallet');
-      setLinkStatus('error');
-    }
-  }
-
   // authedPatch so the Privy JWT flows to the backend, where requireAuth +
   // authorizeOwner verify the caller (no more plaintext ownerAddress claim).
   const save = useMutation({
@@ -317,6 +232,36 @@ export default function AgentDetail() {
     onSuccess: (data) => { setAgent(data); setTab('logs'); },
   });
 
+  // Signature-gated owner-link recovery. When start/stop 403s because the agent
+  // was deployed with a different wallet than the current Privy sign-in, the
+  // user proves control of the owner wallet (their active wagmi wallet) by
+  // signing a server nonce. That adds their Privy identity to authorizedOwners,
+  // after which authorizeOwner stops rejecting them. We then retry the action.
+  async function handleLinkOwner() {
+    setLinkStatus('signing');
+    setLinkError('');
+    try {
+      const challenge = await authedPost<{ nonce: string; message: string; ownerAddress: string }>(
+        `/api/v1/agents/${id}/link-owner/challenge`,
+        {},
+      );
+
+      if (!walletClient) throw new Error('Wallet not connected');
+      const signature = await walletClient.signMessage({ message: challenge.message });
+
+      setLinkStatus('linking');
+      await authedPost(`/api/v1/agents/${id}/link-owner`, { nonce: challenge.nonce, signature });
+      setLinkStatus('idle');
+      // Refresh the record (now carries authorizedOwners) and retry whatever
+      // action triggered the lock-out (defaults to start).
+      try { setAgent(await get<AgentDetails>(`/api/v1/agents/${id}`)); } catch { /* non-blocking */ }
+      action.mutate(action.variables ?? 'start');
+    } catch (err) {
+      setLinkError((err as Error).message || 'Could not link this wallet');
+      setLinkStatus('error');
+    }
+  }
+
   // Owner-signed transfer from owner wallet → agent wallet. No backend
   // involvement; same primitive as the deploy-funding step. We refresh the
   // balance after the tx confirms so the UI tile updates immediately
@@ -326,20 +271,14 @@ export default function AgentDetail() {
     setTopUpStatus('sending');
     setTopUpError('');
     try {
-      if (isSui) {
-        if (!suiAccount) throw new Error('SUI wallet not connected');
-        const tx = buildSuiTransferCoin(agent.walletAddress, SUI_TOP_UP_AMOUNT);
-        await signAndExecute({ transaction: tx });
-      } else {
-        if (!walletClient) throw new Error('EVM wallet not connected');
-        const provider = new BrowserProvider(walletClient.transport);
-        const signer = await provider.getSigner();
-        const tx = await signer.sendTransaction({
-          to: agent.walletAddress,
-          value: parseEther(TOP_UP_AMOUNT),
-        });
-        await tx.wait();
-      }
+      if (!walletClient) throw new Error('EVM wallet not connected');
+      const provider = new BrowserProvider(walletClient.transport);
+      const signer = await provider.getSigner();
+      const tx = await signer.sendTransaction({
+        to: agent.walletAddress,
+        value: parseEther(TOP_UP_AMOUNT),
+      });
+      await tx.wait();
       await refetchBalance();
       setTopUpStatus('idle');
     } catch (err) {
@@ -477,7 +416,7 @@ export default function AgentDetail() {
                 size="sm"
                 onClick={handleTopUp}
                 disabled={topUpStatus === 'sending'}
-                label={topUpStatus === 'sending' ? `Sending ${isSui ? '0.05' : TOP_UP_AMOUNT} ${balanceSymbol}…` : `Top up gas (+${isSui ? '0.05' : TOP_UP_AMOUNT} ${balanceSymbol})`}
+                label={topUpStatus === 'sending' ? `Sending ${TOP_UP_AMOUNT} ${balanceSymbol}…` : `Top up gas (+${TOP_UP_AMOUNT} ${balanceSymbol})`}
               />
               {/* Withdraw — single button for both native 0G and ERC20 tokens.
                   The backend's /withdraw endpoint auto-detects; empty body sweeps
@@ -510,7 +449,7 @@ export default function AgentDetail() {
               {withdrawStatus === 'error' && <div className="text-err">{withdrawError}</div>}
               {isLowGas && agent.status !== 'stopped' && (
                 <div className="text-warn">
-                  Agent will fail to submit evidence below <span className="font-mono">{isSui ? SUI_LOW_GAS_THRESHOLD : LOW_GAS_THRESHOLD} {balanceSymbol}</span>.
+                  Agent will fail to submit evidence below <span className="font-mono">{LOW_GAS_THRESHOLD} {balanceSymbol}</span>.
                 </div>
               )}
             </div>

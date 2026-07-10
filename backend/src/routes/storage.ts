@@ -29,8 +29,7 @@ storageRouter.post('/upload', requireAuth, async (req: AuthRequest, res, next) =
       throw new AppError(400, 'DATA_TOO_LARGE', 'Maximum upload size is 10MB');
     }
 
-    const overrideChainType = (req.query.chainType as string | undefined) || body.chainType;
-    const { rootHash, txHash } = await storageService.upload(buffer, overrideChainType);
+    const { rootHash, txHash } = await storageService.upload(buffer);
 
     const result: ApiResponse = {
       success: true,
@@ -56,8 +55,7 @@ storageRouter.get('/:rootHash', requireAuth, async (req: AuthRequest, res, next)
       throw new AppError(400, 'INVALID_HASH', 'Root hash must be a 64-char hex string or a valid Walrus blob ID');
     }
 
-    const overrideChainType = req.query.chainType as string | undefined;
-    const data = await storageService.download(rootHash, overrideChainType);
+    const data = await storageService.download(rootHash);
     if (!data) {
       throw new AppError(404, 'NOT_FOUND', 'Blob not found');
     }

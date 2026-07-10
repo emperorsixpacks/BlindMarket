@@ -33,16 +33,13 @@ import { startEscrowEventLoop } from './services/escrowEvents.js';
 import { startExpirySweepLoop } from './services/a2aExpirySweep.js';
 import { auditCustodySealedTasks } from './services/keyCustodyService.js';
 import { isBridgeConfigured } from './services/a2aSettlement.js';
-import { marketplaceSigner, escrow, isSui, initSui } from './services/chain.js';
+import { marketplaceSigner, escrow, provider } from './services/chain.js';
 import { logChainConfig } from './services/chainService.js';
 import { reconcileAgents, startZombieReaper } from './services/agentRunner.js';
-import { config as appConfig } from './config.js';
 
 // Fail fast on a misconfigured (esp. production) deploy before binding the port.
 assertBootConfig();
 
-// Initialise chain connectivity (lazy-loads Sui if CHAIN_TYPE=sui).
-void initSui();
 logChainConfig();
 
 const app = express();
@@ -155,9 +152,7 @@ httpServer.listen(config.port, () => {
   // Visibility into whether the A2A settlement bridge will actually fire
   // when an agent accepts/submits. Off-by-default if MARKETPLACE_SIGNER_PRIVATE_KEY
   // is unset; when on, log the signer address so it's clear which key is signing.
-  if (isSui) {
-    console.log('[a2aSettlement] bridge on Sui — on-chain settlement via Move contracts (pending deployment)');
-  } else if (isBridgeConfigured() && marketplaceSigner) {
+  if (isBridgeConfigured() && marketplaceSigner) {
     void (async () => {
       const signerAddr = await marketplaceSigner.getAddress();
       console.log(`[a2aSettlement] bridge active — marketplace signer = ${signerAddr}`);
@@ -175,10 +170,10 @@ httpServer.listen(config.port, () => {
           console.error('[a2aSettlement] ⛔ VERIFIER ROLE MISMATCH — bridge will silently fail every call');
           console.error(`    escrow.verifier()        = ${onChainVerifier}`);
           console.error(`    marketplaceSigner.addr   = ${signerAddr}`);
-          console.error(`    escrow contract address  = ${appConfig.blindEscrowAddress}`);
+          console.error(`    escrow contract address  = ${config.blindEscrowAddress}`);
           console.error('    Fix from contracts/ with the current admin key:');
           console.error(`    MARKETPLACE_SIGNER_ADDRESS=${signerAddr} \\`);
-          console.error(`      npx hardhat run scripts/rotate-verifier.ts --network 0g-${appConfig.ogChainId === 16661 ? 'mainnet' : 'testnet'}`);
+          console.error(`      npx hardhat run scripts/rotate-verifier.ts --network 0g-${config.ogChainId === 16661 ? 'mainnet' : 'testnet'}`);
           console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
         } else {
           console.log(`[a2aSettlement] ✓ verifier role confirmed (escrow.verifier() == signer)`);
@@ -189,7 +184,7 @@ httpServer.listen(config.port, () => {
           ? err.errors.map((ee: Error) => ee.message || String(ee)).join('; ')
           : err.message || String(e);
         console.error(
-          `[a2aSettlement] ⛔ could not read escrow.verifier() — escrow contract at ${appConfig.blindEscrowAddress} may be wrong or unreachable: ${msg}`,
+          `[a2aSettlement] ⛔ could not read escrow.verifier() — escrow contract at ${config.blindEscrowAddress} may be wrong or unreachable: ${msg}`,
         );
       }
     })();

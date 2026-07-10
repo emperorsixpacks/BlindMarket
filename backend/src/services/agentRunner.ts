@@ -147,21 +147,11 @@ export async function deployAgent(params: {
   capabilities: AgentCapability[];
   tools?: AgentTool[];
   storageRef?: string;
-  chainType?: 'evm' | 'sui';
 }): Promise<DeployedAgent> {
   const { privateKey, publicKey } = generateKeyPair();
 
-  // Use the per-request chainType when provided, otherwise fall back to server config
-  const effectiveChainType = params.chainType ?? config.chainType;
-
-  let walletAddress: string;
-  if (effectiveChainType === 'sui') {
-    const { Ed25519Keypair } = await import('@mysten/sui/keypairs/ed25519');
-    const keypair = Ed25519Keypair.fromSecretKey(Buffer.from(privateKey, 'hex'));
-    walletAddress = keypair.toSuiAddress();
-  } else {
-    walletAddress = new Wallet(`0x${privateKey}`).address;
-  }
+  // Only EVM (0G) chain is supported
+  const walletAddress = new Wallet(`0x${privateKey}`).address;
 
   const encryptedPrivateKey = eciesEncrypt(
     Buffer.from(privateKey, 'hex'),
@@ -216,7 +206,6 @@ export async function deployAgent(params: {
     inftTokenId,
     storageRef: params.storageRef,
     platformToken,
-    chainType: params.chainType ?? config.chainType,
   };
 
   await saveAgent(agent);
@@ -276,14 +265,6 @@ export async function startAgent(id: string, opts?: { skipResume?: boolean }): P
       AGENT_PUBLIC_KEY: agent.publicKey ?? '',
       OG_RPC_URL: config.ogRpcUrl,
       OG_CHAIN_ID: String(config.ogChainId),
-      CHAIN_TYPE: agent.chainType ?? config.chainType,
-      // Sui chain config (used when CHAIN_TYPE=sui)
-      SUI_NETWORK_ID: config.suiNetworkId,
-      SUI_RPC_URL: config.suiRpcUrl,
-      SUI_PACKAGE_ID: config.suiPackageId,
-      SUI_BLIND_ESCROW_OBJECT_ID: config.suiBlindEscrowObjectId,
-      SUI_BLIND_REPUTATION_OBJECT_ID: config.suiBlindReputationObjectId,
-      SUI_ADMIN_CAP_ID: config.suiAdminCapId,
       // Escrow proxy address — the verifier role (verificationMode='agent')
       // signs completeVerification directly against this contract.
       AGENT_ESCROW_ADDRESS: config.blindEscrowAddress,

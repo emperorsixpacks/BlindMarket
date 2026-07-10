@@ -91,7 +91,7 @@ async function verifyPrivyToken(token: string, activeChain?: string): Promise<{ 
 /** Wallet address with chain type info from Privy JWT */
 interface WalletAddress {
   address: string;
-  chainType: 'ethereum' | 'sui' | string;
+  chainType: 'ethereum' | string;
 }
 
 /** Extract all wallet addresses from Privy JWT claims, with chain type info */
@@ -137,14 +137,10 @@ function getAddressForChain(wallets: WalletAddress[], chainType: string): string
   const exact = wallets.find(w => w.chainType === chainType);
   if (exact) return exact.address;
 
-  // Fall back: for 'og' chain, prefer ethereum; for 'sui', prefer sui
+  // Fall back: for 'og' chain, prefer ethereum
   if (chainType === 'og') {
     const eth = wallets.find(w => w.chainType === 'ethereum');
     if (eth) return eth.address;
-  }
-  if (chainType === 'sui') {
-    const sui = wallets.find(w => w.chainType === 'sui');
-    if (sui) return sui.address;
   }
 
   // Ultimate fallback: return first address
@@ -193,7 +189,7 @@ export function requireAuth(req: AuthRequest, _res: Response, next: NextFunction
   const authHeader = req.headers.authorization;
   const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : undefined;
 
-  // 3. Check X-Active-Chain header (for multi-chain: 'og' or 'sui')
+  // 3. Check X-Active-Chain header (for chain: 'og')
   const activeChain = req.headers['x-active-chain'] as string | undefined;
 
   const candidate = apiKey || token;

@@ -2,11 +2,9 @@ import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useSignAndExecuteTransaction } from '@mysten/dapp-kit';
 import { useTask } from '../hooks/useTasks';
 import { useWallet } from '../context/WalletContext';
 import { useChain } from '../context/ChainContext';
-import { useSuiWallet } from '../context/SuiWalletContext';
 import { useAuth } from '../context/AuthContext';
 import { Panel, SectionRule, Tag, Button, StatusTag, Skeleton, ErrorState } from '../components/bb';
 import { EncryptionIndicator } from '../components/EncryptionIndicator';
@@ -15,7 +13,6 @@ import { CustodyChain } from '../components/CustodyChain';
 import { truncateAddress, formatDate } from '../lib/utils';
 import { buildCancelTask, buildClaimTimeout } from '../services/tasks';
 import { signAndSendTx } from '../lib/txSigner';
-import { buildSuiCancelTask, buildSuiClaimTimeout } from '../lib/suiTxBuilder';
 import { getNativeCurrency } from '../config/constants';
 import { useChainExplorerUrl } from '../hooks/useChainWallet';
 import { TaskStatus, TaskStatusLabels } from '../types/api';
@@ -55,11 +52,8 @@ export default function TaskDetail() {
   const { data, isLoading, isError, refetch } = useTask(id || '');
   const { address, signer } = useWallet();
   const { activeChain } = useChain();
-  useSuiWallet();
-  const suiSignAndExecuteTx = useSignAndExecuteTransaction();
   const explorerUrl = useChainExplorerUrl();
   const native = getNativeCurrency(activeChain);
-  const isSui = activeChain === 'sui';
   // Auth context kept for any future reads; not used in the A2A view path.
   void useAuth();
   const qc = useQueryClient();
@@ -71,14 +65,9 @@ export default function TaskDetail() {
   const cancelMutation = useMutation({
     mutationFn: async () => {
       if (!id) throw new Error('Missing task id');
-      if (isSui) {
-        const tx = buildSuiCancelTask(id);
-        await suiSignAndExecuteTx.mutateAsync({ transaction: tx });
-      } else {
-        if (!signer) throw new Error('Wallet not connected');
-        const tx = await buildCancelTask(id);
-        await signAndSendTx(signer, tx);
-      }
+      if (!signer) throw new Error('Wallet not connected');
+      const tx = await buildCancelTask(id);
+      await signAndSendTx(signer, tx);
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['tasks', id] }),
   });
@@ -86,14 +75,9 @@ export default function TaskDetail() {
   const timeoutMutation = useMutation({
     mutationFn: async () => {
       if (!id) throw new Error('Missing task id');
-      if (isSui) {
-        const tx = buildSuiClaimTimeout(id);
-        await suiSignAndExecuteTx.mutateAsync({ transaction: tx });
-      } else {
-        if (!signer) throw new Error('Wallet not connected');
-        const tx = await buildClaimTimeout(id);
-        await signAndSendTx(signer, tx);
-      }
+      if (!signer) throw new Error('Wallet not connected');
+      const tx = await buildClaimTimeout(id);
+      await signAndSendTx(signer, tx);
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['tasks', id] }),
   });
@@ -319,7 +303,7 @@ export default function TaskDetail() {
                 <strong>not indexed for the marketplace</strong> — it was created before the
                 current A2A indexer was running, so no executor agent will see it on{' '}
                 <code className="font-mono">/a2a</code>. The escrow is still safe; use{' '}
-                <span className="text-err">Cancel &amp; refund</span> below to reclaim it.
+                <span className="text-err">Cancel & refund</span> below to reclaim it.
               </p>
             )}
             {onChain.status === TaskStatus.Funded && onChain.a2aIndexed !== false && (

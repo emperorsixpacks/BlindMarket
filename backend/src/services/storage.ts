@@ -39,7 +39,6 @@ try {
 }
 
 
-
 /**
  * 0G Storage service — upload/download encrypted blobs.
  *
@@ -97,14 +96,10 @@ function safePath(rootHash: string): string | null {
 // ── Public API ──
 
 /**
- * Upload an encrypted blob to 0G Storage / Walrus (or local fallback).
- * Returns the root hash / blobId.
+ * Upload an encrypted blob to 0G Storage (or local fallback).
+ * Returns the root hash.
  */
-export async function upload(data: Buffer, overrideChainType?: string): Promise<{ rootHash: string; txHash?: string }> {
-  const chainType = overrideChainType ?? config.chainType;
-  if (chainType === 'sui') {
-    return uploadWalrus(data);
-  }
+export async function upload(data: Buffer): Promise<{ rootHash: string; txHash?: string }> {
   if (!is0gConfigured()) {
     return uploadLocal(data);
   }
@@ -112,80 +107,15 @@ export async function upload(data: Buffer, overrideChainType?: string): Promise<
 }
 
 /**
- * Download an encrypted blob by root hash / blobId.
+ * Download an encrypted blob by root hash.
  * Returns the raw encrypted bytes or null if not found.
  */
-export async function download(rootHash: string, overrideChainType?: string): Promise<Buffer | null> {
-  let chainType = overrideChainType;
-  if (!chainType) {
-    // Auto-detect: if it looks like a Walrus base64url blobId but not an EVM 64-char hex string
-    if (/^[A-Za-z0-9_-]{32,66}$/.test(rootHash) && !/^(0x)?[0-9a-fA-F]{64}$/.test(rootHash)) {
-      chainType = 'sui';
-    } else {
-      chainType = config.chainType;
-    }
-  }
-
-  if (chainType === 'sui') {
-    return downloadWalrus(rootHash);
-  }
+export async function download(rootHash: string): Promise<Buffer | null> {
   if (!is0gConfigured()) {
     return downloadLocal(rootHash);
   }
   return download0g(rootHash);
 }
-
-// ── Walrus Storage implementation ──
-
-async function uploadWalrus(data: Buffer): Promise<{ rootHash: string; txHash?: string }> {
-  const url = `${config.walrusPublisherUrl}/v1/blobs`;
-  const response = await fetch(url, {
-    method: 'PUT',
-    body: data as any,
-    headers: {
-      'Content-Type': 'application/octet-stream',
-    },
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    console.error('Walrus upload failed:', text);
-    throw new Error(`Walrus upload failed: ${response.statusText} - ${text}`);
-  }
-
-  const json = (await response.json()) as any;
-  let blobId: string | undefined;
-
-  if (json.newlyCreated && json.newlyCreated.blobObject) {
-    blobId = json.newlyCreated.blobObject.blobId;
-  } else if (json.alreadyCertified) {
-    blobId = json.alreadyCertified.blobId;
-  }
-
-  if (!blobId) {
-    console.error('Walrus upload returned unexpected response:', json);
-    throw new Error('Walrus upload failed: blobId not found in response');
-  }
-
-  return { rootHash: blobId };
-}
-
-async function downloadWalrus(blobId: string): Promise<Buffer | null> {
-  const url = `${config.walrusAggregatorUrl}/v1/blobs/${blobId}`;
-  try {
-    const response = await fetch(url);
-    if (!response.ok) {
-      console.error(`Walrus download failed for ${blobId}:`, response.statusText);
-      return null;
-    }
-    const arrayBuffer = await response.arrayBuffer();
-    return Buffer.from(arrayBuffer);
-  } catch (e) {
-    console.error(`Walrus download exception for ${blobId}:`, e);
-    return null;
-  }
-}
-
 
 // ── 0G Storage implementation ──
 

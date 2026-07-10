@@ -3,7 +3,6 @@ import { useChain } from '../../context/ChainContext';
 
 const chainLabels: Record<string, { name: string; short: string; color: string }> = {
   og: { name: '0G Chain', short: '0G', color: 'bg-ok' },
-  sui: { name: 'Sui Chain', short: 'SUI', color: 'bg-blue-500' },
 };
 
 export function ChainToggle() {
@@ -46,7 +45,7 @@ export function ChainToggle() {
             <button
               key={id}
               onClick={() => {
-                setActiveChain(id as 'og' | 'sui');
+                setActiveChain(id as 'og');
                 setOpen(false);
               }}
               className={`flex w-full items-center gap-2 px-3 py-2 text-left transition-colors ${

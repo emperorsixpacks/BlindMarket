@@ -45,9 +45,8 @@ export const OG_CHAIN_CONFIG = {
   blockExplorerUrls: [OG_CHAIN_ID === 16661 ? 'https://chainscan.0g.ai' : 'https://chainscan-newton.0g.ai'],
 } as const;
 
-// ── Multi-chain support ────────────────────────────────────────────────────
-
-export const SUPPORTED_CHAINS = ['og', 'sui'] as const;
+// Only 0G (EVM) chain is supported
+export const SUPPORTED_CHAINS = ['og'] as const;
 export type SupportedChain = typeof SUPPORTED_CHAINS[number];
 
 /**
@@ -70,54 +69,8 @@ export function getActiveChain(): SupportedChain {
   return (import.meta.env.VITE_ACTIVE_CHAIN as SupportedChain | undefined) ?? 'og';
 }
 
-// Sui chain config
-export const SUI_NETWORK_ID =
-  (import.meta.env.VITE_SUI_NETWORK_ID as 'mainnet' | 'testnet' | 'devnet' | 'local' | undefined) ?? 'testnet';
-
-export const SUI_RPC_URL =
-  import.meta.env.VITE_SUI_RPC_URL ||
-  (SUI_NETWORK_ID === 'mainnet'
-    ? 'https://fullnode.mainnet.sui.io:443'
-    : SUI_NETWORK_ID === 'devnet'
-      ? 'https://fullnode.devnet.sui.io:443'
-      : 'https://fullnode.testnet.sui.io:443');
-
-export const SUI_PACKAGE_ID = import.meta.env.VITE_SUI_PACKAGE_ID || '0x0';
-
-export const SUI_EXPLORER_URL =
-  import.meta.env.VITE_SUI_EXPLORER_URL ||
-  (SUI_NETWORK_ID === 'mainnet'
-    ? 'https://suivision.xyz'
-    : `https://${SUI_NETWORK_ID}.suivision.xyz`);
-
-export const SUI_BLIND_ESCROW_OBJECT_ID =
-  import.meta.env.VITE_SUI_BLIND_ESCROW_OBJECT_ID || '0x0';
-
-export const SUI_TASK_REGISTRY_OBJECT_ID =
-  import.meta.env.VITE_SUI_TASK_REGISTRY_OBJECT_ID || '0x0';
-
-export const SUI_BLIND_REPUTATION_OBJECT_ID =
-  import.meta.env.VITE_SUI_BLIND_REPUTATION_OBJECT_ID || '0x0';
-
-export function suiChainName(): string {
-  return SUI_NETWORK_ID === 'mainnet' ? 'Sui Mainnet' : `Sui ${SUI_NETWORK_ID.charAt(0).toUpperCase() + SUI_NETWORK_ID.slice(1)}`;
-}
-
-export const SUI_CHAIN_CONFIG = {
-  chainName: suiChainName(),
-  networkId: SUI_NETWORK_ID,
-  rpcUrl: SUI_RPC_URL,
-  packageId: SUI_PACKAGE_ID,
-  escrowObjectId: SUI_BLIND_ESCROW_OBJECT_ID,
-  taskRegistryObjectId: SUI_TASK_REGISTRY_OBJECT_ID,
-  reputationObjectId: SUI_BLIND_REPUTATION_OBJECT_ID,
-  explorerUrl: SUI_EXPLORER_URL,
-  nativeCurrency: { name: 'SUI', symbol: 'SUI', decimals: 9 },
-} as const;
-
 export const CHAIN_CONFIGS = {
   og: OG_CHAIN_CONFIG,
-  sui: SUI_CHAIN_CONFIG,
 } as const;
 
 export function getChainConfig(chain: SupportedChain) {
@@ -127,4 +80,3 @@ export function getChainConfig(chain: SupportedChain) {
 export function getNativeCurrency(chain: SupportedChain) {
   return getChainConfig(chain).nativeCurrency;
 }
-

@@ -19,8 +19,7 @@ export interface ChainClientOptions {
  * signer. To keep the SDK's Signer abstraction decoupled from ethers at the
  * call sites, we unwrap an EthersSigner's inner ethers.Signer lazily here.
  *
- * Only supports EVM networks. For Sui, use SuiChainAdapter via
- * createChainAdapter().
+ * Only supports EVM networks.
  */
 export class ChainClient {
   readonly escrow: BlindEscrowClient;
@@ -31,7 +30,7 @@ export class ChainClient {
 
   constructor(opts: ChainClientOptions) {
     if (opts.network.chainType !== 'evm') {
-      throw new Error(`ChainClient requires an EVM network, got ${opts.network.chainType}. Use SuiChainAdapter for Sui.`);
+      throw new Error(`ChainClient requires an EVM network, got ${opts.network.chainType}`);
     }
     this.network = opts.network;
     const provider =

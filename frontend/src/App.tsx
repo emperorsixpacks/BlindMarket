@@ -7,7 +7,6 @@ import { ogTestnet } from './config/chains';
 import { WalletProvider } from './context/WalletContext';
 import { AuthProvider } from './context/AuthContext';
 import { ChainProvider } from './context/ChainContext';
-import { SuiWalletProvider } from './context/SuiWalletContext';
 import { ChainSelectorModal } from './components/bb/ChainSelectorModal';
 import { DashboardLayout } from './components/bb/DashboardLayout';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -56,7 +55,6 @@ function RouteFallback() {
 export default function App() {
   return (
     <ChainProvider>
-      <SuiWalletProvider>
       <PrivyProvider
         appId={privyAppId}
         config={{
@@ -135,7 +133,6 @@ export default function App() {
           </WalletProvider>
         </WagmiProvider>
       </PrivyProvider>
-      </SuiWalletProvider>
     </ChainProvider>
   );
 }

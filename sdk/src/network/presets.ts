@@ -5,15 +5,10 @@ import type { Network } from '../chain/domain-types.js';
  * the SDK cannot silently move contracts under a consumer.
  */
 
-/** Alias for backward compatibility. Prefer 'og-testnet' for new code. */
 export type NetworkName =
   | 'testnet'       // deprecated alias → og-testnet
   | 'og-testnet'
-  | 'og-mainnet'
-  | 'sui-testnet'
-  | 'sui-mainnet'
-  | 'sui-devnet'
-  | 'sui-local';
+  | 'og-mainnet';
 
 export const networks = {
   // ── 0G EVM chains ─────────────────────────────────────────────────────
@@ -48,65 +43,6 @@ export const networks = {
     indexer: 'https://indexer-storage-turbo.0g.ai',
     broker: 'https://brother.0g.ai',
     explorer: 'https://chainscan.0g.ai',
-  },
-
-  // ── Sui chains ────────────────────────────────────────────────────────
-  // Package IDs and shared object IDs are placeholders — update after
-  // deploying the Move contracts via `sui client publish`.
-
-  'sui-testnet': {
-    name: 'sui-testnet',
-    chainType: 'sui' as const,
-    networkId: 'testnet' as const,
-    rpc: ['https://fullnode.testnet.sui.io:443'],
-    packageId: '0xe74d57b9f55eba50b9c6f0b3c09e4892a1b00f842461df16eb5bebe02a4a3f35',
-    sharedObjects: {
-      blindEscrow: '0x14c90c14d60b918706e04688f1bb6df617e8134462c56822bf4d546c37a9f6ef',
-      taskRegistry: '0x379864da638d2212aa11b9048dfe7ab48860075b06f8c2470681cd052bdccdf5',
-      blindReputation: '0x1769c6f22a00fcf4a4493c07eb7cf063915e664768a12aae61feea1b9e5e2fb7',
-    },
-    explorer: 'https://testnet.suivision.xyz',
-  },
-
-  'sui-mainnet': {
-    name: 'sui-mainnet',
-    chainType: 'sui' as const,
-    networkId: 'mainnet' as const,
-    rpc: ['https://fullnode.mainnet.sui.io:443'],
-    packageId: '0x0',   // placeholder — replace with deployed package ID
-    sharedObjects: {
-      blindEscrow: '0x0',
-      taskRegistry: '0x0',
-      blindReputation: '0x0',
-    },
-    explorer: 'https://suivision.xyz',
-  },
-
-  'sui-devnet': {
-    name: 'sui-devnet',
-    chainType: 'sui' as const,
-    networkId: 'devnet' as const,
-    rpc: ['https://fullnode.devnet.sui.io:443'],
-    packageId: '0x0',   // placeholder
-    sharedObjects: {
-      blindEscrow: '0x0',
-      taskRegistry: '0x0',
-      blindReputation: '0x0',
-    },
-    explorer: 'https://devnet.suivision.xyz',
-  },
-
-  'sui-local': {
-    name: 'sui-local',
-    chainType: 'sui' as const,
-    networkId: 'local' as const,
-    rpc: ['http://127.0.0.1:9000'],
-    packageId: '0x0',   // placeholder
-    sharedObjects: {
-      blindEscrow: '0x0',
-      taskRegistry: '0x0',
-      blindReputation: '0x0',
-    },
   },
 
   // ── Backward-compat alias ──────────────────────────────────────────────

@@ -9,11 +9,9 @@ import {
   Tag,
   FormField,
 } from '../components/bb';
-import { useChain } from '../context/ChainContext';
 import { useReputation } from '../hooks/useReputation';
 import {
   isMainnet, OG_CHAIN_ID, OG_RPC_URL,
-  SUI_NETWORK_ID, SUI_RPC_URL,
 } from '../config/constants';
 import { authedGet, authedPost, authedDelete } from '../lib/api';
 
@@ -35,19 +33,15 @@ function saveBool(key: string, v: boolean) {
 }
 
 export default function Settings() {
-  const { activeChain } = useChain();
   const { address: evmAddress, isConnected: evmConnected } = useAccount();
-  const isConnected = activeChain === 'sui' ? false : evmConnected;
-  const address = activeChain === 'sui' ? undefined : evmAddress;
+  const isConnected = evmConnected;
+  const address = evmAddress;
   const { data: reputation } = useReputation(address ?? null);
   const { user, linkWallet } = usePrivy();
   const { unlink } = useUnlinkWallet();
-  const chainLabel = activeChain === 'sui' ? 'Sui Testnet' : `0G ${isMainnet ? 'Mainnet' : 'Galileo'}`;
-  const chainIdLabel = activeChain === 'sui' ? SUI_NETWORK_ID : String(OG_CHAIN_ID);
-  const rpcDisplay = activeChain === 'sui'
-    ? SUI_RPC_URL.replace(/^https?:\/\//, '')
-    : OG_RPC_URL.replace(/^https?:\/\//, '');
-
+  const chainLabel = `0G ${isMainnet ? 'Mainnet' : 'Galileo'}`;
+  const chainIdLabel = String(OG_CHAIN_ID);
+  const rpcDisplay = OG_RPC_URL.replace(/^https?:\/\//, '');
 
   const [notifyPayouts, setNotifyPayouts] = useState(() => loadBool(NOTIF_KEYS.payout, true));
   const [notifyAssignments, setNotifyAssignments] = useState(() => loadBool(NOTIF_KEYS.assignment, true));
@@ -217,11 +211,11 @@ export default function Settings() {
 
             <FormField
               label="Active chain"
-              hint={`Currently set to ${activeChain === 'sui' ? 'Sui' : '0G'}. Change via the header dropdown.`}
+              hint={`Currently set to 0G. Change via the header dropdown.`}
             >
               <div className="px-3 py-2.5 bg-surface-2 border border-line text-sm flex items-center gap-2 flex-wrap">
                 <Tag tone="ok">
-                  {activeChain === 'sui' ? 'Sui' : '0G'} · <span className="font-mono">{chainIdLabel}</span>
+                  0G · <span className="font-mono">{chainIdLabel}</span>
                 </Tag>
                 <span className="ml-auto text-xs text-ok">{chainLabel}</span>
               </div>
@@ -289,9 +283,7 @@ export default function Settings() {
                     aria-checked={toggle.value}
                     aria-label={toggle.label}
                     onClick={() => toggle.set(!toggle.value)}
-                    className={`shrink-0 w-10 h-5 border transition-colors flex items-center ${
-                      toggle.value ? 'bg-cream/20 border-cream/40' : 'bg-surface-2 border-line'
-                    }`}
+                    className={`shrink-0 w-10 h-5 border transition-colors flex items-center ${toggle.value ? 'bg-cream/20 border-cream/40' : 'bg-surface-2 border-line'}`}
                   >
                     <div
                       className={`w-3 h-3 transition-all ${toggle.value ? 'bg-cream ml-5' : 'bg-ink-3 ml-1'}`}
@@ -318,8 +310,8 @@ export default function Settings() {
                   color: isConnected ? 'text-ok' : 'text-ink-3',
                 },
                 {
-                  label: activeChain === 'sui' ? 'Network' : 'Chain ID',
-                  value: activeChain === 'sui' ? SUI_NETWORK_ID : String(OG_CHAIN_ID),
+                  label: 'Chain ID',
+                  value: String(OG_CHAIN_ID),
                   mono: true,
                   color: 'text-ok',
                 },

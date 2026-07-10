@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { useWalletClient } from 'wagmi';
 import { getIdentityToken, getAccessToken } from '@privy-io/react-auth';
 import { BrowserProvider, parseUnits, formatUnits } from 'ethers';
-import { useSignAndExecuteTransaction } from '@mysten/dapp-kit';
 import {
   Breadcrumb,
   PageHeader,
@@ -19,7 +18,6 @@ import {
 import { aesEncrypt, eciesEncrypt, generateAesKey, sha256, toBase64, toBytes } from '../lib/crypto';
 import { stashAesKey } from '../lib/keyStash';
 import { signAndSendTx } from '../lib/txSigner';
-import { buildSuiCreateTask } from '../lib/suiTxBuilder';
 import { authedGet, authedPost } from '../lib/api';
 import { trackEvent } from '../hooks/useAnalytics';
 import { MARKETPLACE_TOKEN_ADDRESS, getNativeCurrency } from '../config/constants';
@@ -61,11 +59,9 @@ import { AGENT_CAPABILITIES } from '../config/capabilities';
 
 export default function PostTask() {
   const { activeChain } = useChain();
-  const isSui = activeChain === 'sui';
   const native = getNativeCurrency(activeChain);
   const address = useChainAddress();
   const { data: walletClient } = useWalletClient();
-  const suiSignAndExecuteTx = useSignAndExecuteTransaction();
   const navigate = useNavigate();
   const { isAuthenticated, login: loginPrivy } = useAuth();
 
@@ -129,7 +125,7 @@ export default function PostTask() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!address || (!isSui && !walletClient)) return;
+    if (!address || !walletClient) return;
     if (submittingRef.current) return; // ignore a double-fire mid-post
     submittingRef.current = true;
 
@@ -269,12 +265,6 @@ export default function PostTask() {
         console.warn('[PostTask] key-custody seal skipped:', (e as Error).message);
       }
 
-      let evmSigner: Awaited<ReturnType<BrowserProvider['getSigner']>> | undefined;
-      if (!isSui) {
-        const provider = new BrowserProvider(walletClient!.transport);
-        evmSigner = await provider.getSigner();
-      }
-
       // 5. Compute duration (seconds from now) from the chosen deadline.
       //    Re-evaluate at submit time so the value is accurate even if the
       //    form sat open for a while between picking the deadline and clicking
@@ -300,46 +290,29 @@ export default function PostTask() {
         : { min_length: 10 };
       const verifierAddress = isAgentVerify ? form.verifierAddress.toLowerCase() : undefined;
 
-      // 6. Get unsigned tx from backend (with the rootHash + wrappedKeys bundle) - skipped for Sui since the tx is built on the client.
-      let taskJson: any = null;
-      if (!isSui) {
-        taskJson = await authedPost<any>('/api/v1/tasks', {
-          taskHash,
-          token: TOKEN,
-          amount: amountBase.toString(),
-          category: 'general',
-          locationZone: form.locationZone,
-          duration: String(durationSecs),
-          targetExecutorType: 'agent' as const,
-          verificationMode,
-          verificationCriteria,
-          verifierAddress,
-          requiredCapabilities: requiredCaps,
-          rootHash,
-          wrappedKeys,
-        }, token);
-      }
+      // 6. Get unsigned tx from backend (with the rootHash + wrappedKeys bundle)
+      const taskJson = await authedPost<any>('/api/v1/tasks', {
+        taskHash,
+        token: TOKEN,
+        amount: amountBase.toString(),
+        category: 'general',
+        locationZone: form.locationZone,
+        duration: String(durationSecs),
+        targetExecutorType: 'agent' as const,
+        verificationMode,
+        verificationCriteria,
+        verifierAddress,
+        requiredCapabilities: requiredCaps,
+        rootHash,
+        wrappedKeys,
+      }, token);
 
-      // 7. Sign and send — EVM via ethers/MetaMask, Sui via wallet
+      // 7. Sign and send — EVM via ethers/MetaMask
       setStatus('signing');
-      let txHash: string;
-      if (isSui) {
-        const suiTx = buildSuiCreateTask(
-          taskHash,
-          amountBase.toString(),
-          'general',
-          form.locationZone,
-          deadlineMs,
-        );
-        const result = await suiSignAndExecuteTx.mutateAsync({ transaction: suiTx });
-        txHash = result.digest;
-        console.log(`[PostTask] Sui task TX submitted: digest=${txHash}`);
-      } else {
-        console.log(`[PostTask] Signing registration TX with value ${amountBase}...`);
-        const sent = await signAndSendTx(evmSigner!, taskJson.unsignedTx, BigInt(amountBase));
-        txHash = sent.hash;
-        console.log(`[PostTask] Task TX submitted: hash=${txHash} block=${sent.receipt?.blockNumber ?? 'pending'}`);
-      }
+      console.log(`[PostTask] Signing registration TX with value ${amountBase}...`);
+      const sent = await signAndSendTx(await (new BrowserProvider(walletClient!.transport)).getSigner(), taskJson.unsignedTx, BigInt(amountBase));
+      const txHash = sent.hash;
+      console.log(`[PostTask] Task TX submitted: hash=${txHash} block=${sent.receipt?.blockNumber ?? 'pending'}`);
 
       // 8. Register A2A meta on the backend, gated on the receipt. Previously
       //    meta was written eagerly in step 6 — but if the createTask tx
@@ -362,7 +335,7 @@ export default function PostTask() {
         keyCustodyBlob,
       }, token);
 
-      const finalTaskId = isSui ? indexResp.onChainTaskId : (taskJson?.taskId ?? null);
+      const finalTaskId = indexResp.onChainTaskId ?? taskJson?.taskId ?? null;
       setTaskId(finalTaskId);
       setInitialWrapCount(Object.keys(wrappedKeys).length);
       setStatus('done');

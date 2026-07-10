@@ -15,8 +15,6 @@ import * as agentStore from '../services/agentStore.js';
 import { redis } from '../services/redis.js';
 import { ethers } from 'ethers';
 import { provider } from '../services/chain.js';
-import { verifyPersonalMessageSignature } from '@mysten/sui/verify';
-import { SuiJsonRpcClient, JsonRpcHTTPTransport } from '@mysten/sui/jsonRpc';
 import { config } from '../config.js';
 
 /**
@@ -149,10 +147,10 @@ const DeploySchema = z.object({
   ownerPublicKey: z.string()
     .regex(/^[0-9a-fA-F]{64,512}$/, 'Must be a hex-encoded public key (64-512 hex chars)')
     .transform(k => {
-      // Normalize: strip leading 00 (SUI Ed25519 flag byte) or 01 (SUI secp256k1 flag byte)
+      // Normalize: strip leading 00 (Ed25519 flag byte) or 01 (secp256k1 flag byte)
       // 65 bytes (130 hex, starts with 04) = secp256k1 uncompressed → keep as-is
-      // 33 bytes (66 hex, starts with 00) = SUI Ed25519 with flag → strip 00
-      // 34 bytes (68 hex, starts with 01) = SUI Secp256k1 with flag → strip 01
+      // 33 bytes (66 hex, starts with 00) = Ed25519 with flag → strip 00
+      // 34 bytes (68 hex, starts with 01) = secp256k1 with flag → strip 01
       // 32 bytes (64 hex) = raw Ed25519 → keep as-is
       if (k.length === 66 && k.startsWith('00')) return k.slice(2);
       if (k.length === 68 && k.startsWith('01')) return k.slice(2);
@@ -170,7 +168,6 @@ const DeploySchema = z.object({
   capabilities: z.array(z.enum(AGENT_CAPABILITIES as unknown as [string, ...string[]])).min(1, 'Agent must declare at least one capability'),
   tools: z.array(ToolSchema).default([]),
   storageRef: z.string().optional(),
-  chainType: z.enum(['evm', 'sui']).optional(),
 });
 
 function strip(agent: Awaited<ReturnType<typeof getAgent>>) {
@@ -462,36 +459,11 @@ agentsRouter.post('/:id/link-owner', requireAuth, async (req: AuthRequest, res) 
   }
   let recovered: string;
   try {
-    if (agent.chainType === 'sui') {
-      const messageStr = buildLinkMessage(authed, agent.id, nonce);
-      const messageBytes = Buffer.from(messageStr, 'utf-8');
-
-      const suiClient = new SuiJsonRpcClient({
-        transport: new JsonRpcHTTPTransport({ url: config.suiRpcUrl }),
-        network: 'testnet',
-      });
-      const publicKey = await verifyPersonalMessageSignature(messageBytes, signature, { client: suiClient });
-      recovered = publicKey.toSuiAddress().toLowerCase();
-      console.log('[agents] SUI verify OK, recovered:', recovered);
-    } else {
-      recovered = ethers.verifyMessage(buildLinkMessage(authed, agent.id, nonce), signature).toLowerCase();
-    }
+    recovered = ethers.verifyMessage(buildLinkMessage(authed, agent.id, nonce), signature).toLowerCase();
   } catch (err) {
-    if (agent?.chainType === 'sui') {
-      // SUI verification failed — try EVM verification as fallback
-      // (the user might have signed with their EVM wallet)
-      try {
-        recovered = ethers.verifyMessage(buildLinkMessage(authed, agent.id, nonce), signature).toLowerCase();
-      } catch {
-        console.error('[agents] link-owner SUI verify error:', err);
-        res.status(400).json({ success: false, error: { code: 'BAD_SIGNATURE', message: 'Signature could not be verified' } });
-        return;
-      }
-    } else {
-      console.error('[agents] link-owner EVM verify error:', err);
-      res.status(400).json({ success: false, error: { code: 'BAD_SIGNATURE', message: 'Signature could not be verified' } });
-      return;
-    }
+    console.error('[agents] link-owner EVM verify error:', err);
+    res.status(400).json({ success: false, error: { code: 'BAD_SIGNATURE', message: 'Signature could not be verified' } });
+    return;
   }
   if (recovered !== agent.ownerAddress.toLowerCase()) {
     const tr = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;

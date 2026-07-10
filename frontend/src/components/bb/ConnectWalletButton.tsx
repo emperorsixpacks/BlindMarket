@@ -1,11 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
 import { usePrivy } from '@privy-io/react-auth';
 import { useAccount, useChainId, useSwitchChain } from 'wagmi';
-import { ConnectModal } from '@mysten/dapp-kit';
 import { ogTestnet } from '../../config/chains';
-import { isMainnet, getNativeCurrency } from '../../config/constants';
-import { useChain } from '../../context/ChainContext';
-import { useSuiWallet } from '../../context/SuiWalletContext';
+import { isMainnet } from '../../config/constants';
 
 function shortenAddress(addr: string) {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
@@ -22,6 +19,7 @@ function EvmWalletButton({ variant }: Props) {
   const { switchChain } = useSwitchChain();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const currentChain = ogTestnet;
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -53,9 +51,9 @@ function EvmWalletButton({ variant }: Props) {
     );
   }
 
-  if (chainId && chainId !== ogTestnet.id) {
+  if (chainId && chainId !== currentChain.id) {
     return (
-      <button onClick={() => switchChain({ chainId: ogTestnet.id })} className="px-3 py-1.5 border border-err text-[11px] font-mono text-err hover:bg-surface-2 transition-colors">
+      <button onClick={() => switchChain({ chainId: currentChain.id })} className="px-3 py-1.5 border border-err text-[11px] font-mono text-err hover:bg-surface-2 transition-colors">
         wrong_network
       </button>
     );
@@ -89,100 +87,6 @@ function EvmWalletButton({ variant }: Props) {
   );
 }
 
-function SuiWalletButton({ variant }: Props) {
-  const { address, isConnected, connectModalOpen, setConnectModalOpen, disconnect } = useSuiWallet();
-  const { ready, authenticated: privyAuth, login: privyLogin, logout: privyLogout } = usePrivy();
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement | null>(null);
-  const suiCurrency = getNativeCurrency('sui');
-
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onClick = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', onClick);
-    return () => document.removeEventListener('mousedown', onClick);
-  }, [menuOpen]);
-
-  if (!isConnected) {
-    const trigger = variant === 'block' ? (
-      <button className="w-full px-4 py-2 border border-line text-sm font-mono text-ink hover:bg-surface-2 transition-colors">
-        connect_sui_wallet
-      </button>
-    ) : (
-      <button className="px-3 py-1.5 border border-line text-[11px] font-mono text-ink hover:bg-surface-2 transition-colors">
-        <span className="opacity-40">[</span> connect_sui <span className="opacity-40">]</span>
-      </button>
-    );
-    return (
-      <ConnectModal
-        trigger={trigger}
-        open={connectModalOpen}
-        onOpenChange={setConnectModalOpen}
-      />
-    );
-  }
-
-  if (ready && !privyAuth) {
-    if (variant === 'block') {
-      return (
-        <button onClick={privyLogin} className="w-full px-4 py-2 border border-line text-sm font-mono text-ink hover:bg-surface-2 transition-colors">
-          sign_in_backend
-        </button>
-      );
-    }
-    return (
-      <div className="flex items-center gap-2">
-        <div className="flex items-center border border-line text-[11px] font-mono opacity-60">
-          <span className="px-3 py-1.5 text-ink-2 items-center gap-1.5 flex">
-            <span className="w-1.5 h-1.5 bg-blue-500 inline-block" />
-            {address ? shortenAddress(address) : 'Sui'}
-          </span>
-        </div>
-        <button onClick={privyLogin} className="px-3 py-1.5 border border-cream text-[11px] font-mono text-cream hover:bg-surface-2 transition-colors">
-          <span className="opacity-40">[</span> sign_in_backend <span className="opacity-40">]</span>
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="relative" ref={menuRef}>
-      <div className="flex items-center border border-line text-[11px] font-mono">
-        <span className="hidden sm:flex px-3 py-1.5 text-ink-2 items-center gap-1.5">
-          <span className="w-1.5 h-1.5 bg-blue-500 inline-block" />
-          Sui {suiCurrency.symbol}
-        </span>
-        <button onClick={() => setMenuOpen(o => !o)} className="px-3 py-1.5 sm:border-l border-line text-ink hover:bg-surface-2 transition-colors flex items-center gap-1.5">
-          <span className="sm:hidden w-1.5 h-1.5 bg-blue-500 inline-block" />
-          {address ? shortenAddress(address) : 'connected'}
-        </button>
-      </div>
-      {menuOpen && (
-        <div className="absolute right-0 top-full mt-1 min-w-[180px] border border-line bg-surface text-[11px] font-mono z-50">
-          {address && (
-            <button onClick={() => { navigator.clipboard.writeText(address); setMenuOpen(false); }} className="block w-full text-left px-3 py-2 text-ink-2 hover:bg-surface-2 hover:text-ink transition-colors">
-              copy_address
-            </button>
-          )}
-          <button onClick={() => { disconnect(); privyLogout(); setMenuOpen(false); }} className="block w-full text-left px-3 py-2 border-t border-line text-err hover:bg-surface-2 transition-colors">
-            disconnect
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
 export function ConnectWalletButton({ variant = 'pill' }: Props) {
-  const { activeChain } = useChain();
-
-  if (activeChain === 'sui') {
-    return <SuiWalletButton variant={variant} />;
-  }
-
   return <EvmWalletButton variant={variant} />;
 }

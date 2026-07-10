@@ -10,10 +10,10 @@ import type {
 /**
  * Chain-agnostic interface for BlindMarket on-chain operations.
  *
- * Every supported blockchain (0G/EVM, Sui, etc.) provides an adapter that
- * implements this interface, translating domain operations into chain-native
- * contract calls. Consumers (backend, agents, CLI) work against this interface
- * and never need to know which chain they're talking to.
+ * Every supported blockchain provides an adapter that implements this interface,
+ * translating domain operations into chain-native contract calls. Consumers
+ * (backend, agents, CLI) work against this interface and never need to know
+ * which chain they're talking to.
  */
 export interface IBlindMarketChain {
   // ── Chain identity ──────────────────────────────────────────────────────
@@ -21,15 +21,14 @@ export interface IBlindMarketChain {
   /** The resolved network config this adapter is connected to. */
   readonly network: Network;
 
-  /** The address (or hex-encoded public key for Sui) of the active signer. */
+  /** The address of the active signer. */
   getAddress(): Promise<string>;
 
   // ── Task lifecycle (BlindEscrow equivalent) ─────────────────────────────
 
   /**
-   * Create a new task with escrowed funds. On EVM chains this sends a
-   * transaction to BlindEscrow.createTask; on Sui it calls the equivalent
-   * Move entry function. Returns the assigned task ID and receipt.
+   * Create a new task with escrowed funds.
+   * Returns the assigned task ID and receipt.
    */
   createTask(params: CreateTaskParams): Promise<{ taskId: bigint; receipt: DomainTxReceipt }>;
 
@@ -103,7 +102,7 @@ export interface IBlindMarketChain {
   /** Read the encrypted metadata URI for an agent token. */
   getEncryptedURI(tokenId: bigint): Promise<string>;
 
-  // ── Queries ─────────────────────────────────────────────────────────────
+  // ── Queries ──────────────────────────────────────────────────────────────
 
   /** Get native balance for an address. */
   getBalance(address: string): Promise<bigint>;
