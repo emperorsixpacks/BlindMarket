@@ -8,8 +8,10 @@
     "BlindReputation": "0xFEAFe4ab073FfB47aBb5AD458622b3F9B10C81dD",
     "TaskRegistry": "0xF6AaCce326fD7f25860f383f18A771E5d089ea8c",
     "BlindEscrow": "0x037529B296a89E6Dd1abAF84D413cb2dD70C5be5",
-    "INFT": "0xff29617270b3B6f565e1eC206C0A69F8966aBd2b",
-    "ValidatorPool": "0xD4Fe5e3Fa3869fEf1CA49E13e1908D9B0630cA84",
+    "INFT": "0xc4498099413f8a7D709175eC252aFa7543c6d39a",
+    "ValidatorPool": "0x1D5867cE8072d8ccD3f2C78717D48036173aa9ab",
     "DummyStake": "0xE738270b0F39cA587081D470A99929806653de5E"
-  }
+  },
+  "validatorPoolRedeployedAt": "2026-07-13T19:20:52.707Z",
+  "inftRedeployedAt": "2026-07-13T19:21:20.509Z"
 }
