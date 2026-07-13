@@ -22,6 +22,14 @@ contract INFT is ERC721, Ownable, ReentrancyGuard {
     mapping(uint256 => bytes32) private _metadataHashes;
     mapping(uint256 => mapping(address => bytes)) private _authorizations;
 
+    // Usage-authorization invalidation. _tokenAuthNonce is bumped on every
+    // transfer, which invalidates ALL prior authorizations for that token in O(1)
+    // (no unbounded loop). An authorization records the nonce it was granted
+    // under and only counts while that matches the token's current nonce — so a
+    // previous owner's grantees cannot retain access after the token is sold.
+    mapping(uint256 => uint256) private _tokenAuthNonce;
+    mapping(uint256 => mapping(address => uint256)) private _authNonceAt;
+
     address public oracle;
     uint256 private _nextTokenId = 1;
 
@@ -93,6 +101,9 @@ contract INFT is ERC721, Ownable, ReentrancyGuard {
         _metadataHashes[tokenId] = newHash;
         _encryptedURIs[tokenId] = newURI;
 
+        // Authorization invalidation is handled centrally in _update() below, which
+        // fires for THIS transfer and for the inherited ERC721 transferFrom /
+        // safeTransferFrom paths too — so no stale grant can survive any transfer.
         _transfer(from, to, tokenId);
         emit MetadataUpdated(tokenId, newHash, newURI);
     }
@@ -133,6 +144,7 @@ contract INFT is ERC721, Ownable, ReentrancyGuard {
         require(ownerOf(tokenId) == msg.sender, "Not owner");
         require(executor != address(0), "Invalid executor");
         _authorizations[tokenId][executor] = permissions;
+        _authNonceAt[tokenId][executor] = _tokenAuthNonce[tokenId];
         emit UsageAuthorized(tokenId, executor);
     }
 
@@ -140,6 +152,27 @@ contract INFT is ERC721, Ownable, ReentrancyGuard {
         require(ownerOf(tokenId) == msg.sender, "Not owner");
         delete _authorizations[tokenId][executor];
         emit UsageRevoked(tokenId, executor);
+    }
+
+    // ── Transfer hook (invalidate usage authorizations on EVERY transfer) ──────
+
+    /**
+     * @dev OZ v5 routes all mints/transfers/burns through _update. Bumping the
+     *      token's auth nonce here invalidates every prior usage authorization on
+     *      any real ownership change — including the inherited public
+     *      transferFrom / safeTransferFrom, which would otherwise bypass the
+     *      per-function bump. Skipped on mint (previous owner == address(0)).
+     */
+    function _update(address to, uint256 tokenId, address auth)
+        internal
+        override
+        returns (address)
+    {
+        address from = super._update(to, tokenId, auth);
+        if (from != address(0)) {
+            _tokenAuthNonce[tokenId]++;
+        }
+        return from;
     }
 
     // ── Views ─────────────────────────────────────────────────────────────────
@@ -155,11 +188,13 @@ contract INFT is ERC721, Ownable, ReentrancyGuard {
     }
 
     function getAuthorization(uint256 tokenId, address executor) external view returns (bytes memory) {
+        if (_authNonceAt[tokenId][executor] != _tokenAuthNonce[tokenId]) return "";
         return _authorizations[tokenId][executor];
     }
 
     function isAuthorized(uint256 tokenId, address executor) external view returns (bool) {
-        return _authorizations[tokenId][executor].length > 0;
+        return _authorizations[tokenId][executor].length > 0
+            && _authNonceAt[tokenId][executor] == _tokenAuthNonce[tokenId];
     }
 
     // ── Admin ─────────────────────────────────────────────────────────────────
