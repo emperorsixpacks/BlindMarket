@@ -41,7 +41,7 @@ export const networks = {
       usdc: '0x0000000000000000000000000000000000000000',
     },
     indexer: 'https://indexer-storage-turbo.0g.ai',
-    broker: 'https://brother.0g.ai',
+    broker: 'https://broker.0g.ai',
     explorer: 'https://chainscan.0g.ai',
   },
 
