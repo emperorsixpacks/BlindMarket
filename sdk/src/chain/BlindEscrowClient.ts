@@ -3,7 +3,7 @@ import type { Address, Hex, TaskId, TaskStatus, TxReceiptLike } from '../types.j
 import { BlindEscrowAbi } from './abi/index.js';
 import { wrapChainError } from './errors.js';
 
-const STATUS_BY_INDEX: TaskStatus[] = ['funded', 'assigned', 'submitted', 'verified', 'completed', 'cancelled'];
+const STATUS_BY_INDEX: TaskStatus[] = ['funded', 'assigned', 'submitted', 'verified', 'completed', 'cancelled', 'disputed'];
 
 export interface CreateTaskArgs {
   taskHash: Hex;
@@ -23,6 +23,8 @@ export interface OnChainTask {
   taskHash: Hex;
   evidenceHash: Hex;
   status: TaskStatus;
+  category: string;
+  locationZone: string;
   createdAt: Date;
   deadline: Date;
 }
@@ -168,10 +170,15 @@ function toReceipt(rec: ethers.ContractTransactionReceipt | null): TxReceiptLike
 }
 
 function decodeTask(taskId: TaskId, raw: ethers.Result): OnChainTask {
-  // Tuple order from BlindEscrow.getTask(): (agent, worker, token, amount, taskHash,
-  // evidenceHash, status, createdAt, deadline) — verify against contracts/BlindEscrow.sol.
+  // Live Task struct (12 fields) from BlindEscrow.getTask(): agent, worker,
+  // token, amount, taskHash, evidenceHash, status, category, locationZone,
+  // createdAt, deadline, submissionAttempts. The old decode read createdAt from
+  // arr[7] (actually category) and deadline from arr[8] (actually locationZone),
+  // yielding Invalid Date and discarding category/locationZone.
   const arr = raw as unknown as unknown[];
   const statusIndex = Number(arr[6]);
+  const status = STATUS_BY_INDEX[statusIndex];
+  if (!status) throw new Error(`BlindEscrow.getTask returned unknown status index ${statusIndex}`);
   return {
     taskId,
     agent: arr[0] as Address,
@@ -180,8 +187,10 @@ function decodeTask(taskId: TaskId, raw: ethers.Result): OnChainTask {
     amount: BigInt(arr[3] as bigint | number),
     taskHash: arr[4] as Hex,
     evidenceHash: arr[5] as Hex,
-    status: STATUS_BY_INDEX[statusIndex] ?? 'funded',
-    createdAt: new Date(Number(arr[7] as bigint | number) * 1000),
-    deadline: new Date(Number(arr[8] as bigint | number) * 1000),
+    status,
+    category: arr[7] as string,
+    locationZone: arr[8] as string,
+    createdAt: new Date(Number(arr[9] as bigint | number) * 1000),
+    deadline: new Date(Number(arr[10] as bigint | number) * 1000),
   };
 }

@@ -22,7 +22,8 @@ export type TaskStatus =
   | 'submitted'
   | 'verified'
   | 'completed'
-  | 'cancelled';
+  | 'cancelled'
+  | 'disputed';
 
 export interface TaskMetadata {
   category: string;

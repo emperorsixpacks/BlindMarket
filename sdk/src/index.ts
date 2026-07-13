@@ -382,7 +382,7 @@ export class BlindMarket {
     reasoning: string;
     teeVerified?: boolean;
   }> {
-    return this.req('POST', '/api/v1/verification/trigger', {
+    return this.req('POST', '/api/v1/verification/verify', {
       taskId: params.taskId,
       taskCategory: params.taskCategory,
       taskRequirements: params.taskRequirements,

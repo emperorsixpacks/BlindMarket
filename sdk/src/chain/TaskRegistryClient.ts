@@ -5,11 +5,12 @@ import { wrapChainError } from './errors.js';
 
 export interface OpenTaskMeta {
   taskId: TaskId;
-  token: Address;
+  agent: Address;
   category: string;
   locationZone: string;
   reward: bigint;
   createdAt: Date;
+  isOpen: boolean;
 }
 
 export class TaskRegistryClient {
@@ -23,14 +24,19 @@ export class TaskRegistryClient {
 
   async getTaskMeta(taskId: TaskId): Promise<OpenTaskMeta> {
     try {
+      // Live TaskMeta struct order: taskId, agent, category, locationZone,
+      // reward, createdAt, isOpen (7 fields). The old decode was off by one
+      // field from the start (token/agent/category/locationZone), so BigInt() on
+      // the locationZone string threw on every real task.
       const raw = (await this.contract.getTaskMeta!(taskId)) as unknown as unknown[];
       return {
         taskId,
-        token: raw[0] as Address,
-        category: raw[1] as string,
-        locationZone: raw[2] as string,
-        reward: BigInt(raw[3] as bigint | number),
-        createdAt: new Date(Number(raw[4] as bigint | number) * 1000),
+        agent: raw[1] as Address,
+        category: raw[2] as string,
+        locationZone: raw[3] as string,
+        reward: BigInt(raw[4] as bigint | number),
+        createdAt: new Date(Number(raw[5] as bigint | number) * 1000),
+        isOpen: Boolean(raw[6]),
       };
     } catch (err) {
       throw wrapChainError(err, 'getTaskMeta');
@@ -39,8 +45,11 @@ export class TaskRegistryClient {
 
   async getOpenTasks(offset: bigint, limit: bigint): Promise<TaskId[]> {
     try {
-      const ids = (await this.contract.getOpenTasks!(offset, limit)) as unknown as unknown[];
-      return ids.map((x) => BigInt(x as bigint | number));
+      // getOpenTasks returns TaskMeta[] structs, NOT raw ids — extract .taskId
+      // (field 0) from each. BigInt()-ing the whole struct tuple threw on any
+      // non-empty page.
+      const metas = (await this.contract.getOpenTasks!(offset, limit)) as unknown as any[];
+      return metas.map((m) => BigInt((m?.taskId ?? m?.[0]) as bigint | number));
     } catch (err) {
       throw wrapChainError(err, 'getOpenTasks');
     }

@@ -5,8 +5,11 @@ import { wrapChainError } from './errors.js';
 
 export interface ReputationSnapshot {
   tasksCompleted: bigint;
+  /** Raw on-chain value. NOTE: despite the name, the contract returns the
+   *  average rating already scaled ×100 (450 = 4.50), NOT a cumulative sum. */
   totalScore: bigint;
   disputes: bigint;
+  /** 0–5 average rating. */
   avgScore: number;
 }
 
@@ -23,9 +26,11 @@ export class BlindReputationClient {
     try {
       const raw = (await this.contract.getReputation!(worker)) as unknown as unknown[];
       const tasksCompleted = BigInt(raw[0] as bigint | number);
+      // raw[1] is already avgScore × 100 (contract getReputation returns the
+      // average scaled ×100, "450 = 4.50") — divide by 100 only, NOT by tasks.
       const totalScore = BigInt(raw[1] as bigint | number);
       const disputes = BigInt(raw[2] as bigint | number);
-      const avgScore = tasksCompleted === 0n ? 0 : Number(totalScore) / Number(tasksCompleted);
+      const avgScore = Number(totalScore) / 100;
       return { tasksCompleted, totalScore, disputes, avgScore };
     } catch (err) {
       throw wrapChainError(err, 'getReputation');
