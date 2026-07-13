@@ -39,18 +39,23 @@ export function lockStake(worker: string, taskId: string, taskReward: number): S
 export function releaseStake(taskId: string): Stake | null {
   const db = getDb();
   const now = new Date().toISOString();
-  db.prepare(
+  // Only transition a currently-locked stake. Return null when nothing changed
+  // (already returned/slashed, or no stake) so callers 404 instead of re-crediting
+  // a duplicate stake_return income entry on every repeat call.
+  const result = db.prepare(
     "UPDATE stakes SET status = 'returned', updated_at = ? WHERE task_id = ? AND status = 'locked'",
   ).run(now, taskId);
+  if (result.changes === 0) return null;
   return db.prepare('SELECT * FROM stakes WHERE task_id = ?').get(taskId) as Stake | null;
 }
 
 export function slashStake(taskId: string): Stake | null {
   const db = getDb();
   const now = new Date().toISOString();
-  db.prepare(
+  const result = db.prepare(
     "UPDATE stakes SET status = 'slashed', updated_at = ? WHERE task_id = ? AND status = 'locked'",
   ).run(now, taskId);
+  if (result.changes === 0) return null;
   return db.prepare('SELECT * FROM stakes WHERE task_id = ?').get(taskId) as Stake | null;
 }
 

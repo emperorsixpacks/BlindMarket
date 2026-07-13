@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requireFounder } from '../middleware/auth.js';
 import type { AuthRequest } from '../types.js';
 import * as stakingService from '../services/stakingService.js';
 import * as accountingService from '../services/accountingService.js';
@@ -44,7 +44,9 @@ stakingRouter.post('/stake', requireAuth, async (req: AuthRequest, res, next) =>
 });
 
 // POST /api/v1/staking/release
-stakingRouter.post('/release', requireAuth, async (req: AuthRequest, res, next) => {
+// Adjudication action (returns a worker's stake) — founder/admin only. A worker
+// must not be able to release or slash stakes at will.
+stakingRouter.post('/release', requireAuth, requireFounder, async (req: AuthRequest, res, next) => {
   try {
     const { taskId } = taskIdSchema.parse(req.body);
     const stake = stakingService.releaseStake(taskId);
@@ -76,7 +78,8 @@ stakingRouter.post('/release', requireAuth, async (req: AuthRequest, res, next) 
 });
 
 // POST /api/v1/staking/slash
-stakingRouter.post('/slash', requireAuth, async (req: AuthRequest, res, next) => {
+// Adjudication action (slashes a worker's stake) — founder/admin only.
+stakingRouter.post('/slash', requireAuth, requireFounder, async (req: AuthRequest, res, next) => {
   try {
     const { taskId } = taskIdSchema.parse(req.body);
     const stake = stakingService.slashStake(taskId);
