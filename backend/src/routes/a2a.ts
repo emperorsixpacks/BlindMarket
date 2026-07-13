@@ -602,6 +602,10 @@ a2aRouter.post('/tasks/:id/accept', requireAuth, async (req: AuthRequest, res, n
     };
     res.json(body);
 
+    // Bids are only needed until a task is assigned — drop the index now that it
+    // is (best-effort; the addBid TTL is the backstop if this fails).
+    bidsStore.clearBids(taskId).catch(() => {});
+
     // Fire webhook for task assignment (non-blocking)
     try {
       const { fireWebhooks } = await import('../services/webhookStore.js');

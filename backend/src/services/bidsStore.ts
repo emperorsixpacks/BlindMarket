@@ -12,8 +12,16 @@ import type { AgentCapability } from '../types.js';
 // in one HGETALL and we can paginate later if it ever matters.
 
 const KEY = {
-  bids: (taskId: string) => `a2a:bids:${taskId}`,
+  // Lowercase the taskId like every other a2a:* key (a2aStore does the same) —
+  // otherwise a bid written under one case is invisible to a lookup under the
+  // canonical lowercase, stranding the bidder on NEEDS_WRAP.
+  bids: (taskId: string) => `a2a:bids:${taskId.toLowerCase()}`,
 };
+
+// Backstop TTL so bid hashes for tasks that never reach a clearBids() lifecycle
+// point don't accumulate forever. Comfortably exceeds MAX_DEADLINE (90d) so an
+// active task's bids never expire out from under it.
+const BIDS_TTL_SECONDS = 100 * 24 * 60 * 60;
 
 export interface BidRecord {
   address: string;
@@ -29,11 +37,13 @@ export interface BidRecord {
  * single HGETALL without a second lookup per bidder.
  */
 export async function addBid(taskId: string, bid: BidRecord): Promise<void> {
+  const key = KEY.bids(taskId);
   await redis.hset(
-    KEY.bids(taskId),
+    key,
     bid.address.toLowerCase(),
     JSON.stringify({ ...bid, address: bid.address.toLowerCase() }),
   );
+  await redis.expire(key, BIDS_TTL_SECONDS);
 }
 
 /** Read all bids for a task. Returns an empty array if no one has bid yet. */
