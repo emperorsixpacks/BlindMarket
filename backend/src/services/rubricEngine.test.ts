@@ -7,7 +7,32 @@ import {
   NoForbiddenPhrases,
   WeightedRubric,
   AllRubric,
+  isSafeRegexSource,
 } from './rubricEngine.js';
+
+describe('isSafeRegexSource (ReDoS guard)', () => {
+  it('rejects nested-quantifier (catastrophic) patterns', () => {
+    expect(isSafeRegexSource('^(a+)+$')).toBe(false);
+    expect(isSafeRegexSource('(a*)*')).toBe(false);
+    expect(isSafeRegexSource('((a+))+')).toBe(false);   // nested groups
+    expect(isSafeRegexSource('(a+|b)+')).toBe(false);    // quantifier inside alternation group
+    expect(isSafeRegexSource('(.*)+')).toBe(false);
+    expect(isSafeRegexSource('(a{2,})+')).toBe(false);   // {n,} counts as a quantifier
+  });
+
+  it('accepts ordinary, linear patterns', () => {
+    expect(isSafeRegexSource('^\\d{4}-\\d{2}-\\d{2}$')).toBe(true);
+    expect(isSafeRegexSource('(abc)+')).toBe(true);       // quantified group, no inner quantifier
+    expect(isSafeRegexSource('(a|b)+')).toBe(true);        // alternation, no inner quantifier
+    expect(isSafeRegexSource('foo.*bar')).toBe(true);
+    expect(isSafeRegexSource('[a-z]+@[a-z]+\\.[a-z]+')).toBe(true);
+    expect(isSafeRegexSource('a+')).toBe(true);
+  });
+
+  it('rejects over-long patterns', () => {
+    expect(isSafeRegexSource('a'.repeat(201))).toBe(false);
+  });
+});
 
 describe('ContainsKeywords', () => {
   it('scores 1.0 when all keywords present', () => {

@@ -76,7 +76,7 @@ const indexTaskSchema = z.object({
       max_length: z.number().int().positive().optional(),
       expected_answer: z.string().optional(),
       forbidden_phrases: z.array(z.string()).optional(),
-      regex_pattern: z.string().optional(),
+      regex_pattern: z.string().max(200).optional(),
       expected_schema: z
         .object({
           type: z.string().optional(),

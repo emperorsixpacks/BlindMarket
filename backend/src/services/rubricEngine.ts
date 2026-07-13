@@ -83,9 +83,58 @@ export function JsonSchema(schema: {
   };
 }
 
+/**
+ * Reject regex sources that risk catastrophic backtracking (ReDoS). Blocks
+ * "star height >= 2" — a quantifier (*, +, {n,}) applied to a group that itself
+ * contains a quantifier: (a+)+, ((a+))+, (a+|b)+ — the classic exponential
+ * blowup, incl. the ^(a+)$ / ^(a+)+$ family. Also caps overall length.
+ *
+ * This is a heuristic, not an RE2-grade guarantee — it does not model
+ * alternation-overlap (e.g. (a|a)+), so MatchesRegex ALSO bounds the input it
+ * tests. For full coverage, swap in the `re2` engine.
+ */
+export function isSafeRegexSource(src: string): boolean {
+  if (src.length > 200) return false;
+  const groupHasQuant: boolean[] = []; // per currently-open '(' group
+  let closedGroupHadQuant = false;     // did the most-recently-closed group hold a quantifier?
+  let prevWasGroupClose = false;
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i];
+    if (ch === '\\') { i++; prevWasGroupClose = false; continue; } // skip escaped char
+    if (ch === '[') { // skip char class — quantifier chars inside are literal
+      i++;
+      while (i < src.length && src[i] !== ']') { if (src[i] === '\\') i++; i++; }
+      prevWasGroupClose = false;
+      continue;
+    }
+    if (ch === '(') { groupHasQuant.push(false); prevWasGroupClose = false; continue; }
+    if (ch === ')') {
+      const had = groupHasQuant.pop() ?? false;
+      closedGroupHadQuant = had;
+      if (had && groupHasQuant.length) groupHasQuant[groupHasQuant.length - 1] = true; // propagate up
+      prevWasGroupClose = true;
+      continue;
+    }
+    const isQuant = ch === '*' || ch === '+' || (ch === '{' && /^\{\d*,?\d*\}/.test(src.slice(i, i + 12)));
+    if (isQuant) {
+      if (prevWasGroupClose && closedGroupHadQuant) return false; // nested quantifier -> ReDoS
+      if (groupHasQuant.length) groupHasQuant[groupHasQuant.length - 1] = true;
+      prevWasGroupClose = false;
+      continue;
+    }
+    prevWasGroupClose = false;
+  }
+  return true;
+}
+
+const REGEX_INPUT_CAP = 20_000;
+
 /** Output must match a regex pattern. Score 1.0 if matched, 0.0 otherwise. */
 export function MatchesRegex(pattern: RegExp): RubricFn {
-  return (output: string) => pattern.test(output) ? 1 : 0;
+  // Bound the input the pattern runs against as defence-in-depth against
+  // polynomial backtracking on top of isSafeRegexSource's star-height guard.
+  return (output: string) =>
+    pattern.test(output.length > REGEX_INPUT_CAP ? output.slice(0, REGEX_INPUT_CAP) : output) ? 1 : 0;
 }
 
 /** Output must NOT contain any of the forbidden phrases. Score 1.0 if clean, 0.0 if any found. */

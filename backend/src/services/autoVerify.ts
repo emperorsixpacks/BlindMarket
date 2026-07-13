@@ -6,6 +6,7 @@ import {
   JsonSchema,
   MatchesRegex,
   NoForbiddenPhrases,
+  isSafeRegexSource,
 } from './rubricEngine.js';
 import type { RubricResult } from './rubricEngine.js';
 
@@ -95,15 +96,20 @@ export function autoVerify(
     });
   }
 
-  // Regex pattern
+  // Regex pattern — reject ReDoS-prone patterns (star height >= 2) before
+  // compiling, so a malicious verification criterion can't freeze the backend.
   if (criteria.regex_pattern) {
-    try {
-      rubrics.push({
-        name: 'regex_pattern',
-        weight: 1.5,
-        fn: MatchesRegex(new RegExp(criteria.regex_pattern)),
-      });
-    } catch { /* invalid regex — skip */ }
+    if (!isSafeRegexSource(criteria.regex_pattern)) {
+      console.warn('[autoVerify] Skipped unsafe/complex regex_pattern (ReDoS guard):', criteria.regex_pattern.slice(0, 80));
+    } else {
+      try {
+        rubrics.push({
+          name: 'regex_pattern',
+          weight: 1.5,
+          fn: MatchesRegex(new RegExp(criteria.regex_pattern)),
+        });
+      } catch { /* invalid regex — skip */ }
+    }
   }
 
   // Expected schema
