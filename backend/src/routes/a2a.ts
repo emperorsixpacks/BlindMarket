@@ -1006,6 +1006,16 @@ a2aRouter.post('/tasks/index', requireAuth, async (req: AuthRequest, res, next) 
     }
 
     const requiredCaps = (data.requiredCapabilities ?? []) as AgentCapability[];
+
+    // Idempotent re-index: preserve wrappedKeys slices added since the first
+    // index (via /wrap-to or /accept self-heal) instead of overwriting them with
+    // only the original post-time set — otherwise a re-index strands late joiners
+    // back on NEEDS_WRAP. Existing meta (a superset) wins on key collisions.
+    const existingMeta = await a2aStore.getMeta(taskHash);
+    const mergedWrappedKeys = (existingMeta?.wrappedKeys || wrappedKeysNormalized)
+      ? { ...(wrappedKeysNormalized ?? {}), ...(existingMeta?.wrappedKeys ?? {}) }
+      : undefined;
+
     await a2aStore.setMeta({
       taskId: taskHash,
       targetExecutorType: 'agent',
@@ -1015,7 +1025,7 @@ a2aRouter.post('/tasks/index', requireAuth, async (req: AuthRequest, res, next) 
       posterAddress: address,
       verifierAddress: data.verifierAddress?.toLowerCase(),
       rootHash: data.rootHash,
-      wrappedKeys: wrappedKeysNormalized,
+      wrappedKeys: mergedWrappedKeys,
       keyCustodyBlob: data.keyCustodyBlob,
       // Absolute on-chain deadline (epoch seconds) from the verified
       // TaskCreated event — lets browse hide expired tasks, /accept refuse
