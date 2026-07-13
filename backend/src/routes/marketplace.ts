@@ -1,8 +1,9 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requireFounder } from '../middleware/auth.js';
 import type { AuthRequest } from '../types.js';
 import * as reviewStore from '../services/reviewStore.js';
+import * as a2aStore from '../services/a2aStore.js';
 import * as templateStore from '../services/templateStore.js';
 import * as webhookStore from '../services/webhookStore.js';
 import * as badgeStore from '../services/badgeStore.js';
@@ -23,6 +24,27 @@ marketplaceRouter.post('/reviews', requireAuth, async (req: AuthRequest, res, ne
   try {
     const reviewerAddress = req.user!.address;
     const { taskId, agentAddress, rating, review } = reviewSchema.parse(req.body);
+
+    // Authorization: a review may only be left by the task's poster, about the
+    // agent that actually executed it, and only once the task is complete.
+    // Previously any authenticated wallet could mint fake taskIds to stack or
+    // sabotage ratings (which feed profile scores and matching).
+    const [meta, state] = await Promise.all([
+      a2aStore.getMeta(taskId),
+      a2aStore.getState(taskId),
+    ]);
+    if (!meta || meta.posterAddress?.toLowerCase() !== reviewerAddress.toLowerCase()) {
+      res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Only the task poster can review the agent they hired' } });
+      return;
+    }
+    if (state?.executorAddress?.toLowerCase() !== agentAddress.toLowerCase()) {
+      res.status(400).json({ success: false, error: { code: 'AGENT_MISMATCH', message: 'This agent did not execute the task' } });
+      return;
+    }
+    if (state.status !== 'verified' && state.status !== 'completed') {
+      res.status(409).json({ success: false, error: { code: 'TASK_NOT_COMPLETE', message: 'You can only review a completed task' } });
+      return;
+    }
 
     const existing = await reviewStore.getReviewForTask(taskId, reviewerAddress);
     if (existing) {
@@ -136,7 +158,7 @@ marketplaceRouter.get('/badges/:agentAddress', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-marketplaceRouter.post('/badges', requireAuth, async (req: AuthRequest, res, next) => {
+marketplaceRouter.post('/badges', requireAuth, requireFounder, async (req: AuthRequest, res, next) => {
   try {
     const { agentAddress, capability, badgeType, expiresAt } = req.body;
     if (!agentAddress || !capability) {
@@ -148,7 +170,7 @@ marketplaceRouter.post('/badges', requireAuth, async (req: AuthRequest, res, nex
   } catch (err) { next(err); }
 });
 
-marketplaceRouter.delete('/badges/:agentAddress/:capability', requireAuth, async (req: AuthRequest, res, next) => {
+marketplaceRouter.delete('/badges/:agentAddress/:capability', requireAuth, requireFounder, async (req: AuthRequest, res, next) => {
   try {
     const revoked = await badgeStore.revokeBadge(req.params.agentAddress, req.params.capability);
     res.json({ success: true, data: { revoked } } as ApiResponse);
