@@ -1176,7 +1176,12 @@ async function runAcceptedTask(acceptedTaskHash, acceptedRootHash, acceptedWrapp
         return;
       }
     } else {
-      log(`no encrypted brief on accept (rootHash=${!!acceptedRootHash} wrappedKey=${!!acceptedWrappedKey}); skipping`);
+      log(`no encrypted brief on accept (rootHash=${!!acceptedRootHash} wrappedKey=${!!acceptedWrappedKey}); releasing`);
+      // Can't work a task with no decryptable brief — hand it back instead of
+      // silently stranding it in 'accepted' (same semantics as the decrypt
+      // failure branch above): re-opens if still Funded, else the backend 409s
+      // ON_CHAIN_LOCKED and releaseTask logs it so the stuck task is visible.
+      await releaseTask(acceptedTaskHash);
       return;
     }
 
