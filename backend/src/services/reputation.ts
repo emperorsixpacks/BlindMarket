@@ -15,7 +15,8 @@ export async function getReputation(worker: string): Promise<Reputation> {
  * Composite 0-100 reputation score derived from on-chain data.
  *
  * Formula:
- *   avgScore = totalScore / tasksCompleted (normalized 0-5)
+ *   avgScore = avgScoreX100 / 100  (the contract already returns the average
+ *     scaled by 100 — 450 = 4.50 — NOT a cumulative sum, so do NOT divide by tasks)
  *   reliability = tasksCompleted / (tasksCompleted + disputes + 1)
  *   score = (avgScore / 5) * reliability * 100
  *
@@ -36,9 +37,12 @@ export async function getCompositeScore(worker: string): Promise<number> {
 function computeCompositeScore(rep: Reputation): number {
   const tasks = Number(rep.tasksCompleted);
   if (tasks === 0) return 0;
-  const total = Number(rep.totalScore);
+  // NOTE: the on-chain getReputation() returns the average already scaled ×100
+  // (450 = 4.50), NOT a cumulative score — so this is avg×100, and we divide by
+  // 100 only. Dividing by tasks again crushed scores toward 0 as task count rose.
+  const avgScoreX100 = Number(rep.totalScore);
   const disputes = Number(rep.disputes);
-  const avgScore = total / tasks / 100; // 0-5
+  const avgScore = avgScoreX100 / 100; // 0-5
   const reliability = tasks / (tasks + disputes + 1);
   const score = (avgScore / 5) * reliability * 100;
   return Math.round(Math.min(100, Math.max(0, score)));
@@ -61,9 +65,10 @@ export async function getReputationWithScore(worker: string): Promise<{
   // on-chain data — doubling the RPC reads per agent on the /agents list.)
   const rep = await getReputation(worker);
   const tasks = Number(rep.tasksCompleted);
-  const total = Number(rep.totalScore);
+  // avgScoreX100: on-chain value is the average already scaled ×100 (450 = 4.50).
+  const avgScoreX100 = Number(rep.totalScore);
   const disputes = Number(rep.disputes);
-  const avgScore = tasks > 0 ? total / tasks / 100 : 0;
+  const avgScore = tasks > 0 ? avgScoreX100 / 100 : 0;
   const score = computeCompositeScore(rep);
 
   return {
