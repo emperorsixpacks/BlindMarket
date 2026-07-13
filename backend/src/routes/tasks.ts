@@ -335,9 +335,23 @@ tasksRouter.post('/:id/apply', requireAuth, async (req: AuthRequest, res, next) 
  */
 tasksRouter.get('/:id/applications', requireAuth, async (req: AuthRequest, res, next) => {
   try {
-    const taskId = req.params.id;
+    const rawId = req.params.id as string;
+    if (!/^\d+$/.test(rawId)) {
+      throw new AppError(400, 'INVALID_TASK_ID', 'Task ID must be a positive integer');
+    }
+    const from = req.user!.address;
+
+    // Authorization: applicant identities (wallet address + message) are visible
+    // ONLY to the task's poster. requireAuth alone previously let any authenticated
+    // wallet enumerate every task's applicants, deanonymizing bidders. Mirror the
+    // ownership check used by POST /:id/assign below.
+    const task = await escrowService.getTask(parseInt(rawId, 10));
+    if (from === 'agent' || task.agent.toLowerCase() !== from.toLowerCase()) {
+      throw new AppError(403, 'FORBIDDEN', 'Only the task poster can view applicants');
+    }
+
     const db = getDb();
-    const taskApps = db.prepare('SELECT * FROM applications WHERE task_id = ? ORDER BY created_at ASC').all(taskId);
+    const taskApps = db.prepare('SELECT * FROM applications WHERE task_id = ? ORDER BY created_at ASC').all(rawId);
     res.json({ success: true, data: { applications: taskApps } } satisfies ApiResponse);
   } catch (err) {
     next(err);
