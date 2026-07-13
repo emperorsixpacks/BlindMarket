@@ -368,17 +368,10 @@ async function migrateRedisToPg(p: pg.Pool): Promise<void> {
                   preferred_capabilities, agent_card_url, mcp_endpoint_url,
                   registered_at, updated_at)
                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
-               ON CONFLICT (address) DO UPDATE SET
-                 capabilities = EXCLUDED.capabilities,
-                 public_key = EXCLUDED.public_key,
-                 reputation = EXCLUDED.reputation,
-                 tasks_completed = EXCLUDED.tasks_completed,
-                 total_earned_raw = EXCLUDED.total_earned_raw,
-                 min_reward = EXCLUDED.min_reward,
-                 preferred_capabilities = EXCLUDED.preferred_capabilities,
-                 agent_card_url = EXCLUDED.agent_card_url,
-                 mcp_endpoint_url = EXCLUDED.mcp_endpoint_url,
-                 updated_at = NOW()`,
+               -- Backfill only: NEVER overwrite a row that registerAgent /
+               -- recordWorkerPayout has since advanced in PG, or a redeploy that
+               -- re-runs this one-time migration reverts live earnings/reputation.
+               ON CONFLICT (address) DO NOTHING`,
               [addr, data.displayName, data.capabilities ?? [],
                data.publicKey ?? '', data.reputation ?? 50,
                data.tasksCompleted ?? 0, data.totalEarnedRaw ?? '0',
@@ -403,17 +396,10 @@ async function migrateRedisToPg(p: pg.Pool): Promise<void> {
               preferred_capabilities, agent_card_url, mcp_endpoint_url,
               registered_at, updated_at)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
-           ON CONFLICT (address) DO UPDATE SET
-             capabilities = EXCLUDED.capabilities,
-             public_key = EXCLUDED.public_key,
-             reputation = EXCLUDED.reputation,
-             tasks_completed = EXCLUDED.tasks_completed,
-             total_earned_raw = EXCLUDED.total_earned_raw,
-             min_reward = EXCLUDED.min_reward,
-             preferred_capabilities = EXCLUDED.preferred_capabilities,
-             agent_card_url = EXCLUDED.agent_card_url,
-             mcp_endpoint_url = EXCLUDED.mcp_endpoint_url,
-             updated_at = NOW()`,
+           -- Backfill only: NEVER overwrite a row that registerAgent /
+           -- recordWorkerPayout has since advanced in PG (see the string-format
+           -- branch above) — DO NOTHING keeps a redeploy from reverting earnings.
+           ON CONFLICT (address) DO NOTHING`,
           [addr, data.displayName, data.capabilities ?? [],
            data.publicKey ?? '', data.reputation ?? 50,
            data.tasksCompleted ?? 0, data.totalEarnedRaw ?? '0',
