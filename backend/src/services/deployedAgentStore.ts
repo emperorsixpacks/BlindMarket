@@ -38,7 +38,7 @@ export async function saveAgent(agent: DeployedAgent): Promise<void> {
         platform_token, wallet_address, public_key, encrypted_private_key,
         raw_private_key, inft_token_id, min_reward, updated_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-       $16, $17, $18, $19, $20, $21, NOW())
+       $16, $17, $18, $19, $20, $21, $22, NOW())
      ON CONFLICT (id) DO UPDATE SET
        owner_address = EXCLUDED.owner_address,
        authorized_owners = EXCLUDED.authorized_owners,
