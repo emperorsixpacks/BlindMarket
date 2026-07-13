@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { useBalance, useWalletClient } from 'wagmi';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { BrowserProvider, parseEther } from 'ethers';
+import { BrowserProvider, parseEther, formatUnits } from 'ethers';
 import {
   Breadcrumb,
   PageHeader,
@@ -151,9 +151,10 @@ export default function AgentDetail() {
         setEditModel(data.model ?? '');
         setEditCapabilities(data.capabilities ?? []);
         setEditMinReward(
-          data.minReward
-            ? (BigInt(data.minReward) / 10n ** 18n).toString()
-            : '',
+          // Decimal-preserving: integer BigInt division floored a fractional
+          // minReward (0.5 0G -> '0'), which Save then persisted as 0, silently
+          // disabling the min-reward gate so the agent accepted 0-reward tasks.
+          data.minReward ? formatUnits(data.minReward, 18) : '',
         );
       })
       // A rejected fetch can't tell 404 from a transient 500/network drop, so
