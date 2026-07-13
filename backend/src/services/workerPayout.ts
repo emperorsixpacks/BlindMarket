@@ -55,6 +55,7 @@ export async function recordWorkerPayout(
   executorAddr: string,
   onChainId: string,
   grossAmount: bigint,
+  opts: { rethrow?: boolean } = {},
 ): Promise<void> {
   const creditedKey = `a2a:credited:${taskHash.toLowerCase()}`;
   try {
@@ -128,6 +129,12 @@ export async function recordWorkerPayout(
     // this a single agentStore blip would make the payout permanently
     // uncreditable from EVERY path while the marker blocks all retries.
     await redis.del(creditedKey).catch(() => {});
+    // Callers with no re-observation path (the DisputeResolved listener) pass
+    // rethrow:true so the failure aborts the tick BEFORE its checkpoint advances
+    // and the event is re-processed — otherwise a transient blip means the worker
+    // is paid on-chain but the earnings ledger is never written ("N tasks · 0 0G").
+    // The /finalize + /verdict routes omit it: they're re-driven by client retries.
+    if (opts.rethrow) throw err;
   }
 }
 
@@ -138,7 +145,7 @@ export async function recordWorkerPayout(
  * BlindReputation.recordDispute() fires.
  * Non-blocking — logged on failure, caller continues.
  */
-export async function recordWorkerDispute(taskHash: string, executorAddr: string): Promise<void> {
+export async function recordWorkerDispute(taskHash: string, executorAddr: string, opts: { rethrow?: boolean } = {}): Promise<void> {
   try {
     const agent = await agentStore.getAgent(executorAddr);
     if (agent) {
@@ -151,5 +158,8 @@ export async function recordWorkerDispute(taskHash: string, executorAddr: string
       `[a2a] recordWorkerDispute failed for ${taskHash.slice(0, 10)}… executor=${executorAddr}:`,
       (err as Error).message,
     );
+    // Listener path (DisputeResolved) rethrows so its NX marker is released and
+    // the tick retries; the routes swallow-and-continue as before.
+    if (opts.rethrow) throw err;
   }
 }

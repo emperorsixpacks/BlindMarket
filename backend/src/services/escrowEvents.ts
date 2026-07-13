@@ -205,7 +205,10 @@ async function processDisputeResolved(taskId: bigint, workerFavored: boolean): P
   );
 
   if (workerFavored && worker && worker !== '0x0000000000000000000000000000000000000000') {
-    await recordWorkerPayout(taskHash, worker, String(taskId), t.amount as bigint);
+    // rethrow:true — this listener is the ONLY observer of an admin-resolved
+    // dispute (backfill scans TaskCreated only), so a failed credit must abort
+    // the tick before its checkpoint advances, not be silently swallowed.
+    await recordWorkerPayout(taskHash, worker, String(taskId), t.amount as bigint, { rethrow: true });
   } else if (!workerFavored && worker && worker !== '0x0000000000000000000000000000000000000000') {
     // At-most-once for THIS listener only (chunk retries re-observe events;
     // recordWorkerDispute itself has no guard because the routes legitimately
@@ -215,7 +218,7 @@ async function processDisputeResolved(taskId: bigint, workerFavored: boolean): P
     const first = await redis.set(disputedKey, worker.toLowerCase(), 'NX');
     if (first !== null) {
       try {
-        await recordWorkerDispute(taskHash, worker);
+        await recordWorkerDispute(taskHash, worker, { rethrow: true });
       } catch (err) {
         await redis.del(disputedKey).catch(() => {});
         throw err;
