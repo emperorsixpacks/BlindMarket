@@ -5,6 +5,7 @@ import type { AuthRequest } from '../types.js';
 import { forensicStore } from '../services/forensicStore.js';
 import { validateForensicReport } from '../services/forensicValidation.js';
 import * as custodyVault from '../services/custodyVault.js';
+import * as a2aStore from '../services/a2aStore.js';
 
 const router = Router();
 
@@ -95,6 +96,26 @@ router.get('/:taskId', requireAuth, async (req: AuthRequest, res, next) => {
         error: { code: 'NOT_FOUND', message: 'No forensic report for this task' },
       });
     }
+
+    // Authorization: a forensic report carries the worker's GPS coordinates and
+    // device fingerprint, so only the task's participants may read it — the
+    // poster, the assigned executor, or the designated verifier. requireAuth
+    // alone previously let ANY authenticated wallet enumerate reports by taskId.
+    const caller = req.user!.address.toLowerCase();
+    const [meta, state] = await Promise.all([
+      a2aStore.getMeta(taskId),
+      a2aStore.getState(taskId),
+    ]);
+    const allowed = [meta?.posterAddress, meta?.verifierAddress, state?.executorAddress]
+      .filter((a): a is string => !!a)
+      .map((a) => a.toLowerCase());
+    if (!allowed.includes(caller)) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'FORBIDDEN', message: 'Only the task poster, worker, or verifier can view its forensic report' },
+      });
+    }
+
     res.json({ success: true, data });
   } catch (err) {
     next(err);
