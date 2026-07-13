@@ -51,11 +51,23 @@ submissionsRouter.post('/verify', requireAuth, async (req: AuthRequest, res, nex
     const { taskId, passed } = approveSchema.parse(req.body);
     const from = req.user!.address;
 
+    // Authorization: only the task's poster or its designated per-task verifier
+    // may drive verification. requireAuth alone previously let any authenticated
+    // wallet credit/slash any worker for any taskId — the accounting/reputation
+    // writes below fired regardless of who called or whether the tx was signed.
+    const task = await escrowService.getTask(taskId);
+    const ZERO = '0x0000000000000000000000000000000000000000';
+    const perTaskVerifier = (await escrowService.getTaskVerifier(taskId).catch(() => ZERO)).toLowerCase();
+    const isPoster = task.agent.toLowerCase() === from.toLowerCase();
+    const isVerifier = perTaskVerifier !== ZERO && perTaskVerifier === from.toLowerCase();
+    if (from === 'agent' || (!isPoster && !isVerifier)) {
+      throw new AppError(403, 'FORBIDDEN', 'Only the task poster or its designated verifier can verify this submission');
+    }
+
     const tx = await escrowService.buildCompleteVerification(from, taskId, passed);
 
     // Record accounting + reputation events
     try {
-      const task = await escrowService.getTask(taskId);
       const decimals = await getTokenDecimals(task.token);
       const amount = Number(task.amount) / (10 ** decimals);
       const workerAddr = task.worker;
