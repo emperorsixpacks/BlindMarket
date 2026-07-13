@@ -162,6 +162,14 @@ const migrations: Migration[] = [
     name: 'lowercase_transaction_addresses',
     sql: `UPDATE transactions SET address = LOWER(address) WHERE address != LOWER(address);`,
   },
+  {
+    id: 8,
+    name: 'custody_integrity_hash',
+    // Deterministic commitment over a custody entry's immutable fields, stored at
+    // ingest so verifyIntegrity can actually recompute + compare it (previously a
+    // no-op that always reported "valid").
+    sql: `ALTER TABLE custody_entries ADD COLUMN integrity_hash TEXT;`,
+  },
 ];
 
 function runMigrations(database: Database.Database): void {

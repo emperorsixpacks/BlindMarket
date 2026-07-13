@@ -7,7 +7,17 @@ export interface CustodyEntry {
   evidence_hash: string;
   submitter: string;
   data_snapshot: string | null;
+  integrity_hash: string | null;
   created_at: string;
+}
+
+/** Deterministic commitment over a custody entry's immutable fields (no timestamp,
+ *  so it is recomputable). Any later change to one of these fields makes the
+ *  recomputation diverge from the value stored at ingest. */
+function commitment(taskId: string, evidenceHash: string, submitter: string, dataSnapshot: string): string {
+  return createHash('sha256')
+    .update(JSON.stringify({ taskId, evidenceHash, submitter, dataSnapshot }))
+    .digest('hex');
 }
 
 export interface AuditEvent {
@@ -29,15 +39,18 @@ export function ingestEvidence(
   dataSnapshot?: string,
 ): CustodyEntry {
   const db = getDb();
-  const hash = createHash('sha256')
-    .update(JSON.stringify({ taskId, evidenceHash, submitter, dataSnapshot: dataSnapshot ?? '', ts: Date.now() }))
-    .digest('hex');
+  const snap = dataSnapshot ?? null;
+  // Store the REAL evidence hash (the chain-of-custody record) plus a
+  // recomputable integrity commitment over the immutable fields. The old code
+  // stored a timestamp-salted hash in evidence_hash — unrecomputable, so
+  // verifyIntegrity could never actually check it.
+  const integrityHash = commitment(taskId, evidenceHash, submitter, snap ?? '');
 
   const result = db
     .prepare(
-      'INSERT INTO custody_entries (task_id, evidence_hash, submitter, data_snapshot) VALUES (?, ?, ?, ?)',
+      'INSERT INTO custody_entries (task_id, evidence_hash, submitter, data_snapshot, integrity_hash) VALUES (?, ?, ?, ?, ?)',
     )
-    .run(taskId, hash, submitter, dataSnapshot ?? null);
+    .run(taskId, evidenceHash, submitter, snap, integrityHash);
 
   const entryId = result.lastInsertRowid as number;
   logAuditEvent(taskId, entryId, 'submitted', submitter, `Evidence ingested: ${evidenceHash}`);
@@ -79,14 +92,17 @@ export function verifyIntegrity(taskId: string): { valid: boolean; entries: { id
     .all(taskId) as CustodyEntry[];
 
   const results = entries.map((entry) => {
-    const recomputed = createHash('sha256')
-      .update(entry.evidence_hash)
-      .digest('hex');
+    const recomputed = commitment(entry.task_id, entry.evidence_hash, entry.submitter, entry.data_snapshot ?? '');
+    const stored = entry.integrity_hash ?? '';
     return {
       id: entry.id,
-      stored: entry.evidence_hash,
+      stored,
       computed: recomputed,
-      match: entry.evidence_hash.length === 64, // hash is always a valid sha256 hex
+      // Genuine tamper check: any change to task_id / evidence_hash / submitter /
+      // data_snapshot diverges from the commitment stored at ingest. Legacy rows
+      // written before the integrity_hash column (stored === '') are reported
+      // UNVERIFIED (match:false), not silently "valid".
+      match: stored.length === 64 && recomputed === stored,
     };
   });
 
