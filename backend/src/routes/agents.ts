@@ -182,12 +182,18 @@ agentsRouter.get('/providers', (_req, res) => {
 });
 
 // POST /api/v1/agents/deploy
-agentsRouter.post('/deploy', async (req, res) => {
-  const parsed = DeploySchema.safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ success: false, error: parsed.error.flatten() }); return; }
-  console.log(`[deploy] ownerPublicKey length=${parsed.data.ownerPublicKey.length / 2} bytes, hex=${parsed.data.ownerPublicKey.slice(0, 8)}...`);
-  const agent = await deployAgent(parsed.data as Parameters<typeof deployAgent>[0]);
-  res.status(201).json({ success: true, data: strip(agent) });
+agentsRouter.post('/deploy', async (req, res, next) => {
+  try {
+    const parsed = DeploySchema.safeParse(req.body);
+    if (!parsed.success) { res.status(400).json({ success: false, error: parsed.error.flatten() }); return; }
+    console.log(`[deploy] ownerPublicKey length=${parsed.data.ownerPublicKey.length / 2} bytes, hex=${parsed.data.ownerPublicKey.slice(0, 8)}...`);
+    const agent = await deployAgent(parsed.data as Parameters<typeof deployAgent>[0]);
+    res.status(201).json({ success: true, data: strip(agent) });
+  } catch (err) {
+    // deployAgent can now throw (e.g. a bad ownerPublicKey that fails ECIES wrap);
+    // surface it as a clean error instead of an unhandled promise rejection.
+    next(err);
+  }
 });
 
 // GET /api/v1/agents

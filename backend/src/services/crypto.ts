@@ -122,11 +122,6 @@ export function generateKeyPair(): { privateKey: string; publicKey: string } {
 export function eciesEncrypt(data: Buffer, recipientPubKeyHex: string): Buffer {
   const cleanKey = recipientPubKeyHex.startsWith('0x') ? recipientPubKeyHex.slice(2) : recipientPubKeyHex;
 
-  // zkLogin public identifier -> no private key exists for ECIES decryption, return empty
-  if (cleanKey.startsWith('05')) {
-    return Buffer.alloc(0);
-  }
-
   const keyBytes = Buffer.from(cleanKey, 'hex');
 
   if (keyBytes.length === X25519_PUBKEY_LENGTH) {
@@ -142,8 +137,12 @@ export function eciesEncrypt(data: Buffer, recipientPubKeyHex: string): Buffer {
     }
     return eciesEncryptSecp256k1(data, normKey);
   } catch (err) {
-    console.warn(`[crypto] ECIES encryption failed for public key of length ${cleanKey.length}:`, (err as Error).message);
-    return Buffer.alloc(0);
+    // Fail CLOSED. A recipient key that passes length checks but fails ECDH
+    // (e.g. off-curve) must surface HERE — returning an empty buffer let callers
+    // store a wrappedKey of '' with a 200, leaving the brief/evidence permanently
+    // undecryptable and (via deploy) locking the agent's own private key. The SDK
+    // twin (sdk/src/crypto/ecies.ts) already throws; match it.
+    throw new Error(`ECIES encryption failed for recipient pubkey (len ${cleanKey.length}): ${(err as Error).message}`);
   }
 }
 
