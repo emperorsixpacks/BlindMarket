@@ -17,7 +17,7 @@ decision · 🟠 your infra action · ⏸ deferred (post-launch).
 | 1.3 | Test suite green | ✅ | 123 contract tests pass, no skips. |
 | 1.4 | Fee schedule | 🟡 | `feeBps=1500` (15%) today; admin-settable, hard-capped 30% (`MAX_FEE_BPS`). ⚠ **Not** per-task — read at settlement, so a change re-prices in-flight tasks. See `MAINNET-DECISIONS.md` §1. |
 | 1.5 | Token allowlist | 🟡 | Mainnet escrow currently allows **native 0G only**. Decide if any stablecoin is added day 1 (no USDC is deployed on 0G mainnet — see VP note). Each needs `allowToken(addr)`. Avoid rebasing / fee-on-transfer tokens. |
-| 2.1 | Deploy Gnosis Safe | 🟠 | Create an N-of-M Safe on 0G mainnet (2-of-3 min). This is the single biggest gate. |
+| 2.1 | Deploy Gnosis Safe | 🟠 | **Safe supports 0G mainnet (confirmed 2026-07-14):** canonical v1.4.1 contracts are on-chain + 0G is in Safe's config service (tx-service `api.safe.global/tx-service/0g`). Create via **app.safe.global** → pick "0G" → connect MetaMask → 2-of-3 min. Then give the Safe address for `migrate-admin-to-safe.ts`. |
 | 2.2 | Transfer admin → Safe | 🔵 | `proposeAdmin(Safe)` (deployer) → `acceptAdmin()` (Safe UI) for **BlindEscrow, BlindReputation, TaskRegistry**; `transferOwnership(Safe)` for **INFT**. ⚠ **ValidatorPool admin is constructor-fixed — no transfer.** Deploy the mainnet VP *from the Safe* (or accept the EOA admin while VP stays dormant). |
 | 2.3 | Cold-store deployer EOA | 🟠 | After admin=Safe, move funds off `0x2f8b…`, store key offline (don't delete). |
 | 3.1 | Fresh marketplace signer | 🔵/🟠 | `generate-marketplace-signer.ts` on a clean machine → writes `MARKETPLACE_SIGNER_PRIVATE_KEY` to `.env`. Never commit. |
