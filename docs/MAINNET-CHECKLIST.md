@@ -79,12 +79,11 @@ verification, bug bounty) are listed at the bottom for completeness.
 
 ### 1.4 Decide and document the fee schedule
 
-- [x] Lock in `feeBps` for mainnet launch. **Decision: 10% (1000 bps)** — see
-      `MAINNET-DECISIONS.md` §1. Testnet already set to 1000 via `set-fee.ts`.
-      ⚠ The contract reads `feeBps` at **settlement**, not creation — so a change
-      re-prices every unsettled in-flight task (a reduction pays workers more).
-      Mainnet: run `NEW_FEE_BPS=1000 … set-fee.ts --network 0g-mainnet` (or via
-      the Safe once admin is migrated).
+- [x] Lock in `feeBps` for mainnet launch. **Decision: 10% (1000 bps) — APPLIED**
+      on testnet + mainnet via `set-fee.ts` (mainnet tx `0xe3f433f9…`). See
+      `MAINNET-DECISIONS.md` §1. ⚠ The contract reads `feeBps` at **settlement**,
+      not creation — so a change re-prices every unsettled in-flight task (a
+      reduction pays workers more). Future changes go via the Safe post-admin-migration.
 
   **Why this matters:** changing fees post-launch with active tasks is a
   reputational landmine — workers who agreed to one rate get a different

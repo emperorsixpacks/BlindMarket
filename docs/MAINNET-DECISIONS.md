@@ -13,7 +13,7 @@ not memory — because these move real money.
 
 | # | Decision | Recommendation | On launch critical path? |
 |---|---|---|---|
-| 1 | Launch fee | **Reduce to 10%** (`feeBps=1000`) | ✅ testnet set; run set-fee.ts on mainnet |
+| 1 | Launch fee | **Reduced to 10%** (`feeBps=1000`) | ✅ DONE — testnet + mainnet both live at 10% |
 | 2 | Token allowlist | **Native 0G only** at launch | No — already allowed |
 | 3 | Per-task escrow cap | **Off-chain cap** (~$250-equiv in 0G to start), raise later; on-chain cap = fast-follow upgrade | Yes (off-chain) |
 | 4 | ValidatorPool stake token | **Defer** — VP is dormant; don't deploy on mainnet at launch | **No — remove from path** |
@@ -48,9 +48,9 @@ marketplaces on take rate. 10% leaves headroom so the fee never has to be *raise
 (raising reads far worse than launching low). Because the fee is read at settlement, the
 reduction pays workers more on in-flight tasks too — safe to apply live.
 
-> **DECISION:** ✅ **10% (feeBps=1000).** Testnet set via `set-fee.ts`
-> (tx `0xa433e3e8…`). Mainnet: run `NEW_FEE_BPS=1000 … set-fee.ts --network 0g-mainnet`
-> (or via the Safe once admin is migrated). Fresh-deploy default + all copy updated to 10%.
+> **DECISION:** ✅ **10% (feeBps=1000) — APPLIED on both nets.** Testnet tx
+> `0xa433e3e8…`; mainnet tx `0xe3f433f9…` (admin `0x2f8b…`). Fresh-deploy default +
+> all copy updated to 10%. Future changes go via the Safe once admin is migrated.
 
 ## 2. Token allowlist
 
