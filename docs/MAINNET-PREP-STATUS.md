@@ -56,6 +56,12 @@ still sign the upgrade + role setup). All commands need `contracts/.env` →
 6. **Redeploy ValidatorPool + INFT** on mainnet with the decided stake token / oracle:
    `STAKE_TOKEN=0x… npx hardhat run scripts/redeploy-validator-pool.ts --network 0g-mainnet`
    `INFT_ORACLE=0x… npx hardhat run scripts/redeploy-inft.ts --network 0g-mainnet`
+   These get **NEW addresses** (fresh, non-upgradeable deploys). Immediately propagate them:
+   - `backend/src/config.ts` → `inftAddress` **mainnet** fallback = new INFT.
+   - Backend secret store → `INFT_ADDRESS` + `VALIDATOR_POOL_ADDRESS` = new addresses.
+   - (BlindEscrow is unchanged — upgraded in place at the same `0x3d0374…` proxy.)
+   Root cause of past drift: addresses are duplicated in `deployments/*.json`, `config.ts`, and
+   `constants.ts`. Consider reading them from the deployment record to make it single-source.
 7. **Set the token allowlist** — `allowToken(addr)` for each decided token (native 0G already allowed).
 8. **Transfer admin → Safe** (2.2): `proposeAdmin(Safe)` (deployer) then `acceptAdmin()` (Safe UI) for BlindEscrow/BlindReputation/TaskRegistry; `transferOwnership(Safe)` for INFT.
 9. **Wire the mainnet backend** (3.4): signer key + mainnet addresses in the secret store; restart.
