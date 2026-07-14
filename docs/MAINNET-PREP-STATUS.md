@@ -81,5 +81,5 @@ store to the new key. ETA ~10 min. Rehearse on testnet first.
 ## Honest gaps to weigh before "real users, real money"
 
 - **Custody (5b.2–5b.5):** cleartext `rawPrivateKey` per agent means a DB/env leak hands over every agent's funds. This is the biggest non-contract risk; plan the non-custodial migration before serious volume.
-- **Single-EOA everything today:** admin = treasury = deployer on both nets. The Safe migration (§2) fixes admin; also point `treasury` at an intended address, not the deployer.
+- **Hot-key roles (partially separated):** ✅ `treasury` moved off the deployer to a cold EOA `0x20093c…` (2026-07-14) — fees no longer accrue on the hot key. ⚠ Still open: `admin` **and** `verifier` are both the deployer `0x2f8b…`. Rotate the verifier to a fresh dedicated signer (`rotate-verifier.ts`) and migrate admin → Safe (`migrate-admin-to-safe.ts`, §2). admin==verifier means one busy-key leak = full takeover.
 - **Formal audit / timelock / bug bounty** (§6) remain the mature-money measures.

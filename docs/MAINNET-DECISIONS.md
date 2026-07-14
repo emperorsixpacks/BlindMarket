@@ -159,7 +159,11 @@ Not on the 🟡 list but it's a money decision: fees go to `treasury`
 to an intended fee-collection address (ideally the Safe or a dedicated cold address), so the
 15% doesn't accrue to a hot deployer key.
 
-> **DECISION (treasury address):** ______
+> **DECISION (treasury address):** ✅ **DONE — moved to a cold EOA
+> `0x20093caFb62A0EdE587F7b65170256F99647e497`** (verified EOA, receives native
+> safely). Testnet tx `0xc36f7cfe…`, mainnet tx `0x19d3dbef…` (2026-07-14). Fees
+> now accrue off the hot deployer key. Admin + verifier still on `0x2f8b…` — see
+> Safe migration.
 
 ---
 
