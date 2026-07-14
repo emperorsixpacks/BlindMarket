@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { CONTRACT_ADDRESSES } from './contractAddresses.js';
 
 function required(key: string): string {
   const value = process.env[key];
@@ -14,6 +15,11 @@ function optional(key: string, fallback: string): string {
 
 const IS_PROD = process.env.NODE_ENV === 'production';
 
+// Contract-address fallbacks are single-sourced from contracts/deployments/*.json
+// via contracts/scripts/sync-addresses.ts (do not hand-edit contractAddresses.ts).
+// Env vars still win at runtime; these are the no-env defaults.
+const ADDR = IS_PROD ? CONTRACT_ADDRESSES.mainnet : CONTRACT_ADDRESSES.testnet;
+
 export const config = {
   port: parseInt(optional('PORT', '3001'), 10),
   nodeEnv: optional('NODE_ENV', 'development'),
@@ -28,10 +34,10 @@ export const config = {
   ogChainId: parseInt(optional('OG_CHAIN_ID', IS_PROD ? '16661' : '16602'), 10),
 
   // Contracts
-  blindEscrowAddress: optional('BLIND_ESCROW_ADDRESS', IS_PROD ? '0x3d0374963DaaD43e31d42373eb11156A8e8ce2Ff' : '0x037529B296a89E6Dd1abAF84D413cb2dD70C5be5'),
-  taskRegistryAddress: optional('TASK_REGISTRY_ADDRESS', IS_PROD ? '0x9CCF9c196006B573FaA9C9c9CebDd1296dbd5cE0' : '0xF6AaCce326fD7f25860f383f18A771E5d089ea8c'),
-  blindReputationAddress: optional('BLIND_REPUTATION_ADDRESS', IS_PROD ? '0x3af9232009C5da30AdA366B6E09849A040162A1a' : '0xFEAFe4ab073FfB47aBb5AD458622b3F9B10C81dD'),
-  inftAddress: optional('INFT_ADDRESS', IS_PROD ? '0xfE70a007AFD022A4824d1975A1facFA266F66E28' : '0xc4498099413f8a7D709175eC252aFa7543c6d39a'),
+  blindEscrowAddress: optional('BLIND_ESCROW_ADDRESS', ADDR.blindEscrow),
+  taskRegistryAddress: optional('TASK_REGISTRY_ADDRESS', ADDR.taskRegistry),
+  blindReputationAddress: optional('BLIND_REPUTATION_ADDRESS', ADDR.blindReputation),
+  inftAddress: optional('INFT_ADDRESS', ADDR.inft),
 
   // Auth — Privy is the sole identity provider; agent API key for service callers
   agentApiKey: process.env.AGENT_API_KEY || '',

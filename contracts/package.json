@@ -4,7 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "sync-addresses": "hardhat run scripts/sync-addresses.ts",
+    "check-addresses": "CHECK=1 hardhat run scripts/sync-addresses.ts"
   },
   "keywords": [],
   "author": "",

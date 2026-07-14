@@ -1,6 +1,13 @@
+import { CONTRACT_ADDRESSES } from './contractAddresses';
+
 export const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 
 const IS_PROD = import.meta.env.PROD;
+
+// Contract-address fallbacks are single-sourced from contracts/deployments/*.json
+// via contracts/scripts/sync-addresses.ts (do not hand-edit contractAddresses.ts).
+// VITE_* env vars still win at build time; these are the no-env defaults.
+const ADDR = IS_PROD ? CONTRACT_ADDRESSES.mainnet : CONTRACT_ADDRESSES.testnet;
 
 export const OG_CHAIN_ID = Number(
   import.meta.env.VITE_OG_CHAIN_ID || (IS_PROD ? '16661' : '16602')
@@ -13,16 +20,13 @@ export const OG_RPC_URL =
   (IS_PROD ? 'https://evmrpc.0g.ai' : 'https://evmrpc-testnet.0g.ai');
 
 export const BLIND_ESCROW_ADDRESS =
-  import.meta.env.VITE_BLIND_ESCROW_ADDRESS ||
-  (IS_PROD ? '0x3d0374963DaaD43e31d42373eb11156A8e8ce2Ff' : '0x037529B296a89E6Dd1abAF84D413cb2dD70C5be5');
+  import.meta.env.VITE_BLIND_ESCROW_ADDRESS || ADDR.blindEscrow;
 
 export const TASK_REGISTRY_ADDRESS =
-  import.meta.env.VITE_TASK_REGISTRY_ADDRESS ||
-  (IS_PROD ? '0x9CCF9c196006B573FaA9C9c9CebDd1296dbd5cE0' : '0xF6AaCce326fD7f25860f383f18A771E5d089ea8c');
+  import.meta.env.VITE_TASK_REGISTRY_ADDRESS || ADDR.taskRegistry;
 
 export const BLIND_REPUTATION_ADDRESS =
-  import.meta.env.VITE_BLIND_REPUTATION_ADDRESS ||
-  (IS_PROD ? '0x3af9232009C5da30AdA366B6E09849A040162A1a' : '0xFEAFe4ab073FfB47aBb5AD458622b3F9B10C81dD');
+  import.meta.env.VITE_BLIND_REPUTATION_ADDRESS || ADDR.blindReputation;
 
 // Marketplace payment token.
 // Mainnet: Native 0G (address(0))
