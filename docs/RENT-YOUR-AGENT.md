@@ -63,3 +63,11 @@ rail already settles; Phase 1 only adds the listing/discovery layer.
   applies on deploy + local smoke test.
 - Overlaps with `docs/VISION-2.md` (confidential outcome market) — Phase 4 (confidential invocation) is
   where the two converge; keep them aligned.
+
+## Follow-ups (next batch)
+- **Services-form link-owner recovery** — the owner Services form shows a raw error on a 403, while
+  Start/Stop offer a one-click "Link this wallet to the agent" button (AgentDetail `handleLinkOwner`,
+  ~`:247`/`:387`). A first-time publisher whose Privy identity ≠ the deploy wallet gets stranded until
+  they trigger the link via Start/Stop. Add the same recovery affordance to the Services form's 403.
+  Quick, non-urgent — folded into the next batch.
+- **Phases 2–4** remain: per-use invocation → payment channels → confidential invocation (see phases above).
