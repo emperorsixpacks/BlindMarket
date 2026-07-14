@@ -15,7 +15,7 @@ decision · 🟠 your infra action · ⏸ deferred (post-launch).
 | 1.1 | Independent contract review | ✅ (internal) | Adversarial multi-agent review of all 5 fixes + fresh re-verification; 2 HIGH blockers caught & fixed. A formal firm audit remains the gold standard (§6, budget-gated). |
 | 1.2 | Storage-layout dry run | ✅ | `validate-escrow-upgrade.ts` = **SAFE on both testnet AND mainnet** (read-only, against the live mainnet proxy `0x3d0374…`). Upgrade is a same-address impl swap; no state migration. |
 | 1.3 | Test suite green | ✅ | 123 contract tests pass, no skips. |
-| 1.4 | Fee schedule | 🟡 | `feeBps=1500` (15%) today. Confirm for launch + document rationale. Per-task fee is fixed at creation. |
+| 1.4 | Fee schedule | 🟡 | `feeBps=1500` (15%) today; admin-settable, hard-capped 30% (`MAX_FEE_BPS`). ⚠ **Not** per-task — read at settlement, so a change re-prices in-flight tasks. See `MAINNET-DECISIONS.md` §1. |
 | 1.5 | Token allowlist | 🟡 | Mainnet escrow currently allows **native 0G only**. Decide if any stablecoin is added day 1 (no USDC is deployed on 0G mainnet — see VP note). Each needs `allowToken(addr)`. Avoid rebasing / fee-on-transfer tokens. |
 | 2.1 | Deploy Gnosis Safe | 🟠 | Create an N-of-M Safe on 0G mainnet (2-of-3 min). This is the single biggest gate. |
 | 2.2 | Transfer admin → Safe | 🔵 | `proposeAdmin(Safe)` (deployer) → `acceptAdmin()` (Safe UI) for **BlindEscrow, BlindReputation, TaskRegistry**; `transferOwnership(Safe)` for **INFT**. ⚠ **ValidatorPool admin is constructor-fixed — no transfer.** Deploy the mainnet VP *from the Safe* (or accept the EOA admin while VP stays dormant). |
@@ -35,7 +35,7 @@ decision · 🟠 your infra action · ⏸ deferred (post-launch).
 
 ## Blockers that are only yours to make/do
 
-- **Decisions (🟡):** launch fee (1.4), token allowlist + mainnet stake token for VP (1.5), per-task cap (4.2), INFT oracle address.
+- **Decisions (🟡):** launch fee (1.4), token allowlist (1.5), per-task cap (4.2), treasury address. Each is written up with a recommendation in **`MAINNET-DECISIONS.md`**. Note: that doc recommends **deferring** the VP stake-token + INFT-oracle decisions — both features are dormant, so their mainnet deploys drop off the launch path.
 - **Infra actions (🟠):** Gnosis Safe (2.1), fund the signer (3.2), secret store (3.4), monitoring (4.1), cold-store the EOA (2.3).
 
 Everything else (🔵) is tooling that's built and verified — it just runs once the above are settled.
