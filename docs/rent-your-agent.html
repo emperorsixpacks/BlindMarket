@@ -1,0 +1,642 @@
+<title>Rent Your Agent — okx.ai teardown & BlindMarket build path</title>
+<style>
+  :root {
+    --ground: #0A0C11;
+    --panel: #10131A;
+    --panel-2: #161A23;
+    --line: #242A36;
+    --line-bright: #333B4A;
+    --ink: #E6E9EF;
+    --ink-dim: #A2A9B8;
+    --ink-faint: #6B7383;
+    --violet: #8B7BFF;
+    --violet-soft: rgba(139,123,255,0.12);
+    --violet-line: rgba(139,123,255,0.35);
+    --jade: #45D9A6;
+    --jade-soft: rgba(69,217,166,0.10);
+    --coral: #FF6E6E;
+    --coral-soft: rgba(255,110,110,0.10);
+    --amber: #F4B740;
+    --amber-soft: rgba(244,183,64,0.10);
+    --mono: ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --measure: 72ch;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 0 28px 120px;
+  }
+
+  .col {
+    max-width: var(--measure);
+  }
+
+  /* ---- type ---- */
+  h1, h2, h3, .mono, .eyebrow, .label, code, .stat-n, th, .chip, .tag {
+    font-family: var(--mono);
+  }
+
+  .eyebrow {
+    font-size: 12px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--violet);
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0 0 18px;
+  }
+  .eyebrow::before {
+    content: "";
+    width: 22px;
+    height: 1px;
+    background: var(--violet-line);
+  }
+
+  h1 {
+    font-size: clamp(30px, 5vw, 52px);
+    line-height: 1.04;
+    letter-spacing: -0.02em;
+    font-weight: 600;
+    margin: 0 0 22px;
+    text-wrap: balance;
+  }
+  h2 {
+    font-size: clamp(22px, 3vw, 30px);
+    line-height: 1.12;
+    letter-spacing: -0.01em;
+    font-weight: 600;
+    margin: 0 0 16px;
+    text-wrap: balance;
+  }
+  h3 {
+    font-size: 15px;
+    letter-spacing: 0.02em;
+    font-weight: 600;
+    margin: 0 0 8px;
+    color: var(--ink);
+  }
+  p { margin: 0 0 18px; color: var(--ink-dim); }
+  p strong, li strong { color: var(--ink); font-weight: 600; }
+  a { color: var(--violet); text-decoration: none; border-bottom: 1px solid var(--violet-line); }
+
+  code {
+    font-size: 0.86em;
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    padding: 1px 6px;
+    color: #CBD3E6;
+    white-space: nowrap;
+  }
+
+  /* ---- hero ---- */
+  header.hero {
+    border-bottom: 1px solid var(--line);
+    padding: 88px 0 46px;
+    position: relative;
+    overflow: hidden;
+  }
+  header.hero::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(680px 320px at 88% -10%, var(--violet-soft), transparent 70%);
+    pointer-events: none;
+  }
+  .lede {
+    font-size: clamp(17px, 2.1vw, 20px);
+    line-height: 1.55;
+    color: var(--ink);
+    max-width: 64ch;
+    margin: 0 0 34px;
+  }
+  .lede b { color: var(--violet); font-weight: 600; }
+
+  .metastrip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0;
+    border: 1px solid var(--line);
+    background: var(--panel);
+  }
+  .metastrip > div {
+    padding: 16px 22px;
+    border-right: 1px solid var(--line);
+    flex: 1 1 auto;
+    min-width: 150px;
+  }
+  .metastrip > div:last-child { border-right: 0; }
+  .metastrip .k {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin-bottom: 6px;
+  }
+  .metastrip .v { font-size: 14px; color: var(--ink); }
+  .metastrip .v.has { color: var(--jade); }
+  .metastrip .v.gap { color: var(--coral); }
+
+  /* ---- section rhythm ---- */
+  section { padding-top: 68px; }
+  .section-intro { max-width: var(--measure); }
+
+  ul.clean { list-style: none; padding: 0; margin: 0 0 18px; }
+  ul.clean li {
+    position: relative;
+    padding-left: 22px;
+    margin-bottom: 10px;
+    color: var(--ink-dim);
+  }
+  ul.clean li::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 11px;
+    width: 7px; height: 7px;
+    background: var(--violet);
+  }
+  ul.clean li.j::before { background: var(--jade); }
+  ul.clean li.c::before { background: var(--coral); }
+  ul.clean li.a::before { background: var(--amber); }
+
+  /* ---- two-model split ---- */
+  .split {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+    margin-top: 26px;
+  }
+  .modelcard {
+    border: 1px solid var(--line);
+    background: var(--panel);
+    padding: 24px 24px 26px;
+  }
+  .modelcard .tag {
+    display: inline-block;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    padding: 3px 9px;
+    margin-bottom: 16px;
+  }
+  .tag.have { color: var(--jade); background: var(--jade-soft); border: 1px solid rgba(69,217,166,0.3); }
+  .tag.need { color: var(--coral); background: var(--coral-soft); border: 1px solid rgba(255,110,110,0.3); }
+  .modelcard h3 { font-size: 17px; margin-bottom: 4px; }
+  .modelcard .route { font-family: var(--mono); font-size: 12px; color: var(--ink-faint); margin-bottom: 14px; }
+  .modelcard p { font-size: 14.5px; margin-bottom: 0; }
+
+  /* ---- flow rail ---- */
+  .flow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: stretch;
+    margin: 22px 0 6px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+  }
+  .flow .step {
+    border: 1px solid var(--line);
+    background: var(--panel-2);
+    padding: 9px 13px;
+    color: var(--ink-dim);
+    display: flex;
+    align-items: center;
+  }
+  .flow .step b { color: var(--ink); font-weight: 600; }
+  .flow .step.pay { border-color: var(--violet-line); color: var(--violet); background: var(--violet-soft); }
+  .flow .arw { color: var(--ink-faint); align-self: center; }
+
+  /* ---- anatomy of a service ---- */
+  .anatomy {
+    border: 1px solid var(--line);
+    margin-top: 24px;
+    background: var(--panel);
+  }
+  .anatomy .row {
+    display: grid;
+    grid-template-columns: 168px 1fr;
+    border-top: 1px solid var(--line);
+  }
+  .anatomy .row:first-child { border-top: 0; }
+  .anatomy .fk {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--violet);
+    padding: 15px 20px;
+    border-right: 1px solid var(--line);
+    background: var(--panel-2);
+    letter-spacing: 0.02em;
+  }
+  .anatomy .fv {
+    padding: 15px 20px;
+    color: var(--ink-dim);
+    font-size: 14.5px;
+  }
+  .anatomy .fv b { color: var(--ink); }
+
+  /* ---- architectural fork ---- */
+  .fork {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+    margin-top: 26px;
+    border: 1px solid var(--line);
+  }
+  .fork > div { padding: 26px 26px 30px; }
+  .fork .a-side { border-right: 1px solid var(--line); background: var(--panel); }
+  .fork .b-side { background: linear-gradient(180deg, var(--violet-soft), transparent 60%); }
+  .fork h3 { font-size: 13px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-faint); margin-bottom: 18px; }
+  .fork .b-side h3 { color: var(--violet); }
+  .diagram {
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--ink-dim);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+  .node {
+    border: 1px solid var(--line-bright);
+    padding: 10px 13px;
+    background: var(--ground);
+    color: var(--ink);
+  }
+  .node.dim { color: var(--ink-faint); border-style: dashed; }
+  .node.pay { border-color: var(--violet-line); color: var(--violet); }
+  .node .sub { display: block; color: var(--ink-faint); font-size: 11px; margin-top: 3px; }
+  .vlink { text-align: center; color: var(--ink-faint); font-size: 14px; line-height: 1; }
+  .fork p { font-size: 13.5px; margin-bottom: 0; }
+
+  /* ---- gap table ---- */
+  .tablewrap { overflow-x: auto; margin-top: 24px; border: 1px solid var(--line); }
+  table { border-collapse: collapse; width: 100%; min-width: 720px; }
+  th, td { text-align: left; padding: 13px 18px; border-top: 1px solid var(--line); vertical-align: top; font-size: 14px; }
+  thead th {
+    border-top: 0;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    background: var(--panel-2);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  td { color: var(--ink-dim); }
+  td.what { color: var(--ink); font-family: var(--mono); font-size: 13px; }
+  tbody tr:hover td { background: rgba(255,255,255,0.014); }
+  .chip {
+    display: inline-block;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    white-space: nowrap;
+  }
+  .chip.has { color: var(--jade); background: var(--jade-soft); border: 1px solid rgba(69,217,166,0.28); }
+  .chip.part { color: var(--amber); background: var(--amber-soft); border: 1px solid rgba(244,183,64,0.28); }
+  .chip.miss { color: var(--coral); background: var(--coral-soft); border: 1px solid rgba(255,110,110,0.28); }
+
+  /* ---- callout ---- */
+  .callout {
+    border: 1px solid var(--violet-line);
+    background: var(--violet-soft);
+    padding: 24px 26px;
+    margin-top: 26px;
+  }
+  .callout .eyebrow { color: var(--violet); margin-bottom: 12px; }
+  .callout p { color: var(--ink); margin-bottom: 0; }
+  .callout p + p { margin-top: 12px; }
+
+  /* ---- phases ---- */
+  .phases { margin-top: 26px; display: flex; flex-direction: column; gap: 14px; }
+  .phase {
+    border: 1px solid var(--line);
+    background: var(--panel);
+    display: grid;
+    grid-template-columns: 78px 1fr auto;
+    align-items: stretch;
+  }
+  .phase .num {
+    font-family: var(--mono);
+    font-size: 24px;
+    color: var(--violet);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-right: 1px solid var(--line);
+    background: var(--panel-2);
+  }
+  .phase .body { padding: 18px 22px; }
+  .phase .body h3 { margin-bottom: 6px; }
+  .phase .body p { font-size: 14px; margin-bottom: 0; color: var(--ink-dim); }
+  .phase .body code { white-space: normal; }
+  .phase .meta {
+    padding: 18px 22px;
+    border-left: 1px solid var(--line);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: flex-end;
+    justify-content: center;
+    min-width: 150px;
+  }
+  .phase .meta .chip { white-space: nowrap; }
+  .phase.diff .num { color: var(--jade); }
+
+  /* ---- recommendation ---- */
+  .rec {
+    border: 1px solid var(--line-bright);
+    margin-top: 26px;
+  }
+  .rec .rec-head {
+    padding: 22px 26px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel);
+  }
+  .rec .rec-head h2 { margin-bottom: 6px; }
+  .rec .rec-head p { margin-bottom: 0; font-size: 14.5px; }
+  .rec ol { margin: 0; padding: 8px 0; list-style: none; counter-reset: r; }
+  .rec ol li {
+    counter-increment: r;
+    padding: 16px 26px 16px 64px;
+    position: relative;
+    border-top: 1px solid var(--line);
+    color: var(--ink-dim);
+    font-size: 14.5px;
+  }
+  .rec ol li:first-child { border-top: 0; }
+  .rec ol li::before {
+    content: counter(r);
+    position: absolute;
+    left: 26px; top: 16px;
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--ground);
+    background: var(--violet);
+    width: 20px; height: 20px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .rec ol li b { color: var(--ink); }
+
+  footer {
+    margin-top: 74px;
+    padding-top: 24px;
+    border-top: 1px solid var(--line);
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink-faint);
+    line-height: 1.7;
+  }
+
+  @media (max-width: 720px) {
+    .split, .fork { grid-template-columns: 1fr; }
+    .fork .a-side { border-right: 0; border-bottom: 1px solid var(--line); }
+    .anatomy .row { grid-template-columns: 1fr; }
+    .anatomy .fk { border-right: 0; border-bottom: 1px solid var(--line); }
+    .phase { grid-template-columns: 56px 1fr; }
+    .phase .num { font-size: 18px; }
+    .phase .meta { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--line); align-items: flex-start; flex-direction: row; flex-wrap: wrap; }
+  }
+</style>
+
+<header class="hero">
+  <div class="wrap">
+    <p class="eyebrow">Deep research · okx.ai vs BlindMarket</p>
+    <h1>Rent your agent</h1>
+    <p class="lede">okx.ai runs <b>two</b> marketplaces. BlindMarket has built one of them well and none of the other. The gap that matters isn&rsquo;t the storefront UI — it&rsquo;s that okx.ai lets agents <b>sell a standing service and get paid per call</b>, while every BlindMarket payment is still a full on-chain escrow task.</p>
+    <div class="metastrip">
+      <div>
+        <div class="k">/tasks · bounty model</div>
+        <div class="v has">BlindMarket has this</div>
+      </div>
+      <div>
+        <div class="k">/agents · rental model</div>
+        <div class="v gap">Missing the core primitive</div>
+      </div>
+      <div>
+        <div class="k">Reusable UI shell</div>
+        <div class="v has">Profile · browse · reviews exist</div>
+      </div>
+      <div>
+        <div class="k">The real lift</div>
+        <div class="v">Service entity + per-call settlement</div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <section>
+    <div class="section-intro">
+      <p class="eyebrow">01 — Two models, one built</p>
+      <h2>okx.ai is a bounty board <em>and</em> a service catalog</h2>
+      <p>The screenshots show two distinct surfaces with two distinct economic shapes. They look similar because they share an identity and reputation layer, but the money moves completely differently.</p>
+    </div>
+    <div class="split">
+      <div class="modelcard">
+        <span class="tag have">BlindMarket already has this</span>
+        <h3>The task / bounty model</h3>
+        <div class="route">okx.ai/tasks</div>
+        <p>A buyer posts a bespoke task; agents accept it (by pasting a prompt into their own agent), submit work, and get paid from escrow once concluded. Buyer-initiated, one-off, negotiable price. This is BlindMarket&rsquo;s entire product today — <code>createTask</code> &rarr; accept &rarr; submit &rarr; verify &rarr; settle.</p>
+      </div>
+      <div class="modelcard">
+        <span class="tag need">BlindMarket is missing this</span>
+        <h3>The rental / service model</h3>
+        <div class="route">okx.ai/agents</div>
+        <p>An agent is a <b>standing product</b>. Its owner lists named <b>Services</b>, each at a fixed price (&ldquo;0.5 USDT · Use now&rdquo;), with a public profile, a &ldquo;sold&rdquo; counter and star reviews. A buyer taps <b>Use now</b> and pays <b>per invocation</b>. Provider-initiated, repeatable, catalog-priced. This is &ldquo;rent your agent.&rdquo;</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-intro">
+      <p class="eyebrow">02 — Teardown</p>
+      <h2>How okx.ai&rsquo;s rental model actually works</h2>
+      <p>Reconstructed from okx.ai&rsquo;s own agent-runtime definitions (identity, discovery and payments protocols). Three layers do the work: an on-chain <b>identity</b>, a <b>Service</b> record hanging off it, and a per-call <b>payment handshake</b>.</p>
+    </div>
+
+    <h3 style="margin-top:14px; color:var(--ink-faint); font-size:12px; letter-spacing:0.1em; text-transform:uppercase;">The Service entity — the object BlindMarket has no equivalent of</h3>
+    <div class="anatomy">
+      <div class="row"><div class="fk">agent</div><div class="fv">An <b>ERC-8004 identity on XLayer</b> (fixed chain). Registered as an <b>ASP</b> (provider) with a name, description, avatar and reputation. Searchable by anyone.</div></div>
+      <div class="row"><div class="fk">service.name</div><div class="fv">A 5&ndash;30 char noun phrase (&ldquo;2026 World Cup Predictions and Betting&rdquo;). An agent lists <b>one or many</b>.</div></div>
+      <div class="row"><div class="fk">service.type</div><div class="fv"><b>API service</b> (<code>A2MCP</code>) = <b>pay-per-call, fixed price</b>. &nbsp;·&nbsp; <b>Agent-to-agent</b> (<code>A2A</code>) = negotiated / off-chain pricing.</div></div>
+      <div class="row"><div class="fk">service.fee</div><div class="fv">A plain <b>USDT</b> number (&le;6 decimals). Required for an API service, optional for A2A. This is the &ldquo;0.5 USDT&rdquo; on the card.</div></div>
+      <div class="row"><div class="fk">service.endpoint</div><div class="fv">A public <code>https://</code> URL the <b>agent owner hosts themselves</b> — permanent, recorded on-chain. Required for API services. <b>This is the load-bearing difference.</b></div></div>
+      <div class="row"><div class="fk">reputation</div><div class="fv">Star rating (<code>feedbackRate</code>), % positive, <b>&ldquo;sold&rdquo; count</b>, and a full review distribution — all tied to the on-chain agent id.</div></div>
+    </div>
+
+    <h3 style="margin-top:34px; color:var(--ink-faint); font-size:12px; letter-spacing:0.1em; text-transform:uppercase;">&ldquo;Use now&rdquo; — the per-call payment handshake</h3>
+    <p style="margin-top:10px;">When a buyer invokes an API service, the platform is <b>not in the delivery path</b>. The buyer&rsquo;s wallet hits the agent&rsquo;s own endpoint and settles per call over HTTP 402:</p>
+    <div class="flow">
+      <span class="step">Buyer hits <b>agent endpoint</b></span>
+      <span class="arw">&rarr;</span>
+      <span class="step">Server replies <b>HTTP 402</b><br></span>
+      <span class="arw">&rarr;</span>
+      <span class="step pay">Wallet pays fee (x402 / USDT)</span>
+      <span class="arw">&rarr;</span>
+      <span class="step">Replay request</span>
+      <span class="arw">&rarr;</span>
+      <span class="step"><b>200</b> — result returned</span>
+    </div>
+    <p style="margin-top:16px;">For a single call that&rsquo;s a one-shot <code>x402</code> payment. For repeated calls, okx.ai opens a <b>payment channel</b> (a session) and issues a signed voucher per request, settling on close — the metered / streaming path. The task/bounty acceptance (Image 3&rsquo;s &ldquo;paste this prompt into your agent&rdquo;) is a <em>different</em>, agent-to-agent ingress; the rental model is this direct pay-per-call loop.</p>
+  </section>
+
+  <section>
+    <div class="section-intro">
+      <p class="eyebrow">03 — The architectural fork</p>
+      <h2>Discovery-over-endpoints vs the platform-runs-everything</h2>
+      <p>This is the decision the whole feature hinges on. okx.ai and BlindMarket sit on opposite sides of it, and BlindMarket&rsquo;s side is the reason its stored endpoint URLs are inert today.</p>
+    </div>
+    <div class="fork">
+      <div class="a-side">
+        <h3>okx.ai — thin platform</h3>
+        <div class="diagram">
+          <div class="node">Buyer wallet</div>
+          <div class="vlink">&darr;&nbsp; pays per call</div>
+          <div class="node pay">Agent&rsquo;s own https endpoint<span class="sub">self-hosted by the ASP · 402 handshake</span></div>
+          <div class="vlink">&uarr;&nbsp; only indexes</div>
+          <div class="node dim">Platform<span class="sub">identity · discovery · reputation · rails</span></div>
+        </div>
+        <p>The agent is a real server on the open internet. The platform never sees the payload and isn&rsquo;t custodial. Cheap to scale, but the agent operator does the hosting — and the endpoint sees plaintext.</p>
+      </div>
+      <div class="b-side">
+        <h3>BlindMarket — thick platform</h3>
+        <div class="diagram">
+          <div class="node">Buyer</div>
+          <div class="vlink">&darr;</div>
+          <div class="node pay">Platform<span class="sub">forks worker.js · custodies keys · escrow DB</span></div>
+          <div class="vlink">&darr;</div>
+          <div class="node">Agent = a forked worker process<span class="sub">no public endpoint · reachable only internally</span></div>
+        </div>
+        <p>Agents are platform-run <code>worker.js</code> children with <b>no callable endpoint</b> — the <code>mcpEndpointUrl</code> / <code>agentCardUrl</code> fields are stored but <b>never dialed</b>. All work flows through the internal escrow lifecycle. Custodial and privacy-preserving — but there&rsquo;s no lightweight &ldquo;invoke &amp; pay&rdquo; door.</p>
+      </div>
+    </div>
+    <div class="callout">
+      <p class="eyebrow">The takeaway</p>
+      <p>Don&rsquo;t copy okx.ai&rsquo;s self-hosted-endpoint model — it would shed BlindMarket&rsquo;s key custody and its encryption story, which are the moat. Instead, keep the thick platform and add a <b>platform-mediated invocation</b> path: a new route that runs the agent&rsquo;s worker on demand and settles per call. Same primitive okx.ai exposes, delivered the BlindMarket way.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-intro">
+      <p class="eyebrow">04 — Gap ledger</p>
+      <h2>What&rsquo;s already built vs what&rsquo;s net-new</h2>
+      <p>The profile, browse and reputation shell is real and reusable — the rental primitive underneath it is not.</p>
+    </div>
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr><th>Capability</th><th>Status</th><th>Where it stands in the code</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="what">Agent profile page</td><td><span class="chip has">Exists</span></td><td><code>AgentDetail.tsx</code> + <code>GET /agents/:id</code> — full page, but framed as an owner dashboard (start/stop/withdraw), no buy CTA or price.</td></tr>
+          <tr><td class="what">Marketplace browse</td><td><span class="chip has">Exists</span></td><td><code>AgentMarketplace.tsx</code> + <code>/marketplace/agents/search</code> — ratings, capabilities, task counts. Add price + &ldquo;min price&rdquo; columns.</td></tr>
+          <tr><td class="what">Star reviews per agent</td><td><span class="chip part">Partial</span></td><td><code>agent_reviews</code> table works, but is gated to a completed <code>taskId</code> — the profile-page submit form passes an empty id and is effectively unwired.</td></tr>
+          <tr><td class="what">&ldquo;Sold&rdquo; / usage counter</td><td><span class="chip part">Partial</span></td><td><code>tasksCompleted</code> / <code>totalEarned</code> exist per agent, but aggregate across all work — no per-service &ldquo;172 sold&rdquo; breakdown.</td></tr>
+          <tr><td class="what">Named, priced Service entity</td><td><span class="chip miss">Missing</span></td><td>No schema, table, type or route anywhere. Monetization is <em>only</em> via escrow task. This is the object to build.</td></tr>
+          <tr><td class="what">Per-use invoke &amp; pay</td><td><span class="chip miss">Missing</span></td><td>Smallest unit of payment is a full on-chain escrow task. Even <code>delegate_to_agent</code> replays the whole heavyweight lifecycle.</td></tr>
+          <tr><td class="what">Callable agent ingress</td><td><span class="chip miss">Missing</span></td><td>Agents are forked processes; <code>.well-known/agent.json</code> is platform-wide, not per-agent. No door to invoke a single agent on demand.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-intro">
+      <p class="eyebrow">05 — Where privacy fits</p>
+      <h2>The rental model is your opening to ship confidential services</h2>
+      <p>This ties directly to the optional-privacy thread. A <em>listing</em> — name, description, price — is inherently public, so services live naturally in the public lane. But the <b>invocation</b> doesn&rsquo;t have to be.</p>
+    </div>
+    <div class="col">
+      <ul class="clean">
+        <li class="j"><strong>Service metadata is public</strong> — discovery, price and reviews need no encryption. This is exactly the &ldquo;public lane&rdquo; from the optional-privacy work, and it&rsquo;s cheap because the contracts never knew about encryption anyway.</li>
+        <li><strong>The per-call input &amp; output can still be ECIES-encrypted</strong> end-to-end to the agent&rsquo;s key. BlindMarket already has this crypto; it&rsquo;s the same wrap/unwrap the task flow uses.</li>
+        <li class="a"><strong>That combination is a wedge okx.ai structurally cannot match.</strong> Their model routes the payload through a self-hosted endpoint that sees plaintext. &ldquo;Rent an agent, your prompt and result stay encrypted from the platform and everyone else&rdquo; is a category okx.ai&rsquo;s architecture forbids.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-intro">
+      <p class="eyebrow">06 — Build path</p>
+      <h2>Four phases, front-loaded on the cheap wins</h2>
+      <p>Sequenced so a usable &ldquo;rent your agent&rdquo; ships after Phase 2; Phases 3&ndash;4 turn it from viable into differentiated.</p>
+    </div>
+    <div class="phases">
+      <div class="phase">
+        <div class="num">1</div>
+        <div class="body">
+          <h3>The Service entity</h3>
+          <p>New <code>agent_services</code> table: <code>{agentAddress, name, description, priceRaw, type, active, soldCount, avgRating}</code>. Owner CRUD + public list route. Render a &ldquo;Services&rdquo; section on the existing profile with price + a <b>Use</b> CTA, and add a min-price column to the browse table. Pure additive — reuses the built shell.</p>
+        </div>
+        <div class="meta"><span class="chip has">Reuses UI shell</span><span class="chip part">~new table + routes</span></div>
+      </div>
+      <div class="phase">
+        <div class="num">2</div>
+        <div class="body">
+          <h3>Per-use invocation + settlement</h3>
+          <p><code>POST /services/:id/invoke</code> — accept input, run the agent worker <b>detached from the full task lifecycle</b>, return output. First settlement cut: a micro-escrow fast-path (reuse <code>createTask</code> with instant auto-verify). Bump per-service <code>soldCount</code> and earnings <b>atomically</b> — respect the known earnings-drift lesson.</p>
+        </div>
+        <div class="meta"><span class="chip miss">Core new work</span><span class="chip part">worker path refactor</span></div>
+      </div>
+      <div class="phase">
+        <div class="num">3</div>
+        <div class="body">
+          <h3>Payment channels — the real primitive</h3>
+          <p>Open a channel per buyer&harr;agent, sign a voucher per call, settle on close. This is okx.ai&rsquo;s session model. Repeated per-use invocation is <b>exactly the repeat-micro-interaction pilot</b> VISION-2 said would justify channels — the rental feature is that pilot. Kills per-call gas.</p>
+        </div>
+        <div class="meta"><span class="chip miss">New contract work</span><span class="chip part">unblocks metering</span></div>
+      </div>
+      <div class="phase diff">
+        <div class="num">4</div>
+        <div class="body">
+          <h3>Confidential invocation</h3>
+          <p>Optional per service: ECIES-wrap the input to the agent&rsquo;s pubkey and encrypt the result back. The differentiator from §5 — &ldquo;rent an agent, end-to-end encrypted.&rdquo; Reuses existing crypto; ship it as the premium tier.</p>
+        </div>
+        <div class="meta"><span class="chip has">Moat feature</span><span class="chip has">reuses crypto</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="rec">
+      <div class="rec-head">
+        <p class="eyebrow" style="color:var(--jade);">Recommendation</p>
+        <h2>Build the door, not okx.ai&rsquo;s house</h2>
+        <p>The UI is largely done. The lift is one new object and one new settlement path — delivered the custodial, encryptable way only BlindMarket can.</p>
+      </div>
+      <ol>
+        <li><b>Add a Service entity and a per-use invocation route</b> — that&rsquo;s the whole gap between &ldquo;agent registry&rdquo; and &ldquo;rent your agent.&rdquo; Everything else is polish on code that already exists.</li>
+        <li><b>Stay platform-mediated; don&rsquo;t self-host endpoints.</b> okx.ai&rsquo;s thin-platform model would cost you key custody and encryption. Run the worker on demand instead.</li>
+        <li><b>Let rental be the reason to finally build payment channels</b> — it&rsquo;s the repeat-usage pilot your own roadmap gated them on.</li>
+        <li><b>Ship confidential invocation as the wedge</b> okx.ai can&rsquo;t copy, and reuse the sold-count / reviews plumbing you already have (fixing the empty-<code>taskId</code> review path along the way).</li>
+      </ol>
+    </div>
+  </section>
+
+  <footer>
+    Sourced from the current BlindMarket tree (contracts · backend · frontend · worker) and okx.ai&rsquo;s published agent-runtime protocol definitions (identity · discovery · payments).<br>
+    Verify each named route / field against source before implementing — paths drift.
+  </footer>
+
+</div>
