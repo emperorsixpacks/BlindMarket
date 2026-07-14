@@ -53,16 +53,17 @@ still sign the upgrade + role setup). All commands need `contracts/.env` →
    `MARKETPLACE_SIGNER_ADDRESS=0x… npx hardhat run scripts/rotate-verifier.ts --network 0g-mainnet`
 5. **Upgrade BlindEscrow** (#14/#26 — storage already validated SAFE):
    `npx hardhat run scripts/upgrade-blind-escrow.ts --network 0g-mainnet` → expect `✓ Upgraded & VERIFIED`.
-6. **Redeploy ValidatorPool + INFT** on mainnet with the decided stake token / oracle:
-   `STAKE_TOKEN=0x… npx hardhat run scripts/redeploy-validator-pool.ts --network 0g-mainnet`
-   `INFT_ORACLE=0x… npx hardhat run scripts/redeploy-inft.ts --network 0g-mainnet`
-   These get **NEW addresses** (fresh, non-upgradeable deploys). The redeploy scripts write them
-   into `deployments/0g-mainnet.json` (the single source of truth). Propagate to both apps with:
-   `cd contracts && npm run sync-addresses` → commit the regenerated `contractAddresses.ts` files.
-   Then set the runtime env in the secret store: `INFT_ADDRESS` + `VALIDATOR_POOL_ADDRESS` = new
-   addresses (env wins over the fallbacks at runtime). BlindEscrow is unchanged — upgraded in place
-   at the same `0x3d0374…` proxy. (CI guard: `npm run check-addresses` fails if the committed
-   `contractAddresses.ts` drift from the deployment records.)
+6. **~~Redeploy ValidatorPool + INFT~~ — DEFERRED, not a launch step** (decision: `MAINNET-DECISIONS.md` §4/§5).
+   Both features are dormant: disputes are admin-resolved (`resolveDispute` is `onlyAdmin`; VP is
+   not wired into escrow), and the INFT `#27` fix only hardens the dormant transfer path while live
+   minting is oracle-independent + non-fatal. Deploy each **when its feature actually ships**:
+   - **ValidatorPool** — from the Safe (admin is constructor-fixed), with a real ERC20 stake token
+     and `MIN_STAKE` rescaled to that token's decimals (today's `100e6` assumes 6-decimals).
+   - **INFT** — with a real 0G TEE attestation oracle (a Safe/EOA placeholder can't produce valid
+     `verifyProof` proofs, so transfers would revert until then).
+   When you do deploy either: they get NEW addresses → run `cd contracts && npm run sync-addresses`,
+   commit the regenerated `contractAddresses.ts`, and set `INFT_ADDRESS` / `VALIDATOR_POOL_ADDRESS`
+   in the secret store. BlindEscrow is unaffected (upgraded in place at `0x3d0374…`).
 7. **Set the token allowlist** — `allowToken(addr)` for each decided token (native 0G already allowed).
 8. **Transfer admin → Safe** (2.2): `proposeAdmin(Safe)` (deployer) then `acceptAdmin()` (Safe UI) for BlindEscrow/BlindReputation/TaskRegistry; `transferOwnership(Safe)` for INFT.
 9. **Wire the mainnet backend** (3.4): signer key + mainnet addresses in the secret store; restart.
