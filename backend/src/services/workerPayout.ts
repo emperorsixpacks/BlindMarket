@@ -13,16 +13,16 @@ import * as escrowService from './escrow.js';
 import { redis } from './redis.js';
 
 // Cache the on-chain feeBps for the duration of the process. Fee changes are
-// admin-gated and rare; one stale read per restart is fine. Falls back to 1500
-// (15%) — the documented default in CLAUDE.md — if the RPC is unreachable.
+// admin-gated and rare; one stale read per restart is fine. Falls back to 1000
+// (10%) — the documented default in CLAUDE.md — if the RPC is unreachable.
 let cachedFeeBps: number | null = null;
 export async function getFeeBps(): Promise<number> {
   if (cachedFeeBps !== null) return cachedFeeBps;
   try {
     cachedFeeBps = await escrowService.feeBps();
   } catch (err) {
-    console.warn('[a2a] feeBps RPC read failed, falling back to 1500:', (err as Error).message);
-    cachedFeeBps = 1500;
+    console.warn('[a2a] feeBps RPC read failed, falling back to 1000:', (err as Error).message);
+    cachedFeeBps = 1000;
   }
   return cachedFeeBps;
 }

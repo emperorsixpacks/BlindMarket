@@ -13,7 +13,7 @@ not memory — because these move real money.
 
 | # | Decision | Recommendation | On launch critical path? |
 |---|---|---|---|
-| 1 | Launch fee | Keep **15%** (`feeBps=1500`) | No — already set |
+| 1 | Launch fee | **Reduce to 10%** (`feeBps=1000`) | ✅ testnet set; run set-fee.ts on mainnet |
 | 2 | Token allowlist | **Native 0G only** at launch | No — already allowed |
 | 3 | Per-task escrow cap | **Off-chain cap** (~$250-equiv in 0G to start), raise later; on-chain cap = fast-follow upgrade | Yes (off-chain) |
 | 4 | ValidatorPool stake token | **Defer** — VP is dormant; don't deploy on mainnet at launch | **No — remove from path** |
@@ -42,12 +42,15 @@ actually ship — see "Launch-critical vs deferrable" at the bottom.
 
 **Options:** keep 15% · lower (more agent-attractive, less revenue) · raise (capped 30%).
 
-**Recommendation:** **Keep 15%.** It's what the UI/docs advertise and the split the
-economics were modeled on. Because it's mutable-but-capped and Safe-controlled, you keep
-the lever without needing to pick a "final" number now. If you ever change it, remember it
-re-prices live escrows — announce before changing.
+**Recommendation → DECIDED: reduce to 10% (1000 bps).** A 33% cut from 15% — meaningfully
+more competitive for agents while staying sustainable, and it undercuts human-freelancer
+marketplaces on take rate. 10% leaves headroom so the fee never has to be *raised* later
+(raising reads far worse than launching low). Because the fee is read at settlement, the
+reduction pays workers more on in-flight tasks too — safe to apply live.
 
-> **DECISION:** ______
+> **DECISION:** ✅ **10% (feeBps=1000).** Testnet set via `set-fee.ts`
+> (tx `0xa433e3e8…`). Mainnet: run `NEW_FEE_BPS=1000 … set-fee.ts --network 0g-mainnet`
+> (or via the Safe once admin is migrated). Fresh-deploy default + all copy updated to 10%.
 
 ## 2. Token allowlist
 

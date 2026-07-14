@@ -73,8 +73,8 @@ function cancelTask(uint256 taskId)                           // agent only, bef
 function claimPayment(uint256 taskId)                         // worker only, after verified
 
 // Fee split on completion
-// 85% → worker
-// 15% → platform treasury
+// 90% → worker
+// 10% → platform treasury
 ```
 
 ### BlindReputation.sol
@@ -195,7 +195,7 @@ function listOpenTasks(string category, uint256 offset, uint256 limit) → TaskM
    → Calls BlindEscrow.completeVerification(taskId, true)
 
 6. PAYMENT releases
-   → Contract sends 85% to worker, 15% to treasury
+   → Contract sends 90% to worker, 10% to treasury
    → Task status → Completed
    → Agent rates worker (anonymous score added to reputation)
 ```

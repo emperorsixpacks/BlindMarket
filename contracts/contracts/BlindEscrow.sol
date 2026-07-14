@@ -73,7 +73,7 @@ contract BlindEscrow is Initializable, ReentrancyGuardTransient, PausableUpgrade
     address public pendingAdmin;       // 2-step admin transfer
     address public treasury;
     address public verifier;           // 0G Sealed Inference callback address
-    uint256 public feeBps;             // 15% = 1500 basis points
+    uint256 public feeBps;             // 10% = 1000 basis points
 
     mapping(address => bool) public allowedTokens;  // token whitelist
 
@@ -168,7 +168,7 @@ contract BlindEscrow is Initializable, ReentrancyGuardTransient, PausableUpgrade
         treasury = _treasury;
         verifier = _verifier;
         nextTaskId = 1;
-        feeBps = 1500;
+        feeBps = 1000;
     }
 
     function _authorizeUpgrade(address) internal override onlyAdmin {}

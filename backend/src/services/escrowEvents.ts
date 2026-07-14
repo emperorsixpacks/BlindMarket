@@ -181,7 +181,7 @@ async function tick(): Promise<void> {
 }
 /**
  * Mirror an on-chain dispute resolution into the off-chain accounting.
- * workerFavored=true → the contract already paid the worker (85/15 split) and
+ * workerFavored=true → the contract already paid the worker (90/10 split) and
  * emitted TaskCompleted; credit tasksCompleted/totalEarnedRaw/the Earnings
  * ledger. workerFavored=false → the poster was refunded; record the dispute.
  * Also flips the a2a state out of any active status so worker resume loops

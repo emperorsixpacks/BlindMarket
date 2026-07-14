@@ -371,7 +371,7 @@ describe("BlindEscrow", function () {
       await escrow.connect(worker).submitEvidence(1, EVIDENCE_HASH);
     });
 
-    it("should release 85% to worker, 15% to treasury, and record reputation", async function () {
+    it("should release 90% to worker, 10% to treasury, and record reputation", async function () {
       const workerBefore = await token.balanceOf(worker.address);
       const treasuryBefore = await token.balanceOf(treasury.address);
 
@@ -380,7 +380,7 @@ describe("BlindEscrow", function () {
       const task = await escrow.getTask(1);
       expect(task.status).to.equal(4); // Completed
 
-      const expectedFee = (AMOUNT * 1500n) / 10000n;
+      const expectedFee = (AMOUNT * 1000n) / 10000n;
       const expectedPayout = AMOUNT - expectedFee;
 
       expect(await token.balanceOf(worker.address)).to.equal(workerBefore + expectedPayout);
@@ -587,7 +587,7 @@ describe("BlindEscrow", function () {
       await escrow.connect(admin).resolveDispute(1, true);
 
       expect((await escrow.getTask(1)).status).to.equal(4); // Completed
-      const fee = (AMOUNT * 1500n) / 10000n;
+      const fee = (AMOUNT * 1000n) / 10000n;
       expect(await token.balanceOf(worker.address)).to.equal(workerBefore + AMOUNT - fee);
     });
 
@@ -618,7 +618,7 @@ describe("BlindEscrow", function () {
   describe("admin functions", function () {
     it("should set fee bps with event", async function () {
       await expect(escrow.connect(admin).setFeeBps(2000))
-        .to.emit(escrow, "FeeBpsUpdated").withArgs(1500, 2000);
+        .to.emit(escrow, "FeeBpsUpdated").withArgs(1000, 2000);
       expect(await escrow.feeBps()).to.equal(2000);
     });
 
