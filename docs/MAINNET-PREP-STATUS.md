@@ -49,10 +49,13 @@ still sign the upgrade + role setup). All commands need `contracts/.env` →
 1. **Lock decisions** (fee, allowlist, VP stake token, INFT oracle, cap).
 2. **Deploy the Gnosis Safe** (2.1).
 3. **Generate + fund the fresh marketplace signer** (3.1, 3.2) — clean machine.
-4. **Rotate verifier to the fresh signer** (deployer still admin):
-   `MARKETPLACE_SIGNER_ADDRESS=0x… npx hardhat run scripts/rotate-verifier.ts --network 0g-mainnet`
-5. **Upgrade BlindEscrow** (#14/#26 — storage already validated SAFE):
-   `npx hardhat run scripts/upgrade-blind-escrow.ts --network 0g-mainnet` → expect `✓ Upgraded & VERIFIED`.
+4. ✅ **DONE — Rotated verifier to the fresh signer** `0xF0c75D…` (2026-07-14, tx `0xff4420f0…`;
+   `MARKETPLACE_SIGNER_ADDRESS=0x… npx hardhat run scripts/rotate-verifier.ts --network 0g-mainnet`).
+   Backend already signs with the new key; `verifierMatches=true`.
+5. ✅ **DONE — Upgraded BlindEscrow** (2026-07-14, impl `0x4B804C0c…`→`0x7792E866…`, proxy unchanged,
+   byte-verified). Adversarial pre-flight caught that mainnet was behind HEAD by MORE than #14/#26 —
+   the swap also shipped the per-task-verifier feature (932a19b, testnet-only until now); user
+   re-approved full HEAD. Storage SAFE, all 47 tasks preserved (nextTaskId=48), backward-compatible.
 6. **~~Redeploy ValidatorPool + INFT~~ — DEFERRED, not a launch step** (decision: `MAINNET-DECISIONS.md` §4/§5).
    Both features are dormant: disputes are admin-resolved (`resolveDispute` is `onlyAdmin`; VP is
    not wired into escrow), and the INFT `#27` fix only hardens the dormant transfer path while live
@@ -81,5 +84,5 @@ store to the new key. ETA ~10 min. Rehearse on testnet first.
 ## Honest gaps to weigh before "real users, real money"
 
 - **Custody (5b.2–5b.5):** cleartext `rawPrivateKey` per agent means a DB/env leak hands over every agent's funds. This is the biggest non-contract risk; plan the non-custodial migration before serious volume.
-- **Hot-key roles (partially separated):** ✅ `treasury` moved off the deployer to a cold EOA `0x20093c…` (2026-07-14) — fees no longer accrue on the hot key. 🔄 **Verifier rotation IN FLIGHT (paused):** fresh key `0xF0c75D…` generated + funded 2 0G; awaiting Andrew to set `MARKETPLACE_SIGNER_PRIVATE_KEY` on Render, then a **coordinated** `setVerifier` (rotate-verifier.ts). ⚠ Setting the Render var WITHOUT running setVerifier pauses settlements — `/health/bridge` prints the exact rotateCommand when it detects the mismatch. ⚠ Still open after that: `admin` = deployer `0x2f8b…` → migrate admin → Safe (`migrate-admin-to-safe.ts`, §2).
+- **Hot-key roles (mostly separated):** ✅ `treasury` → cold EOA `0x20093c…`; ✅ **verifier ROTATED** to a fresh dedicated key `0xF0c75D…` (2026-07-14, tx `0xff4420f0…`, funded 2 0G, `verifierMatches=true`) — the `admin==verifier` collapse is **FIXED**. ⚠ Still open: `admin` = deployer `0x2f8b…` → migrate admin → Safe (`migrate-admin-to-safe.ts`, §2), then cold-store the deployer EOA.
 - **Formal audit / timelock / bug bounty** (§6) remain the mature-money measures.
