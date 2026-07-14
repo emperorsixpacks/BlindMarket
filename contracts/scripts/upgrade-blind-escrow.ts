@@ -1,26 +1,31 @@
 /**
- * Upgrade the BlindEscrow UUPS proxy to a new implementation.
+ * Upgrade the BlindEscrow UUPS proxy to the currently compiled implementation.
  *
- * Reads the proxy address from deployments/<network>.json (network-aware:
- * 0g-testnet or 0g-mainnet), deploys the new BlindEscrow implementation, and
- * calls upgradeToAndCall on the proxy (via OpenZeppelin's upgrades plugin). The
- * proxy address, all task state, escrow balances, admin, verifier, treasury,
- * fee config, token allowlist, and reputation/registry wiring are all preserved
- * — only the executable code changes.
+ * Reads the proxy address from deployments/<network>.json (0g-testnet /
+ * 0g-mainnet). Deploys a new implementation ONLY if the compiled bytecode
+ * actually differs from what's live (redeployImplementation defaults to
+ * 'onchange'); a genuine no-op otherwise. The proxy address, all task state,
+ * escrow balances, admin, verifier, treasury, fee config, token allowlist, and
+ * reputation/registry wiring are preserved — only the code changes.
+ *
+ * The output is UNAMBIGUOUS: it always ends by verifying that the proxy's live
+ * code is byte-equivalent to the compiled BlindEscrow (normalizing the UUPS
+ * __self immutable), and reports either "upgraded & verified" or "already
+ * current & verified" — never a bare "no-op" you have to second-guess.
+ *
+ * (History: this script used to force redeployImplementation:'always', which
+ * deployed a throwaway impl every run and, combined with a stale post-tx RPC
+ * read, made a SUCCESSFUL upgrade print as a no-op. Both are fixed here.)
  *
  * Prerequisites:
- *   - PRIVATE_KEY env var set to the admin's private key (the address that
- *     deployed the proxy is admin by default; see BlindEscrow.initialize).
- *   - Admin wallet has 0G for gas.
- *   - Run scripts/validate-escrow-upgrade.ts first (read-only storage check).
+ *   - PRIVATE_KEY = the current admin (the proxy deployer by default).
+ *   - Admin funded with 0G for gas.
+ *   - scripts/validate-escrow-upgrade.ts (read-only storage check) — also
+ *     enforced here as a hard gate.
  *
  * Usage:
  *   PRIVATE_KEY=<admin_pk> npx hardhat run scripts/upgrade-blind-escrow.ts --network 0g-testnet
  *   PRIVATE_KEY=<admin_pk> npx hardhat run scripts/upgrade-blind-escrow.ts --network 0g-mainnet
- *
- * Verifies success by reading the new implementation address and calling
- * the new marketplaceAssign function via staticCall (no state change) to
- * confirm it exists on the proxy.
  */
 
 import { ethers, upgrades, network } from "hardhat";
@@ -28,106 +33,92 @@ import * as fs from "fs";
 import * as path from "path";
 import { assertSafeNetwork } from "./_guard";
 
-const EIP1967_IMPL_SLOT =
-  "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
+const IMPL_SLOT = "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
 
-/**
- * Read the EIP-1967 implementation slot directly from the RPC.
- *
- * upgrades.erc1967.getImplementationAddress() can return cached values that
- * don't reflect the post-upgrade state, leading to a misleading "before==after"
- * log even when the upgrade succeeded. The raw eth_getStorageAt call is
- * authoritative.
- */
-async function readImplFromChain(proxy: string): Promise<string> {
-  const raw = await ethers.provider.getStorage(proxy, EIP1967_IMPL_SLOT);
+/** Authoritative EIP-1967 impl read (OZ's helper can serve stale cached values
+ *  right after an upgrade). */
+async function readImpl(proxy: string): Promise<string> {
+  const raw = await ethers.provider.getStorage(proxy, IMPL_SLOT);
   return ethers.getAddress("0x" + raw.slice(-40));
 }
 
+/** Two deployments of identical source differ only in the UUPS __self immutable
+ *  (each impl stores address(this)). Zero it out so bytecode can be compared. */
+function normalizeSelf(code: string, impl: string): string {
+  const a = impl.toLowerCase().replace(/^0x/, "");
+  return code.toLowerCase().split(a).join("0".repeat(40));
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 async function main() {
   await assertSafeNetwork();
-  // Network-aware: 0g-testnet → deployments/0g-testnet.json, 0g-mainnet →
-  // deployments/0g-mainnet.json. Lets the same script run the mainnet upgrade.
+
   const deploymentsPath = path.resolve(__dirname, `../deployments/${network.name}.json`);
-  if (!fs.existsSync(deploymentsPath)) {
-    throw new Error(`deployments file not found: ${deploymentsPath}`);
-  }
+  if (!fs.existsSync(deploymentsPath)) throw new Error(`deployments file not found: ${deploymentsPath}`);
   const deployments = JSON.parse(fs.readFileSync(deploymentsPath, "utf-8"));
-  const proxyAddress: string = deployments.contracts?.BlindEscrow;
+  const proxy: string = deployments.contracts?.BlindEscrow;
   const expectedAdmin: string | undefined = deployments.deployer;
-  if (!proxyAddress) {
-    throw new Error("BlindEscrow address missing from deployments file");
-  }
+  if (!proxy) throw new Error("BlindEscrow address missing from deployments file");
 
   const [signer] = await ethers.getSigners();
+  if (!signer) throw new Error("No signer configured — set PRIVATE_KEY in .env");
   console.log("Upgrader:", signer.address);
   if (expectedAdmin && expectedAdmin.toLowerCase() !== signer.address.toLowerCase()) {
     console.warn(
-      `[warn] signer (${signer.address}) is not the recorded deployer (${expectedAdmin}). The on-chain admin check will revert if this signer is not the current admin.`,
+      `[warn] signer (${signer.address}) is not the recorded deployer (${expectedAdmin}); the on-chain admin check will revert if it isn't the current admin.`,
     );
   }
-
   const balance = await ethers.provider.getBalance(signer.address);
   console.log("Balance:", ethers.formatEther(balance), "0G");
-  if (balance === 0n) {
-    throw new Error("Upgrader has 0 balance. Fund it at https://faucet.0g.ai/");
-  }
-
-  console.log(`\n--- Upgrading BlindEscrow proxy at ${proxyAddress} ---`);
-
-  // Capture pre-upgrade implementation for the "before/after" log. Use the
-  // raw EIP-1967 slot read because OZ's getImplementationAddress can lie here.
-  const preImpl = await readImplFromChain(proxyAddress);
-  console.log("Implementation before:", preImpl);
+  if (balance === 0n) throw new Error("Upgrader has 0 balance. Fund it at https://faucet.0g.ai/");
 
   const Factory = await ethers.getContractFactory("BlindEscrow");
 
-  // OZ upgrades plugin runs storage-layout compatibility checks against the
-  // deployed implementation; if storage is incompatible it throws here rather
-  // than producing a broken upgrade.
-  // redeployImplementation: 'always' bypasses OZ's bytecode-equality cache.
-  // We hit a case where the cache decided no redeploy was needed even though
-  // the new bytecode contained a function (marketplaceAssign / 0xb1e1fca4)
-  // that wasn't present in the previously-deployed implementation. Forcing
-  // redeploy is the safe fallback — it costs one extra impl deployment but
-  // guarantees the proxy points at the freshly-built bytecode.
-  const upgraded = await upgrades.upgradeProxy(proxyAddress, Factory, {
-    kind: "uups",
-    redeployImplementation: "always",
-  });
+  // Hard storage-layout gate (same check as validate-escrow-upgrade.ts).
+  await upgrades.validateUpgrade(proxy, Factory, { kind: "uups" });
+  console.log("[ok] storage layout compatible");
+
+  const preImpl = await readImpl(proxy);
+  console.log(`\n--- Upgrading BlindEscrow proxy ${proxy} ---`);
+  console.log("Implementation before:", preImpl);
+
+  const upgraded = await upgrades.upgradeProxy(proxy, Factory, { kind: "uups" });
   await upgraded.waitForDeployment();
 
-  const postImpl = await readImplFromChain(proxyAddress);
+  // Authoritative post-upgrade impl read, retrying through RPC lag.
+  let postImpl = await readImpl(proxy);
+  for (let i = 0; i < 8 && postImpl === preImpl; i++) {
+    await sleep(1500);
+    postImpl = await readImpl(proxy);
+  }
   console.log("Implementation after: ", postImpl);
 
-  if (preImpl.toLowerCase() === postImpl.toLowerCase()) {
-    console.warn("[warn] implementation address unchanged — no bytecode delta detected. Upgrade was a no-op.");
+  // ── Verification gate ──────────────────────────────────────────────────────
+  // The proxy's live code MUST be byte-equivalent to the freshly compiled
+  // BlindEscrow (after zeroing __self). Catches a silently-skipped upgrade AND a
+  // stale address read — turning the old ambiguous "no-op" into a real verdict.
+  const liveCode = await ethers.provider.getCode(postImpl);
+  const artifact = JSON.parse(
+    fs.readFileSync(path.resolve(__dirname, "../artifacts/contracts/BlindEscrow.sol/BlindEscrow.json"), "utf-8"),
+  );
+  const compiled: string =
+    typeof artifact.deployedBytecode === "string" ? artifact.deployedBytecode : artifact.deployedBytecode.object;
+
+  const verified = normalizeSelf(liveCode, postImpl) === normalizeSelf(compiled, postImpl);
+  if (!verified) {
+    throw new Error(
+      "VERIFICATION FAILED: the proxy's live implementation is NOT byte-equivalent to the " +
+        "compiled BlindEscrow. Do NOT trust this upgrade — investigate before proceeding.",
+    );
+  }
+
+  if (postImpl.toLowerCase() === preImpl.toLowerCase()) {
+    console.log("\n✓ Already current & VERIFIED — the proxy already runs the compiled BlindEscrow (no upgrade needed).");
   } else {
-    console.log("[ok] implementation address changed");
+    console.log("\n✓ Upgraded & VERIFIED — the proxy now runs the compiled BlindEscrow.");
   }
-
-  // Sanity check: the new function must be callable on the proxy. We use a
-  // dry-run staticCall with a guaranteed-revert path (calling as non-verifier)
-  // — what we care about is that the function selector resolves and reverts
-  // with NotVerifier, not "function does not exist".
-  const escrow = upgraded as unknown as { marketplaceAssign: (taskId: bigint, worker: string) => Promise<unknown>; getFunction: (n: string) => { staticCall: (...args: unknown[]) => Promise<unknown> } };
-  try {
-    await (escrow.getFunction("marketplaceAssign") as { staticCall: (taskId: bigint, worker: string) => Promise<unknown> }).staticCall(1n, ethers.ZeroAddress);
-    console.warn("[warn] marketplaceAssign staticCall did not revert — unexpected, but the function is at least callable.");
-  } catch (err) {
-    const msg = (err as Error).message;
-    if (msg.includes("NotVerifier") || msg.includes("ZeroAddress") || msg.includes("InvalidStatus")) {
-      console.log("[ok] marketplaceAssign is live on the proxy (reverted as expected for non-verifier dry-run)");
-    } else if (msg.includes("function does not exist") || msg.includes("call revert exception")) {
-      throw new Error(`marketplaceAssign not found after upgrade: ${msg}`);
-    } else {
-      // Some other revert — still proves the function dispatches. Log and continue.
-      console.log(`[ok] marketplaceAssign dispatched (revert: ${msg.slice(0, 120)})`);
-    }
-  }
-
-  console.log("\nUpgrade complete.");
-  console.log(`Proxy address (unchanged): ${proxyAddress}`);
+  console.log(`Proxy address (unchanged): ${proxy}`);
 }
 
 main().catch((err) => {
