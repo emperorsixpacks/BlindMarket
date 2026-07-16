@@ -86,6 +86,18 @@ function rewardToNumber(raw: string | undefined, decimals: number): number {
   }
 }
 
+// BigInt(raw) THROWS on malformed input ("1.5", "0xZ"…). One bad reward from
+// the API must not blank the whole page — the sort and total-spent reduce
+// below go through this instead of calling BigInt directly.
+function rewardToWei(raw: string | undefined): bigint {
+  if (!raw) return 0n;
+  try {
+    return BigInt(raw);
+  } catch {
+    return 0n;
+  }
+}
+
 function formatReward(raw: string | undefined, decimals: number, symbol: string) {
   if (!raw) return '—';
   try {
@@ -175,7 +187,7 @@ export default function MyTasks() {
     .sort((a, b) => {
       // Compare rewards as BigInt — they're uint256 wei, well past the safe
       // integer range, so Number() coercion could mis-order near-equal amounts.
-      const rewardWei = (t: PostedTask) => (t.onChain ? BigInt(t.onChain.reward) : 0n);
+      const rewardWei = (t: PostedTask) => rewardToWei(t.onChain?.reward);
       const cmpWei = (x: bigint, y: bigint) => (x < y ? -1 : x > y ? 1 : 0);
       const getCreatedAt = (t: PostedTask) => Number(t.onChain?.createdAt || t.state.acceptedAt || 0);
 
@@ -199,7 +211,7 @@ export default function MyTasks() {
   // per-task Number() precision loss above 0.009 0G.
   const completedTasks = tasks.filter(t => effectiveStatus(t) === 4);
   const totalSpentWei = completedTasks.reduce(
-    (s, t) => s + (t.onChain ? BigInt(t.onChain.reward) : 0n),
+    (s, t) => s + rewardToWei(t.onChain?.reward),
     0n,
   );
   const totalSpent = Number(formatUnits(totalSpentWei, native.decimals));

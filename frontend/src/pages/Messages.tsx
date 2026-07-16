@@ -184,7 +184,7 @@ export default function Messages() {
                         )}
                       </div>
                       {msg.subject && (
-                        <div className="text-sm font-semibold text-ink mb-1">{msg.subject}</div>
+                        <div className="text-sm font-semibold text-ink mb-1 break-words">{msg.subject}</div>
                       )}
                       <div className="text-xs text-ink-2 line-clamp-2">{msg.body}</div>
                     </div>

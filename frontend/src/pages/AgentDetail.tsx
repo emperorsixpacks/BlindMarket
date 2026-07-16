@@ -364,14 +364,18 @@ export default function AgentDetail() {
   const tabs: Tab[] = isOwner
     ? ['logs', 'services', 'tools', 'tasks', 'reviews', 'webhooks', 'edit', 'metrics']
     : ['services', 'reviews', 'tasks', 'logs', 'tools', 'metrics'];
-  const displayTab: Tab = searchParams.has('tab') || userPickedTab ? tab : isOwner ? 'logs' : 'services';
+  const requestedTab: Tab = searchParams.has('tab') || userPickedTab ? tab : isOwner ? 'logs' : 'services';
+  // A shared ?tab=edit / ?tab=webhooks link opened by a non-owner would
+  // otherwise select a tab that isn't in their tab bar and whose content is
+  // isOwner-gated — blank panel. Fall back to their first tab instead.
+  const displayTab: Tab = tabs.includes(requestedTab) ? requestedTab : tabs[0];
 
-  // okx-style buy signals for the header strip.
+  // okx-style buy signals for the header strip. `distribution` is defensive-
+  // defaulted: a stats payload without it must not crash the whole page.
+  const reviewDist: Record<number, number> = reviewStats?.distribution ?? {};
   const positivePct =
     reviewStats && reviewStats.totalReviews > 0
-      ? Math.round(
-          (((reviewStats.distribution[4] ?? 0) + (reviewStats.distribution[5] ?? 0)) / reviewStats.totalReviews) * 100
-        )
+      ? Math.round((((reviewDist[4] ?? 0) + (reviewDist[5] ?? 0)) / reviewStats.totalReviews) * 100)
       : null;
   const description = (agent.instructions ?? '').trim();
 
@@ -757,8 +761,8 @@ export default function AgentDetail() {
                     </div>
                     <div className="flex-1 space-y-1.5 min-w-0">
                       {[5, 4, 3, 2, 1].map((star) => {
-                        const count = reviewStats.distribution[star] ?? 0;
-                        const max = Math.max(1, ...[1, 2, 3, 4, 5].map((s) => reviewStats.distribution[s] ?? 0));
+                        const count = reviewDist[star] ?? 0;
+                        const max = Math.max(1, ...[1, 2, 3, 4, 5].map((s) => reviewDist[s] ?? 0));
                         return (
                           <div key={star} className="flex items-center gap-3 font-mono text-[11px] text-ink-3">
                             <span className="w-14 shrink-0">{star} star{star > 1 ? 's' : ''}</span>
@@ -1271,8 +1275,14 @@ function WebhookTab({ agentId: _agentId }: { agentId: string }) {
               </div>
               <button
                 onClick={async () => {
-                  await deleteWebhook(h.id);
-                  await loadHooks();
+                  try {
+                    await deleteWebhook(h.id);
+                    await loadHooks();
+                  } catch (err) {
+                    // Surface instead of silently rejecting — the row staying
+                    // put with no feedback reads as a dead button.
+                    setCreateError((err as Error).message || 'Delete failed');
+                  }
                 }}
                 className="text-xs text-err hover:underline shrink-0"
               >

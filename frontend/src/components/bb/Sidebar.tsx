@@ -76,12 +76,14 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   });
   useSocket('platform', { 'stats:update': () => refetch() });
 
-  const { data: unreadData } = useQuery({
+  const { data: unreadData, refetch: refetchUnread } = useQuery({
     queryKey: ['messages', 'unread-count'],
     queryFn: () => authedGet<{ count: number }>('/api/v1/messages/unread-count'),
     refetchInterval: 30_000,
   });
-  useSocket('platform', { 'message:new': () => refetch() });
+  // NB: refetch the UNREAD count — this was wired to the stats refetch above,
+  // which left the badge stale until the 30s interval tick.
+  useSocket('platform', { 'message:new': () => refetchUnread() });
 
   const unreadCount = unreadData?.count ?? 0;
 

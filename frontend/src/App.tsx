@@ -43,8 +43,21 @@ const AgentMarketplace = lazy(() => import('./pages/AgentMarketplace'));
 const TaskTemplates = lazy(() => import('./pages/TaskTemplates'));
 
 const privyAppId = import.meta.env.VITE_PRIVY_APP_ID;
-if (!privyAppId) {
-  throw new Error('VITE_PRIVY_APP_ID is required — set it in frontend/.env');
+// Deliberate hard fail on a misconfigured build — but render a readable
+// error instead of throwing at module scope, which white-screens the whole
+// site with zero fallback (the ErrorBoundary doesn't exist yet up here).
+function MissingEnv() {
+  return (
+    <div className="min-h-screen bg-bg text-ink flex items-center justify-center p-6">
+      <div className="max-w-md border border-line bg-surface p-6">
+        <h1 className="text-base font-semibold mb-2">BlindMarket can't start</h1>
+        <p className="text-sm text-ink-2 leading-relaxed">
+          This build is missing <code className="font-mono text-cream">VITE_PRIVY_APP_ID</code>.
+          Set it in the deployment environment and rebuild.
+        </p>
+      </div>
+    </div>
+  );
 }
 
 // Plain, full-height route fallback — matches the app background so a chunk
@@ -54,6 +67,7 @@ function RouteFallback() {
 }
 
 export default function App() {
+  if (!privyAppId) return <MissingEnv />;
   return (
     <ChainProvider>
       <PrivyProvider
