@@ -15,7 +15,7 @@ decision · 🟠 your infra action · ⏸ deferred (post-launch).
 | 1.1 | Independent contract review | ✅ (internal) | Adversarial multi-agent review of all 5 fixes + fresh re-verification; 2 HIGH blockers caught & fixed. A formal firm audit remains the gold standard (§6, budget-gated). |
 | 1.2 | Storage-layout dry run | ✅ | `validate-escrow-upgrade.ts` = **SAFE on both testnet AND mainnet** (read-only, against the live mainnet proxy `0x3d0374…`). Upgrade is a same-address impl swap; no state migration. |
 | 1.3 | Test suite green | ✅ | 123 contract tests pass, no skips. |
-| 1.4 | Fee schedule | 🟡 | `feeBps=1500` (15%) today; admin-settable, hard-capped 30% (`MAX_FEE_BPS`). ⚠ **Not** per-task — read at settlement, so a change re-prices in-flight tasks. See `MAINNET-DECISIONS.md` §1. |
+| 1.4 | Fee schedule | ✅ | `feeBps=1000` (10%) since 2026-07-14 (`set-fee.ts`, was 1500); admin-settable, hard-capped 30% (`MAX_FEE_BPS`). ⚠ **Not** per-task — read at settlement, so a change re-prices in-flight tasks. See `MAINNET-DECISIONS.md` §1. |
 | 1.5 | Token allowlist | 🟡 | Mainnet escrow currently allows **native 0G only**. Decide if any stablecoin is added day 1 (no USDC is deployed on 0G mainnet — see VP note). Each needs `allowToken(addr)`. Avoid rebasing / fee-on-transfer tokens. |
 | 2.1 | Deploy Gnosis Safe | 🟠 | **Safe supports 0G mainnet (confirmed 2026-07-14):** canonical v1.4.1 contracts are on-chain + 0G is in Safe's config service (tx-service `api.safe.global/tx-service/0g`). Create via **app.safe.global** → pick "0G" → connect MetaMask → 2-of-3 min. Then give the Safe address for `migrate-admin-to-safe.ts`. |
 | 2.2 | Transfer admin → Safe | 🔵 | `proposeAdmin(Safe)` (deployer) → `acceptAdmin()` (Safe UI) for **BlindEscrow, BlindReputation, TaskRegistry**; `transferOwnership(Safe)` for **INFT**. ⚠ **ValidatorPool admin is constructor-fixed — no transfer.** Deploy the mainnet VP *from the Safe* (or accept the EOA admin while VP stays dormant). |
@@ -71,7 +71,7 @@ still sign the upgrade + role setup). All commands need `contracts/.env` →
 8. **Transfer admin → Safe** (2.2): `proposeAdmin(Safe)` (deployer) then `acceptAdmin()` (Safe UI) for BlindEscrow/BlindReputation/TaskRegistry; `transferOwnership(Safe)` for INFT.
 9. **Wire the mainnet backend** (3.4): signer key + mainnet addresses in the secret store; restart.
 10. **Verify** (§5):
-    `EXPECTED_ADMIN=0xSafe EXPECTED_VERIFIER=0xSigner EXPECTED_TREASURY=0x… EXPECTED_FEE_BPS=1500 npx hardhat run scripts/verify-deployment-config.ts --network 0g-mainnet`
+    `EXPECTED_ADMIN=0xSafe EXPECTED_VERIFIER=0xSigner EXPECTED_TREASURY=0x… EXPECTED_FEE_BPS=1000 npx hardhat run scripts/verify-deployment-config.ts --network 0g-mainnet`
     then run one live **$1 test task** end-to-end before announcing.
 11. **Cold-store the deployer EOA** (2.3).
 

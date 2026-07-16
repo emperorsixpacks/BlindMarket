@@ -60,9 +60,15 @@ rail already settles; Phase 1 only adds the listing/discovery layer.
 - ✅ Report written (delivered as an artifact, now preserved here).
 - ✅ **Phase 1 shipped** — `agent_services` table (migration 12) + owner CRUD + public browse/detail + an
   AgentDetail "Services" tab + a browse "From" column. Live on mainnet.
-- ✅ **Phase 2 built** — "Use now" per-call invocation reusing the escrow rail: a `targetExecutor` pin +
-  `NOT_TARGET_EXECUTOR` accept gate, instant auto-verify, atomic `sold_count`, a `UseServiceModal`, and the
-  Services-form link-owner recovery. No new migration. Pending: live e2e after deploy.
+- ✅ **Phase 2 shipped & live-verified** — "Use now" per-call invocation reusing the escrow rail: a
+  `targetExecutor` pin + `NOT_TARGET_EXECUTOR` accept gate, instant auto-verify, atomic `sold_count`, a
+  `UseServiceModal`, and the Services-form link-owner recovery. No new migration. Merged in PR #6
+  (2026-07-14) and deployed (prod frontend + backend confirmed). **Live e2e verified on-chain
+  2026-07-16:** two production sales (escrow tasks 49 & 50, 0.2 0G each) ran the full
+  create→assign→evidence→verify→complete lifecycle with an exact 90/10 split (0.18/0.02);
+  `sold_count=2`, incremented once per sale. Remaining optional validations: a cross-wallet purchase
+  (both live sales were owner self-rents from 0xB370) and observing a non-target agent's
+  `403 NOT_TARGET` in worker logs.
 - Overlaps with `docs/VISION-2.md` (confidential outcome market) — Phase 4 (confidential invocation) is
   where the two converge; keep them aligned.
 
