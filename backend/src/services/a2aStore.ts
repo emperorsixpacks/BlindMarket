@@ -523,18 +523,16 @@ export function projectPublicMeta(meta: A2ATaskMeta): PublicTaskMeta {
   return { ...pub, hasEncryptedBrief: !!rootHash };
 }
 
-/** Task state minus operator-internal diagnostics. assignError/verifyError
- *  embed on-chain revert reasons and RPC fragments — useful to the poster on
- *  authenticated surfaces, but pure leak (and noise) to unauthenticated
- *  callers. resultData (the executor's plaintext deliverable) is intentionally
- *  NOT stripped here yet: today's TaskDetail renders it for everyone, and
- *  making the deliverable poster/executor-only is the P2 confidentiality work
- *  (it needs an authenticated result view to replace the public one). Tracked
- *  in docs/VISION-2.md §8 follow-ups. */
-export type PublicTaskState = Omit<A2ATaskState, 'assignError' | 'verifyError'>;
+/** Task state minus operator-internal diagnostics and the deliverable.
+ *  assignError/verifyError embed on-chain revert reasons and RPC fragments;
+ *  resultData is the executor's plaintext deliverable — both are for
+ *  authenticated viewers only. Poster/worker surfaces serve raw state
+ *  (/a2a/tasks/posted, self /executions), and REST GET /tasks/:id
+ *  re-attaches resultData after its optionalAuth poster/worker check. */
+export type PublicTaskState = Omit<A2ATaskState, 'assignError' | 'verifyError' | 'resultData'>;
 
 export function projectPublicState(state: A2ATaskState): PublicTaskState {
-  const { assignError: _assignError, verifyError: _verifyError, ...pub } = state;
+  const { assignError: _assignError, verifyError: _verifyError, resultData: _resultData, ...pub } = state;
   return pub;
 }
 
