@@ -11,6 +11,7 @@ import {
   Icon,
   FormField,
   FormInput,
+  FormSelect,
   FormTextarea,
 } from '../components/bb';
 import { HeaderManager } from '../components/bb/HeaderManager';
@@ -118,9 +119,6 @@ function capLabel(cap: string): string {
   const t = cap.replace(/_/g, ' ');
   return t.charAt(0).toUpperCase() + t.slice(1);
 }
-
-const selectClass =
-  'w-full px-3 py-2.5 bg-surface-2 border border-line text-ink text-sm focus:border-cream';
 
 export default function DeployAgentForm() {
   const native = getNativeCurrency('og');
@@ -433,14 +431,14 @@ export default function DeployAgentForm() {
           <SectionRule num="02" title="Model" />
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
             <FormField label="Provider">
-              <select value={form.provider} onChange={e => set('provider', e.target.value)} className={selectClass}>
+              <FormSelect value={form.provider} onChange={e => set('provider', e.target.value)}>
                 {Object.keys(providers).map(p => <option key={p} value={p}>{p}</option>)}
-              </select>
+              </FormSelect>
             </FormField>
             <FormField label="Model">
-              <select value={form.model} onChange={e => set('model', e.target.value)} className={`${selectClass} font-mono`}>
+              <FormSelect value={form.model} onChange={e => set('model', e.target.value)} className="font-mono">
                 {(providers[form.provider] ?? []).map(m => <option key={m} value={m}>{m}</option>)}
-              </select>
+              </FormSelect>
             </FormField>
             <FormField label="API key" required={form.provider !== '0g-compute'} hint={form.provider === '0g-compute' ? 'No API key needed — billed to agent wallet via 0G Compute Router' : undefined}>
               <FormInput
@@ -527,14 +525,14 @@ export default function DeployAgentForm() {
               <div className="border border-line p-4 space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <FormField label="Type">
-                    <select
+                    <FormSelect
                       value={newTool.type}
                       onChange={e => setNewTool(t => ({ ...t, type: e.target.value as 'http' | 'mcp' }))}
-                      className={selectClass}
+                      
                     >
                       <option value="http">HTTP</option>
                       <option value="mcp">MCP</option>
-                    </select>
+                    </FormSelect>
                   </FormField>
                   <FormField label="Name">
                     <FormInput
@@ -556,13 +554,13 @@ export default function DeployAgentForm() {
                   </FormField>
                   {newTool.type === 'http' && (
                     <FormField label="Method">
-                      <select
+                      <FormSelect
                         value={newTool.method ?? 'POST'}
                         onChange={e => setNewTool(t => ({ ...t, method: e.target.value as Tool['method'] }))}
-                        className={`${selectClass} font-mono`}
+                        className="font-mono"
                       >
                         {['GET', 'POST', 'PUT', 'DELETE'].map(m => <option key={m} value={m}>{m}</option>)}
-                      </select>
+                      </FormSelect>
                     </FormField>
                   )}
                 </div>
@@ -585,7 +583,7 @@ export default function DeployAgentForm() {
                       <HeaderManager headers={newTool.headers} onChange={(h) => setNewTool(t => ({ ...t, headers: h }))} />
                     </FormField>
                     <FormField label="Body payload">
-                      <select
+                      <FormSelect
                         value={newTool.body.contentType}
                         onChange={e => {
                           const contentType = e.target.value as 'application/json' | 'application/x-www-form-urlencoded';
@@ -597,11 +595,11 @@ export default function DeployAgentForm() {
                             }
                           }));
                         }}
-                        className={selectClass}
+                        
                       >
                         <option value="application/json">JSON</option>
                         <option value="application/x-www-form-urlencoded">Form URL encoded</option>
-                      </select>
+                      </FormSelect>
 
                       {newTool.body.contentType === 'application/json' ? (
                         <FormTextarea

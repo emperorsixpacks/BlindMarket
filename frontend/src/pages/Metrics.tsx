@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAccount } from 'wagmi';
-import { Breadcrumb, PageHeader, Panel, StatCard } from '../components/bb';
+import { Breadcrumb, PageHeader, Panel, StatCard, LoadingState, ErrorState } from '../components/bb';
 import { useAuth } from '../context/AuthContext';
 import { authedGet } from '../lib/api';
 import { FOUNDER_ADDRESSES } from '../config/constants';
@@ -43,6 +43,7 @@ export default function Metrics() {
   const [data, setData] = useState<FunnelResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
   const isFounder =
     !!address && FOUNDER_ADDRESSES.includes(address.toLowerCase());
@@ -57,12 +58,12 @@ export default function Metrics() {
       .catch(e => { if (!cancelled) setError(e?.message || 'Failed to load'); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [isFounder, isAuthenticated, windowDays]);
+  }, [isFounder, isAuthenticated, windowDays, reloadKey]);
 
   if (!isConnected) {
     return (
       <div>
-        <Breadcrumb items={['admin', 'metrics']} />
+        <Breadcrumb items={['account', 'metrics']} />
         <PageHeader title="Metrics" description="Founder-only funnel analytics." />
         <Panel>
           <div className="px-4 py-6 text-sm text-ink-2 font-mono">
@@ -76,7 +77,7 @@ export default function Metrics() {
   if (!isFounder) {
     return (
       <div>
-        <Breadcrumb items={['admin', 'metrics']} />
+        <Breadcrumb items={['account', 'metrics']} />
         <PageHeader title="Metrics" description="Founder-only funnel analytics." />
         <Panel>
           <div className="px-4 py-6 text-sm text-ink-2 font-mono">
@@ -113,13 +114,13 @@ export default function Metrics() {
         ))}
       </div>
 
-      {loading && (
-        <div className="text-xs font-mono text-ink-3 mb-4">loading…</div>
-      )}
+      {loading && <LoadingState label="Loading funnel…" />}
       {error && (
-        <div className="mb-6 px-4 py-3 border border-line bg-surface-2 text-xs font-mono text-ink-3">
-          error: {error}
-        </div>
+        <ErrorState
+          title="Couldn't load metrics"
+          description={error}
+          onRetry={() => setReloadKey(k => k + 1)}
+        />
       )}
 
       {data && (

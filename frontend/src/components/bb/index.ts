@@ -5,7 +5,7 @@ export { Tag } from './Tag';
 export { Panel } from './Panel';
 export { SectionRule } from './SectionRule';
 export { StatCard } from './StatCard';
-export { FormField, FormInput, FormTextarea } from './FormField';
+export { FormField, FormInput, FormSelect, FormTextarea } from './FormField';
 export { Spinner, Skeleton, LoadingState, EmptyState, ErrorState, StatusTag, statusTone } from './states';
 export { DataTable, type Column } from './DataTable';
 export { Sidebar } from './Sidebar';

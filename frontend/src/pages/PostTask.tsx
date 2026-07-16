@@ -15,6 +15,7 @@ import {
   StatusTag,
   Icon,
   SignInGate,
+  Spinner,
 } from '../components/bb';
 import { aesEncrypt, eciesEncrypt, generateAesKey, sha256, toBase64, toBytes } from '../lib/crypto';
 import { stashAesKey } from '../lib/keyStash';
@@ -643,6 +644,34 @@ export default function PostTask() {
           </div>
 
           <div className="p-6">
+            {/* Pipeline strip — the encrypt→fund flow spans several slow
+                steps; showing which one is live keeps a 30s wait from
+                reading as a hang. Stages map onto the existing status
+                machine (no pipeline logic changes). */}
+            {busy && (
+              <div className="mb-5 flex flex-wrap items-center gap-x-4 gap-y-2 font-mono text-2xs uppercase tracking-widest">
+                {([
+                  { label: 'encrypt · upload · wrap keys', stages: ['encrypting'] },
+                  { label: 'approve token', stages: ['approving'] },
+                  { label: 'sign in wallet', stages: ['signing'] },
+                ] as const).map((step, i, all) => {
+                  const active = (step.stages as readonly string[]).includes(status);
+                  const activeIdx = all.findIndex((s) => (s.stages as readonly string[]).includes(status));
+                  const done = activeIdx > i;
+                  return (
+                    <span key={step.label} className="inline-flex items-center gap-2">
+                      {active ? (
+                        <Spinner size={12} />
+                      ) : (
+                        <span className={`w-1.5 h-1.5 inline-block ${done ? 'bg-ok' : 'bg-line-2'}`} />
+                      )}
+                      <span className={active ? 'text-ink' : done ? 'text-ok' : 'text-ink-3'}>{step.label}</span>
+                      {i < all.length - 1 && <span className="text-ink-3/50">→</span>}
+                    </span>
+                  );
+                })}
+              </div>
+            )}
             {!isAuthenticated ? (
               <SignInGate prompt="to post a task" />
             ) : (

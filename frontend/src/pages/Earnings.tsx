@@ -11,6 +11,7 @@ import {
   DataTable,
   type Column,
   useTabParam,
+  Button,
 } from '../components/bb';
 import { useAccountingEntries, useAccountingSummary } from '../hooks/useAccounting';
 import { useAuth } from '../context/AuthContext';
@@ -87,14 +88,18 @@ export default function Earnings() {
   const address = useChainAddress();
   const native = getNativeCurrency(activeChain);
   const fmt = (n: number | null | undefined) => formatCurrency(n, native.symbol);
-  const { data: summary, isLoading: summaryLoading } = useAccountingSummary();
+  const { data: summary, isLoading: summaryLoading, isError: summaryError, refetch: refetchSummary } = useAccountingSummary();
   const { data: entriesRes, isLoading: entriesLoading, error: entriesError } = useAccountingEntries(undefined, undefined, undefined, txPage, PAGE_SIZE);
-  const { data: agents, isLoading: agentsLoading } = useQuery({
+  const { data: agents, isLoading: agentsLoading, isError: agentsError, refetch: refetchAgents } = useQuery({
     queryKey: ['agents', address],
     queryFn: async () => {
+      // Throw on failure so react-query surfaces an error state — a silent
+      // [] here used to read as "no agents" when the API was down.
       const res = await fetch(`${API_BASE_URL}/api/v1/agents?owner=${address}`);
+      if (!res.ok) throw new Error(`Agents request failed (${res.status})`);
       const json = await res.json();
-      return json.success ? (json.data as Agent[]) : [];
+      if (!json.success) throw new Error(json.error || 'Agents request failed');
+      return json.data as Agent[];
     },
     enabled: !!address,
   });
@@ -245,6 +250,14 @@ export default function Earnings() {
         </div>
       )}
 
+      {/* Summary fetch failed — say so instead of dashes that read as zero. */}
+      {summaryError && (
+        <div className="mb-4 p-3 border border-err/40 bg-err/5 flex items-center justify-between gap-3 text-sm text-ink-2">
+          <span>Couldn't load the earnings summary.</span>
+          <Button variant="outline" size="sm" label="Retry" onClick={() => refetchSummary()} />
+        </div>
+      )}
+
       {/* Stat cards — live from accounting API */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-0 border border-line mb-8">
         <StatCard
@@ -305,6 +318,8 @@ export default function Earnings() {
               rowKey={(a) => a.id}
               loading={agentsLoading}
               loadingLabel="Loading agents…"
+              error={agentsError}
+              onRetry={() => refetchAgents()}
               empty={
                 !address
                   ? {

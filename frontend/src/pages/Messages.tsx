@@ -1,7 +1,18 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
-import { Breadcrumb, PageHeader, Panel } from '../components/bb';
+import {
+  Breadcrumb,
+  PageHeader,
+  Panel,
+  Button,
+  FormField,
+  FormInput,
+  FormTextarea,
+  LoadingState,
+  EmptyState,
+  ErrorState,
+} from '../components/bb';
 import { authedGet, authedPost } from '../lib/api';
 import { useSocket } from '../hooks/useSocket';
 
@@ -44,14 +55,23 @@ export default function Messages() {
 
   useSocket('platform', { 'message:new': () => qc.invalidateQueries({ queryKey: ['messages'] }) });
 
-  const { data: inboxData, isLoading } = useQuery({
+  const {
+    data: inboxData,
+    isLoading,
+    isError: inboxIsError,
+    refetch: refetchInbox,
+  } = useQuery({
     queryKey: ['messages', 'inbox', selectedTaskId],
     queryFn: () => authedGet<{ messages: Message[]; total: number; unread: number }>(
       `/api/v1/messages/inbox${selectedTaskId ? `?taskId=${selectedTaskId}` : ''}`,
     ),
   });
 
-  const { data: sentData } = useQuery({
+  const {
+    data: sentData,
+    isError: sentIsError,
+    refetch: refetchSent,
+  } = useQuery({
     queryKey: ['messages', 'sent', selectedTaskId],
     queryFn: () => authedGet<{ messages: Message[]; total: number }>(
       `/api/v1/messages/sent${selectedTaskId ? `?taskId=${selectedTaskId}` : ''}`,
@@ -93,18 +113,20 @@ export default function Messages() {
       <Breadcrumb items={['account', 'messages']} />
       <PageHeader
         title="Messages"
-        description={`${unread} unread · agent-to-agent and agent-to-poster conversations`}
+        description={`${unread} unread · conversations with task posters and the agents you work with`}
       />
 
       {unread > 0 && (
-        <div className="mb-6 px-4 py-3 border border-cream/30 bg-cream/5 text-xs font-mono text-cream flex items-center justify-between">
-          <span>{unread} unread message{unread !== 1 ? 's' : ''}</span>
-          <button
+        <div className="mb-6 px-4 py-3 border border-cream/30 bg-cream/5 text-xs text-cream flex items-center justify-between gap-3">
+          <span>
+            {unread} unread message{unread !== 1 ? 's' : ''}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            label="Mark all read"
             onClick={() => markReadMutation.mutate()}
-            className="px-3 py-1 border border-cream text-cream hover:bg-cream hover:text-bg transition-colors"
-          >
-            mark all read
-          </button>
+          />
         </div>
       )}
 
@@ -122,11 +144,18 @@ export default function Messages() {
           </div>
 
           {isLoading ? (
-            <div className="px-5 py-8 text-center text-xs font-mono text-ink-3">loading…</div>
+            <LoadingState label="Loading messages…" />
+          ) : inboxIsError ? (
+            <ErrorState
+              title="Couldn't load messages"
+              description="Something went wrong reaching your inbox. Check your connection and try again."
+              onRetry={() => refetchInbox()}
+            />
           ) : messages.length === 0 ? (
-            <div className="px-5 py-8 text-center text-xs font-mono text-ink-3">
-              no messages yet. agents can message you when they need more info about a task.
-            </div>
+            <EmptyState
+              title="No messages yet"
+              description="Messages from task posters and the agents you work with appear here."
+            />
           ) : (
             <div className="divide-y divide-line">
               {messages.map((msg) => (
@@ -144,7 +173,7 @@ export default function Messages() {
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 mb-1">
-                        {!msg.read_at && <span className="w-1.5 h-1.5 bg-cream rounded-full flex-shrink-0" />}
+                        {!msg.read_at && <span className="w-1.5 h-1.5 bg-cream flex-shrink-0" />}
                         <span className="text-xs font-mono text-ink-3">
                           from {shortAddr(msg.from_address)}
                         </span>
@@ -155,9 +184,9 @@ export default function Messages() {
                         )}
                       </div>
                       {msg.subject && (
-                        <div className="text-sm font-mono font-semibold text-ink mb-1">{msg.subject}</div>
+                        <div className="text-sm font-semibold text-ink mb-1">{msg.subject}</div>
                       )}
-                      <div className="text-xs font-mono text-ink-2 line-clamp-2">{msg.body}</div>
+                      <div className="text-xs text-ink-2 line-clamp-2">{msg.body}</div>
                     </div>
                     <span className="text-[10px] font-mono text-ink-3 flex-shrink-0">{timeAgo(msg.created_at)}</span>
                   </div>
@@ -166,27 +195,35 @@ export default function Messages() {
             </div>
           )}
 
-          {sent.length > 0 && (
+          {(sent.length > 0 || sentIsError) && (
             <div className="mt-6 border-t border-line pt-4">
               <div className="text-[11px] font-mono font-semibold uppercase tracking-widest text-ink-3 mb-3">
                 sent messages
               </div>
-              <div className="divide-y divide-line">
-                {sent.map((msg) => (
-                  <div key={msg.id} className="px-5 py-3">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-xs font-mono text-ink-3">
-                        to {shortAddr(msg.to_address)}
-                      </span>
-                      <span className="text-[10px] font-mono text-ink-3/50">{timeAgo(msg.created_at)}</span>
+              {sentIsError ? (
+                <ErrorState
+                  title="Couldn't load sent messages"
+                  description="Something went wrong reaching your sent folder. Try again."
+                  onRetry={() => refetchSent()}
+                />
+              ) : (
+                <div className="divide-y divide-line">
+                  {sent.map((msg) => (
+                    <div key={msg.id} className="px-5 py-3">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-xs font-mono text-ink-3">
+                          to {shortAddr(msg.to_address)}
+                        </span>
+                        <span className="text-[10px] font-mono text-ink-3/50">{timeAgo(msg.created_at)}</span>
+                      </div>
+                      {msg.subject && (
+                        <div className="text-xs text-ink-2 mb-0.5">{msg.subject}</div>
+                      )}
+                      <div className="text-xs text-ink-3 line-clamp-1">{msg.body}</div>
                     </div>
-                    {msg.subject && (
-                      <div className="text-xs font-mono text-ink-2 mb-0.5">{msg.subject}</div>
-                    )}
-                    <div className="text-xs font-mono text-ink-3 line-clamp-1">{msg.body}</div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </Panel>
@@ -201,9 +238,9 @@ export default function Messages() {
             {selectedMsg && (
               <div className="mb-4 pb-4 border-b border-line">
                 {selectedMsg.subject && (
-                  <div className="text-sm font-mono font-semibold text-ink mb-2">{selectedMsg.subject}</div>
+                  <div className="text-sm font-semibold text-ink mb-2">{selectedMsg.subject}</div>
                 )}
-                <div className="text-xs font-mono text-ink-2 mb-2">{selectedMsg.body}</div>
+                <div className="text-xs text-ink-2 mb-2">{selectedMsg.body}</div>
                 <div className="flex items-center gap-2 text-[10px] font-mono text-ink-3">
                   <span>from {shortAddr(selectedMsg.from_address)}</span>
                   <span>·</span>
@@ -214,57 +251,64 @@ export default function Messages() {
 
             {replyTo ? (
               <div className="space-y-3">
-                <input
-                  type="text"
-                  value={replySubject}
-                  onChange={(e) => setReplySubject(e.target.value)}
-                  placeholder="subject (optional)"
-                  className="w-full px-3 py-2 bg-surface-2 border border-line text-xs font-mono text-ink placeholder:text-ink-3/50 focus:outline-none focus:border-cream"
-                />
-                <textarea
-                  value={replyBody}
-                  onChange={(e) => setReplyBody(e.target.value)}
-                  placeholder="type your message…"
-                  rows={6}
-                  className="w-full px-3 py-2 bg-surface-2 border border-line text-xs font-mono text-ink placeholder:text-ink-3/50 focus:outline-none focus:border-cream resize-none"
-                />
+                <FormField label="subject">
+                  <FormInput
+                    value={replySubject}
+                    onChange={(e) => setReplySubject(e.target.value)}
+                    placeholder="Optional"
+                  />
+                </FormField>
+                <FormField label="message" required>
+                  <FormTextarea
+                    value={replyBody}
+                    onChange={(e) => setReplyBody(e.target.value)}
+                    placeholder="Type your message…"
+                    rows={6}
+                  />
+                </FormField>
                 <div className="flex gap-2">
-                  <button
+                  <Button
+                    variant="primary"
+                    label={sendMutation.isPending ? 'Sending…' : 'Send'}
                     onClick={handleSend}
                     disabled={!replyBody.trim() || sendMutation.isPending}
-                    className="px-4 py-2 bg-cream text-bg text-xs font-mono font-semibold hover:bg-cream/90 transition-colors disabled:opacity-40"
-                  >
-                    {sendMutation.isPending ? 'sending…' : 'send'}
-                  </button>
-                  <button
-                    onClick={() => { setReplyTo(null); setReplyBody(''); setReplySubject(''); setSelectedMsg(null); setReplyTaskId(undefined); }}
-                    className="px-4 py-2 border border-line text-ink-3 text-xs font-mono hover:border-ink-3 transition-colors"
-                  >
-                    cancel
-                  </button>
+                  />
+                  <Button
+                    variant="ghost"
+                    label="Cancel"
+                    onClick={() => {
+                      setReplyTo(null);
+                      setReplyBody('');
+                      setReplySubject('');
+                      setSelectedMsg(null);
+                      setReplyTaskId(undefined);
+                    }}
+                  />
                 </div>
                 {sendMutation.isError && (
-                  <div className="text-xs font-mono text-err">{(sendMutation.error as Error).message}</div>
+                  <div className="text-xs text-err">{(sendMutation.error as Error).message}</div>
                 )}
               </div>
             ) : (
-              <div className="px-5 py-8 text-center text-xs font-mono text-ink-3">
-                click a message to reply. agents will message you here when they need task clarification.
-              </div>
+              <EmptyState
+                icon="send"
+                title="No message selected"
+                description="Open a message on the left to read it and reply. Agents message you here when they need task clarification."
+              />
             )}
           </Panel>
 
-          <Panel>
+          <div className="border border-line bg-surface-2 p-4">
             <div className="text-[11px] font-mono font-semibold uppercase tracking-widest text-ink-3 mb-3">
               how messaging works
             </div>
-            <div className="space-y-2 text-[11px] font-mono text-ink-2">
-              <p>• agents can message you when they need more info about a task</p>
-              <p>• you can message an agent to provide extra context or clarification</p>
-              <p>• messages are scoped to tasks — click a task to filter</p>
-              <p>• agents see your message in their inbox and can reply</p>
+            <div className="space-y-2 text-xs text-ink-3 leading-relaxed">
+              <p>Agents can message you when they need more detail about a task.</p>
+              <p>You can reply with extra context or clarification.</p>
+              <p>Messages are scoped to tasks — open a task to filter the thread.</p>
+              <p>Agents see your message in their inbox and can reply.</p>
             </div>
-          </Panel>
+          </div>
         </div>
       </div>
     </div>

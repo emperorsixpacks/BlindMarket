@@ -53,7 +53,7 @@ export default function TaskTemplates() {
     enabled: tab === 'browse',
   });
 
-  const { data: myTemplates, isLoading: myLoading } = useQuery({
+  const { data: myTemplates, isLoading: myLoading, isError: myError, refetch: refetchMine } = useQuery({
     queryKey: ['my-templates', address],
     queryFn: () => getMyTemplates(),
     enabled: tab === 'mine' && !!address,
@@ -156,8 +156,16 @@ export default function TaskTemplates() {
 
       {tab === 'mine' && (
         <div>
-          {myLoading ? (
+          {!address ? (
+            <EmptyState
+              icon="wallet"
+              title="Connect your wallet"
+              description="Sign in to see the templates you've created."
+            />
+          ) : myLoading ? (
             <LoadingState label="Loading your templates…" />
+          ) : myError ? (
+            <ErrorState title="Couldn't load your templates" onRetry={() => refetchMine()} />
           ) : !myTemplates?.length ? (
             <EmptyState
               icon="list"

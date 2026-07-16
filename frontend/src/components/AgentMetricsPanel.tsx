@@ -43,11 +43,23 @@ export default function AgentMetricsPanel({ agentId }: { agentId: string }) {
 
   if (data.length < 2) {
     return (
-      <div className="text-sm text-dim py-6 text-center">
+      <div className="text-sm text-ink-3 py-6 text-center">
         Collecting metrics… (waiting for data points)
       </div>
     );
   }
+
+  // Chart chrome from the design tokens so both themes work — recharts takes
+  // inline colours, so read the CSS variables rather than hardcoding hexes.
+  const tooltipStyle = {
+    background: 'var(--bb-surface)',
+    border: '1px solid var(--bb-line)',
+    borderRadius: 0,
+    fontSize: 12,
+    color: 'var(--bb-ink)',
+  } as const;
+  const AXIS = 'var(--bb-ink-3)';
+  const GRID = 'var(--bb-line)';
 
   const cpuMin = 0;
   const cpuMax = Math.max(100, ...data.map(d => d.cpu));
@@ -58,28 +70,28 @@ export default function AgentMetricsPanel({ agentId }: { agentId: string }) {
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 py-4">
-      <div className="card p-4">
-        <h3 className="text-sm font-semibold mb-3">CPU (%)</h3>
+      <div className="border border-line bg-surface p-4">
+        <h3 className="text-sm font-semibold text-ink mb-3">CPU (%)</h3>
         <ResponsiveContainer width="100%" height={200}>
           <LineChart data={data}>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-            <XAxis dataKey="t" tickFormatter={formatTime} stroke="rgba(255,255,255,0.3)" fontSize={11} />
-            <YAxis domain={[cpuMin, cpuMax]} stroke="rgba(255,255,255,0.3)" fontSize={11} tickFormatter={v => v.toFixed(1)} />
-            <Tooltip contentStyle={{ background: '#1a1a2e', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, fontSize: 12 } as any} formatter={(value: any) => [`${Number(value).toFixed(1)}%`, 'CPU']} />
-            <Line type="monotone" dataKey="cpu" stroke="#6366f1" strokeWidth={2} dot={false} />
+            <CartesianGrid strokeDasharray="3 3" stroke={GRID} />
+            <XAxis dataKey="t" tickFormatter={formatTime} stroke={AXIS} fontSize={11} />
+            <YAxis domain={[cpuMin, cpuMax]} stroke={AXIS} fontSize={11} tickFormatter={v => v.toFixed(1)} />
+            <Tooltip contentStyle={tooltipStyle as any} formatter={(value: any) => [`${Number(value).toFixed(1)}%`, 'CPU']} />
+            <Line type="monotone" dataKey="cpu" stroke="var(--bb-cream)" strokeWidth={2} dot={false} />
           </LineChart>
         </ResponsiveContainer>
       </div>
 
-      <div className="card p-4">
-        <h3 className="text-sm font-semibold mb-3">Memory (MB)</h3>
+      <div className="border border-line bg-surface p-4">
+        <h3 className="text-sm font-semibold text-ink mb-3">Memory (MB)</h3>
         <ResponsiveContainer width="100%" height={200}>
           <LineChart data={data}>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-            <XAxis dataKey="t" tickFormatter={formatTime} stroke="rgba(255,255,255,0.3)" fontSize={11} />
-            <YAxis domain={[ramMin, ramMax]} stroke="rgba(255,255,255,0.3)" fontSize={11} tickFormatter={v => v.toFixed(0)} />
-            <Tooltip contentStyle={{ background: '#1a1a2e', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, fontSize: 12 } as any} formatter={(value: any) => [`${Number(value).toFixed(1)} MB`, 'RSS']} />
-            <Line type="monotone" dataKey="ramMb" stroke="#22c55e" strokeWidth={2} dot={false} />
+            <CartesianGrid strokeDasharray="3 3" stroke={GRID} />
+            <XAxis dataKey="t" tickFormatter={formatTime} stroke={AXIS} fontSize={11} />
+            <YAxis domain={[ramMin, ramMax]} stroke={AXIS} fontSize={11} tickFormatter={v => v.toFixed(0)} />
+            <Tooltip contentStyle={tooltipStyle as any} formatter={(value: any) => [`${Number(value).toFixed(1)} MB`, 'RSS']} />
+            <Line type="monotone" dataKey="ramMb" stroke="var(--bb-ok)" strokeWidth={2} dot={false} />
           </LineChart>
         </ResponsiveContainer>
       </div>

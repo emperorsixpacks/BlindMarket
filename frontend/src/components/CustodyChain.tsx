@@ -4,13 +4,16 @@ import { verifyIntegrity } from '../services/custody';
 import type { IntegrityResult } from '../services/custody';
 import { truncateAddress } from '../lib/utils';
 import { useAuth } from '../context/AuthContext';
+import { Button, Tag, Icon, LoadingState } from './bb';
 
-const actionColors: Record<string, string> = {
-  submitted: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
-  viewed: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
-  verified: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
-  exported: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
-  integrity_check: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20',
+// Audit actions → semantic Tag tones (the same ok/warn/err/info scale the
+// rest of the app uses — no bespoke colour system here).
+const ACTION_TONE: Record<string, 'ok' | 'warn' | 'err' | 'info' | 'neutral'> = {
+  submitted: 'info',
+  viewed: 'neutral',
+  verified: 'ok',
+  exported: 'warn',
+  integrity_check: 'info',
 };
 
 export function CustodyChain({ taskId }: { taskId: string }) {
@@ -36,14 +39,12 @@ export function CustodyChain({ taskId }: { taskId: string }) {
   if (!isAuthenticated) {
     return (
       <div className="py-8 text-center space-y-3">
-        <div className="w-12 h-12 rounded-full bg-neutral-800 border border-neutral-700 flex items-center justify-center mx-auto mb-2">
-          <svg className="w-6 h-6 text-neutral-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-          </svg>
+        <div className="w-12 h-12 bg-surface-2 border border-line flex items-center justify-center mx-auto mb-2">
+          <Icon name="lock" size={22} className="text-ink-3" />
         </div>
-        <p className="text-sm text-neutral-300">Authentication Required</p>
-        <p className="text-xs text-neutral-500 max-w-xs mx-auto">
-          You must be logged in to view the cryptographic evidence chain and audit logs for this task.
+        <p className="text-sm text-ink-2">Sign in required</p>
+        <p className="text-xs text-ink-3 max-w-xs mx-auto">
+          Sign in to view the cryptographic evidence chain and audit log for this task.
         </p>
       </div>
     );
@@ -51,47 +52,41 @@ export function CustodyChain({ taskId }: { taskId: string }) {
 
   return (
     <div className="space-y-4">
-      {/* Tab selector */}
-      <div className="flex gap-2 border-b border-neutral-800 pb-2">
-        <button
-          onClick={() => setActiveTab('chain')}
-          className={`px-3 py-1.5 text-xs font-medium rounded-t transition-colors ${
-            activeTab === 'chain'
-              ? 'text-amber-400 border-b-2 border-amber-400'
-              : 'text-neutral-500 hover:text-neutral-300'
-          }`}
-        >
-          Evidence Chain
-        </button>
-        <button
-          onClick={() => setActiveTab('audit')}
-          className={`px-3 py-1.5 text-xs font-medium rounded-t transition-colors ${
-            activeTab === 'audit'
-              ? 'text-amber-400 border-b-2 border-amber-400'
-              : 'text-neutral-500 hover:text-neutral-300'
-          }`}
-        >
-          Audit Log
-        </button>
+      {/* Tab selector — same treatment as TaskDetail's page tabs */}
+      <div role="tablist" className="flex gap-6 border-b border-line">
+        {([
+          { id: 'chain', label: 'Evidence chain' },
+          { id: 'audit', label: 'Audit log' },
+        ] as const).map((tab) => (
+          <button
+            key={tab.id}
+            role="tab"
+            aria-selected={activeTab === tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`pb-2.5 -mb-px text-xs border-b-2 transition-colors ${
+              activeTab === tab.id
+                ? 'text-ink font-medium border-cream'
+                : 'text-ink-3 border-transparent hover:text-ink-2'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
-      {/* Verify Integrity button */}
+      {/* Verify integrity */}
       <div className="flex items-center gap-3">
-        <button
+        <Button
+          variant="outline"
+          size="sm"
           onClick={handleVerify}
           disabled={verifying}
-          className="px-3 py-1.5 text-xs font-medium rounded-lg border border-neutral-700 text-neutral-300 hover:border-neutral-500 hover:text-white transition-colors disabled:opacity-50"
-        >
-          {verifying ? 'Checking...' : 'Verify Integrity'}
-        </button>
+          label={verifying ? 'Checking…' : 'Verify integrity'}
+        />
         {integrityResult && (
-          <span className={`text-xs font-medium px-2 py-0.5 rounded-full border ${
-            integrityResult.valid
-              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-              : 'bg-red-500/10 text-red-400 border-red-500/20'
-          }`}>
+          <Tag tone={integrityResult.valid ? 'ok' : 'err'}>
             {integrityResult.valid ? 'PASS' : 'FAIL'}
-          </span>
+          </Tag>
         )}
       </div>
 
@@ -99,32 +94,28 @@ export function CustodyChain({ taskId }: { taskId: string }) {
       {activeTab === 'chain' && (
         <div className="relative">
           {chainLoading ? (
-            <div className="text-sm text-neutral-500">Loading chain...</div>
+            <LoadingState label="Loading evidence chain…" />
           ) : !chainData?.chain?.length ? (
-            <div className="text-sm text-neutral-500">No evidence entries yet.</div>
+            <div className="text-sm text-ink-3">No evidence entries yet.</div>
           ) : (
             <div className="space-y-0">
               {chainData.chain.map((entry, i) => (
                 <div key={entry.id} className="flex gap-3">
                   {/* Timeline dots & line */}
                   <div className="flex flex-col items-center">
-                    <div className="w-2.5 h-2.5 rounded-full bg-amber-400 border-2 border-neutral-900 mt-1.5 z-10" />
-                    {i < chainData.chain.length - 1 && (
-                      <div className="w-px flex-1 bg-neutral-700" />
-                    )}
+                    <div className="w-2.5 h-2.5 bg-cream mt-1.5 z-10" />
+                    {i < chainData.chain.length - 1 && <div className="w-px flex-1 bg-line" />}
                   </div>
                   {/* Entry card */}
                   <div className="flex-1 pb-4">
-                    <div className="card-dark p-3">
+                    <div className="border border-line bg-surface-2 p-3">
                       <div className="flex items-center justify-between mb-1">
-                        <span className="text-[10px] text-neutral-500">
+                        <span className="text-2xs text-ink-3">
                           #{entry.id} &middot; {new Date(entry.created_at).toLocaleString()}
                         </span>
                       </div>
-                      <p className="text-xs text-neutral-300 font-mono break-all">
-                        {entry.evidence_hash}
-                      </p>
-                      <p className="text-[10px] text-neutral-500 mt-1">
+                      <p className="text-xs text-ink-2 font-mono break-all">{entry.evidence_hash}</p>
+                      <p className="text-2xs text-ink-3 mt-1">
                         Submitter: {truncateAddress(entry.submitter)}
                       </p>
                     </div>
@@ -140,29 +131,19 @@ export function CustodyChain({ taskId }: { taskId: string }) {
       {activeTab === 'audit' && (
         <div>
           {auditLoading ? (
-            <div className="text-sm text-neutral-500">Loading audit log...</div>
+            <LoadingState label="Loading audit log…" />
           ) : !auditData?.audit?.length ? (
-            <div className="text-sm text-neutral-500">No audit events yet.</div>
+            <div className="text-sm text-ink-3">No audit events yet.</div>
           ) : (
             <div className="space-y-2">
               {auditData.audit.map((event) => (
                 <div key={event.id} className="flex items-start gap-3 py-2">
-                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border ${
-                    actionColors[event.action] || 'bg-neutral-800 text-neutral-400 border-neutral-700'
-                  }`}>
-                    {event.action}
-                  </span>
+                  <Tag tone={ACTION_TONE[event.action] ?? 'neutral'}>{event.action.replace(/_/g, ' ')}</Tag>
                   <div className="flex-1">
-                    <p className="text-xs text-neutral-300">
-                      {truncateAddress(event.actor)}
-                    </p>
-                    {event.detail && (
-                      <p className="text-[10px] text-neutral-500 mt-0.5">{event.detail}</p>
-                    )}
+                    <p className="text-xs text-ink-2 font-mono">{truncateAddress(event.actor)}</p>
+                    {event.detail && <p className="text-2xs text-ink-3 mt-0.5">{event.detail}</p>}
                   </div>
-                  <span className="text-[10px] text-neutral-600">
-                    {new Date(event.created_at).toLocaleString()}
-                  </span>
+                  <span className="text-2xs text-ink-3">{new Date(event.created_at).toLocaleString()}</span>
                 </div>
               ))}
             </div>
