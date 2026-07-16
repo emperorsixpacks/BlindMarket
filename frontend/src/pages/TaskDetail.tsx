@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -6,7 +5,7 @@ import { useTask } from '../hooks/useTasks';
 import { useWallet } from '../context/WalletContext';
 import { useChain } from '../context/ChainContext';
 import { useAuth } from '../context/AuthContext';
-import { Panel, SectionRule, Tag, Button, StatusTag, Skeleton, ErrorState } from '../components/bb';
+import { Panel, SectionRule, Tag, Button, StatusTag, Skeleton, ErrorState, useTabParam } from '../components/bb';
 import { EncryptionIndicator } from '../components/EncryptionIndicator';
 import { TxPendingModal } from '../components/TxPendingModal';
 import { CustodyChain } from '../components/CustodyChain';
@@ -57,7 +56,7 @@ export default function TaskDetail() {
   // Auth context kept for any future reads; not used in the A2A view path.
   void useAuth();
   const qc = useQueryClient();
-  const [activeTab, setActiveTab] = useState<DetailTab>('details');
+  const [activeTab, setActiveTab] = useTabParam<DetailTab>('details', DETAIL_TABS.map((t) => t.id));
 
   // Build + sign + send the cancel / timeout tx as one mutation so React Query
   // surfaces the error (auth failure, server error, user-rejected sig) instead

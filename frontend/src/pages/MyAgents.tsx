@@ -12,6 +12,7 @@ import {
   LoadingState,
   EmptyState,
   ErrorState,
+  SignInGate,
 } from '../components/bb';
 import { truncateAddress } from '../lib/utils';
 import { API_BASE_URL } from '../config/constants';
@@ -71,7 +72,7 @@ type Act = 'start' | 'pause' | 'stop' | 'restart';
 
 export default function MyAgents() {
   const address = useChainAddress();
-  const { isAuthenticated, login: loginPrivy } = useAuth();
+  const { isAuthenticated } = useAuth();
   const qc = useQueryClient();
   const [page, setPage] = useState(1);
 
@@ -183,19 +184,7 @@ export default function MyAgents() {
         </div>
       </div>
 
-      {address && !isAuthenticated && (
-        <div className="mb-6 p-4 border border-warn/40 bg-warn/5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-sm">
-          <span className="text-ink-2">
-            You are connected to your wallet, but not signed in to the backend. Please sign in to manage or interact with your agents.
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            label="Sign in to backend"
-            onClick={loginPrivy}
-          />
-        </div>
-      )}
+      {address && <SignInGate prompt="to manage your agents" />}
 
       {/* Agent list — custom responsive list matching the bb DataTable look
           (header row, hairline dividers, hover). A generic DataTable can't host

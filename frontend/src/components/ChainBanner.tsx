@@ -18,9 +18,9 @@ export function ChainBanner() {
   if (isCorrectChain) return null;
 
   return (
-    <div className="sticky top-0 z-40 flex items-center justify-between gap-4 border-b border-amber-500/40 bg-amber-500/10 px-6 py-2 text-sm text-amber-100 backdrop-blur">
+    <div className="sticky top-0 z-40 flex items-center justify-between gap-4 border-b border-warn/40 bg-warn/10 px-6 py-2 text-sm text-ink backdrop-blur">
       <div className="flex items-center gap-3">
-        <span className="inline-block h-2 w-2 rounded-full bg-amber-400" aria-hidden />
+        <span className="inline-block h-2 w-2 bg-warn" aria-hidden />
         <span>
           Wrong network — you're on chain <span className="font-mono">{chainId}</span>. BlindMarket runs on {netName} ({OG_CHAIN_ID}).
         </span>
@@ -28,7 +28,7 @@ export function ChainBanner() {
       <button
         type="button"
         onClick={switchChain}
-        className="rounded-md border border-amber-300/60 bg-amber-400/20 px-3 py-1 text-xs font-medium text-amber-50 hover:bg-amber-400/30 transition-colors"
+        className="border border-warn/60 bg-warn/20 px-3 py-1 text-xs font-medium text-ink hover:bg-warn/30 transition-colors whitespace-nowrap"
       >
         Switch to {netName}
       </button>

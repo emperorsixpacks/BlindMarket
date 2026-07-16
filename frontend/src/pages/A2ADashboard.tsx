@@ -11,6 +11,7 @@ import {
   LoadingState,
   EmptyState,
   ErrorState,
+  useTabParam,
 } from '../components/bb';
 import {
   useAgentProfile,
@@ -38,7 +39,8 @@ type BrowseRow = {
 };
 
 export default function A2ADashboard() {
-  const [activeTab, setActiveTab] = useState<Tab>('browse');
+  // Tab lives in the URL (?tab=) so refresh/back/share keep the view.
+  const [activeTab, setActiveTab] = useTabParam<Tab>('browse', TABS.map((t) => t.id));
   const [displayName, setDisplayName] = useState('');
   const [selectedCaps, setSelectedCaps] = useState<string[]>([]);
   const [agentCardUrl, setAgentCardUrl] = useState('');

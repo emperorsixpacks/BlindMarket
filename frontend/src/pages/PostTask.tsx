@@ -14,6 +14,7 @@ import {
   Tag,
   StatusTag,
   Icon,
+  SignInGate,
 } from '../components/bb';
 import { aesEncrypt, eciesEncrypt, generateAesKey, sha256, toBase64, toBytes } from '../lib/crypto';
 import { stashAesKey } from '../lib/keyStash';
@@ -63,7 +64,7 @@ export default function PostTask() {
   const address = useChainAddress();
   const { data: walletClient } = useWalletClient();
   const navigate = useNavigate();
-  const { isAuthenticated, login: loginPrivy } = useAuth();
+  const { isAuthenticated } = useAuth();
 
   const [form, setForm] = useState({
     instructions: '',
@@ -642,24 +643,8 @@ export default function PostTask() {
           </div>
 
           <div className="p-6">
-            {!address ? (
-              <div className="flex items-center gap-2 text-sm text-ink-3">
-                <Icon name="wallet" size={16} className="text-ink-3" />
-                Connect a wallet to post a task.
-              </div>
-            ) : !isAuthenticated ? (
-              <div className="space-y-3">
-                <div className="flex items-center gap-2 text-sm text-ink-3">
-                  <Icon name="lock" size={16} className="text-warn" />
-                  Please sign in to authenticate with the backend before posting.
-                </div>
-                <Button
-                  variant="primary"
-                  type="button"
-                  label="Sign in to backend"
-                  onClick={loginPrivy}
-                />
-              </div>
+            {!isAuthenticated ? (
+              <SignInGate prompt="to post a task" />
             ) : (
               <Button
                 variant="primary"

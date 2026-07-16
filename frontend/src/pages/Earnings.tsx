@@ -10,6 +10,7 @@ import {
   StatusTag,
   DataTable,
   type Column,
+  useTabParam,
 } from '../components/bb';
 import { useAccountingEntries, useAccountingSummary } from '../hooks/useAccounting';
 import { useAuth } from '../context/AuthContext';
@@ -79,7 +80,7 @@ function amountClass(n: number): string {
 const PAGE_SIZE = 20;
 
 export default function Earnings() {
-  const [tab, setTab] = useState<Tab>('transactions');
+  const [tab, setTab] = useTabParam<Tab>('transactions', TABS.map((t) => t.id));
   const [txPage, setTxPage] = useState(1);
   const { isAuthenticated } = useAuth();
   const { activeChain } = useChain();

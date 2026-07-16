@@ -37,16 +37,19 @@ function EvmWalletButton({ variant }: Props) {
   }
 
   if (!authenticated) {
+    // An injected wallet can be connected (address present) without a Privy
+    // session — the backend still needs a sign-in. Name the actual next step.
+    const label = address ? 'sign_in' : 'connect_wallet';
     if (variant === 'block') {
       return (
         <button onClick={login} className="w-full px-4 py-2 border border-line text-sm font-mono text-ink hover:bg-surface-2 transition-colors">
-          connect_wallet
+          {label}
         </button>
       );
     }
     return (
       <button onClick={login} className="px-3 py-1.5 border border-line text-[11px] font-mono text-ink hover:bg-surface-2 transition-colors">
-        <span className="opacity-40">[</span> connect_wallet <span className="opacity-40">]</span>
+        <span className="opacity-40">[</span> {label} <span className="opacity-40">]</span>
       </button>
     );
   }

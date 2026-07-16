@@ -18,6 +18,8 @@ import {
   EmptyState,
   ErrorState,
   Icon,
+  ConfirmDialog,
+  useTabParam,
 } from '../components/bb';
 import { truncateAddress } from '../lib/utils';
 import { get, authedPatch, authedPost } from '../lib/api';
@@ -97,7 +99,7 @@ export default function AgentDetail() {
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
-  const [tab, setTab] = useState<Tab>('logs');
+  const [tab, setTab] = useTabParam<Tab>('logs', Object.keys(TAB_LABELS) as Tab[]);
   const [autoScroll, setAutoScroll] = useState(true);
   const logContainerRef = useRef<HTMLDivElement>(null);
 
@@ -123,6 +125,7 @@ export default function AgentDetail() {
   const [topUpStatus, setTopUpStatus] = useState<'idle' | 'sending' | 'error'>('idle');
   const [topUpError, setTopUpError] = useState('');
   const [withdrawStatus, setWithdrawStatus] = useState<'idle' | 'sending' | 'done' | 'error'>('idle');
+  const [withdrawConfirmOpen, setWithdrawConfirmOpen] = useState(false);
   const [withdrawInfo, setWithdrawInfo] = useState<{ txHash: string; amount: string } | null>(null);
   const [withdrawError, setWithdrawError] = useState('');
 
@@ -309,7 +312,7 @@ export default function AgentDetail() {
   // Refuses while the agent is running to avoid racing with in-flight txs.
   async function handleWithdraw() {
     if (!address || !id) return;
-    if (!confirm(`Withdraw funds from this agent's wallet back to ${address.slice(0, 8)}…? This cannot be undone.`)) return;
+    setWithdrawConfirmOpen(false);
     setWithdrawStatus('sending');
     setWithdrawError('');
     try {
@@ -434,13 +437,23 @@ export default function AgentDetail() {
                   The backend's /withdraw endpoint auto-detects; empty body sweeps
                   native 0G (gas reserve kept). */}
               {agent.status !== 'running' && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleWithdraw}
-                  disabled={withdrawStatus === 'sending' || balanceEther < 0.0015}
-                  label={withdrawStatus === 'sending' ? 'Withdrawing…' : 'Withdraw to owner'}
-                />
+                <>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setWithdrawConfirmOpen(true)}
+                    disabled={withdrawStatus === 'sending' || balanceEther < 0.0015}
+                    label={withdrawStatus === 'sending' ? 'Withdrawing…' : 'Withdraw to owner'}
+                  />
+                  <ConfirmDialog
+                    open={withdrawConfirmOpen}
+                    title="Withdraw agent funds"
+                    description={`Funds in this agent's wallet will be sent back to ${address ? `${address.slice(0, 8)}…` : 'your wallet'}. This can't be undone.`}
+                    confirmLabel="Withdraw funds"
+                    onConfirm={handleWithdraw}
+                    onCancel={() => setWithdrawConfirmOpen(false)}
+                  />
+                </>
               )}
             </div>
           </div>

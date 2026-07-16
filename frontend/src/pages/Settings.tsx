@@ -8,6 +8,9 @@ import {
   Button,
   Tag,
   FormField,
+  FormInput,
+  Modal,
+  ConfirmDialog,
 } from '../components/bb';
 import { useReputation } from '../hooks/useReputation';
 import {
@@ -55,11 +58,17 @@ export default function Settings() {
     (a: any) => a.type === 'wallet' && a.chainType === 'ethereum' && a.address?.startsWith('0x'),
   ) as Array<{ type: 'wallet'; address: string; chainType: string; verifiedAt?: string; connectorType?: string }>;
 
-  const handleUnlink = async (walletAddress: string) => {
-    if (!window.confirm(`Unlink ${walletAddress.slice(0, 6)}…${walletAddress.slice(-4)}?`)) return;
+  const [unlinkTarget, setUnlinkTarget] = useState<string | null>(null);
+  const [unlinking, setUnlinking] = useState(false);
+  const handleUnlink = async () => {
+    if (!unlinkTarget) return;
+    setUnlinking(true);
     try {
-      await unlink({ address: walletAddress });
-    } catch { /* ignore */ }
+      await unlink({ address: unlinkTarget });
+    } catch { /* ignore */ } finally {
+      setUnlinking(false);
+      setUnlinkTarget(null);
+    }
   };
 
   // ── API Keys ──────────────────────────────────────────────────────────────
@@ -109,12 +118,18 @@ export default function Settings() {
     }
   };
 
-  const handleRevoke = async (id: number) => {
-    if (!window.confirm('Revoke this API key? Any system using it will lose access immediately.')) return;
+  const [revokeTarget, setRevokeTarget] = useState<number | null>(null);
+  const [revoking, setRevoking] = useState(false);
+  const handleRevoke = async () => {
+    if (revokeTarget == null) return;
+    setRevoking(true);
     try {
-      await authedDelete(`/api/v1/api-keys/${id}`);
-      setKeys(prev => prev.filter(k => k.id !== id));
-    } catch { /* ignore */ }
+      await authedDelete(`/api/v1/api-keys/${revokeTarget}`);
+      setKeys(prev => prev.filter(k => k.id !== revokeTarget));
+    } catch { /* ignore */ } finally {
+      setRevoking(false);
+      setRevokeTarget(null);
+    }
   };
 
   const walletDisplay = address
@@ -185,7 +200,7 @@ export default function Settings() {
                       </div>
                       {!isPrimary && (
                         <button
-                          onClick={() => handleUnlink(w.address)}
+                          onClick={() => setUnlinkTarget(w.address)}
                           className="text-[10px] uppercase tracking-wider text-err hover:text-err/80 transition-colors shrink-0"
                         >
                           Unlink
@@ -245,7 +260,7 @@ export default function Settings() {
                           : 'Never used'}
                       </span>
                       <button
-                        onClick={() => handleRevoke(k.id)}
+                        onClick={() => setRevokeTarget(k.id)}
                         className="text-[10px] uppercase tracking-wider text-err hover:text-err/80 transition-colors"
                       >
                         Revoke
@@ -354,67 +369,87 @@ export default function Settings() {
       </div>
 
       {/* ── Create key modal ── */}
-      {showCreate && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-bg/80 backdrop-blur-sm">
-          <div className="w-full max-w-sm border border-line bg-surface p-6 space-y-4">
-            <h3 className="text-base font-semibold text-ink">Create API key</h3>
-            <FormField label="Key name">
-              <input
-                type="text"
-                value={newKeyName}
-                onChange={(e) => setNewKeyName(e.target.value)}
-                placeholder="e.g. CI server"
-                className="w-full px-3 py-2 bg-surface-2 border border-line text-sm text-ink placeholder:text-ink-3 outline-none focus:border-cream transition-colors"
-                onKeyDown={(e) => { if (e.key === 'Enter') handleCreate(); }}
-              />
-            </FormField>
-            <div className="flex items-center justify-end gap-2">
-              <button
-                onClick={() => { setShowCreate(false); setNewKeyName(''); }}
-                className="text-xs text-ink-3 hover:text-ink transition-colors px-3 py-2"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleCreate}
-                disabled={creating || !newKeyName.trim()}
-                className="text-xs px-3 py-2 border border-line text-ink hover:border-cream transition-colors disabled:opacity-40"
-              >
-                {creating ? 'Creating…' : 'Create'}
-              </button>
-            </div>
+      <Modal
+        open={showCreate}
+        onClose={() => { setShowCreate(false); setNewKeyName(''); }}
+        title="Create API key"
+        size="sm"
+      >
+        <div className="space-y-4">
+          <FormField label="Key name">
+            <FormInput
+              type="text"
+              value={newKeyName}
+              onChange={(e) => setNewKeyName(e.target.value)}
+              placeholder="e.g. CI server"
+              onKeyDown={(e) => { if (e.key === 'Enter') handleCreate(); }}
+            />
+          </FormField>
+          <div className="flex items-center justify-end gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              label="Cancel"
+              onClick={() => { setShowCreate(false); setNewKeyName(''); }}
+            />
+            <Button
+              variant="primary"
+              size="sm"
+              label={creating ? 'Creating…' : 'Create key'}
+              onClick={handleCreate}
+              disabled={creating || !newKeyName.trim()}
+            />
           </div>
         </div>
-      )}
+      </Modal>
 
-      {/* ── Show new key once ── */}
-      {createdKey && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-bg/80 backdrop-blur-sm">
-          <div className="w-full max-w-md border border-line bg-surface p-6 space-y-4">
-            <h3 className="text-base font-semibold text-ink">Key created</h3>
-            <p className="text-xs text-ink-3 leading-relaxed">
-              Copy this key now. For security reasons, it will not be shown again.
-            </p>
-            <div className="flex items-center gap-2 bg-surface-2 border border-line px-3 py-2.5">
-              <code className="flex-1 text-xs font-mono text-cream break-all select-all">{createdKey}</code>
-              <button
-                onClick={() => { navigator.clipboard.writeText(createdKey); }}
-                className="text-[10px] uppercase tracking-wider text-ink-3 hover:text-ink shrink-0 transition-colors"
-              >
-                Copy
-              </button>
-            </div>
-            <div className="flex justify-end">
-              <button
-                onClick={() => setCreatedKey(null)}
-                className="text-xs px-3 py-2 border border-line text-ink hover:border-cream transition-colors"
-              >
-                Done
-              </button>
-            </div>
+      {/* ── Show new key once — deliberately not dismissable via backdrop:
+            the key is shown exactly once, so closing must be explicit. ── */}
+      <Modal open={!!createdKey} onClose={() => setCreatedKey(null)} title="Key created" dismissable={false}>
+        <div className="space-y-4">
+          <p className="text-xs text-ink-3 leading-relaxed">
+            Copy this key now. For security reasons, it will not be shown again.
+          </p>
+          <div className="flex items-center gap-2 bg-surface-2 border border-line px-3 py-2.5">
+            <code className="flex-1 text-xs font-mono text-cream break-all select-all">{createdKey}</code>
+            <button
+              onClick={() => { if (createdKey) navigator.clipboard.writeText(createdKey); }}
+              className="text-[10px] uppercase tracking-wider text-ink-3 hover:text-ink shrink-0 transition-colors"
+            >
+              Copy
+            </button>
+          </div>
+          <div className="flex justify-end">
+            <Button variant="outline" size="sm" label="Done" onClick={() => setCreatedKey(null)} />
           </div>
         </div>
-      )}
+      </Modal>
+
+      {/* ── Confirmations ── */}
+      <ConfirmDialog
+        open={!!unlinkTarget}
+        title="Unlink wallet"
+        description={
+          unlinkTarget
+            ? `${unlinkTarget.slice(0, 6)}…${unlinkTarget.slice(-4)} will be removed from your account. You can link it again later.`
+            : undefined
+        }
+        confirmLabel="Unlink wallet"
+        danger
+        loading={unlinking}
+        onConfirm={handleUnlink}
+        onCancel={() => setUnlinkTarget(null)}
+      />
+      <ConfirmDialog
+        open={revokeTarget != null}
+        title="Revoke API key"
+        description="Any system using this key loses access immediately. This can't be undone."
+        confirmLabel="Revoke key"
+        danger
+        loading={revoking}
+        onConfirm={handleRevoke}
+        onCancel={() => setRevokeTarget(null)}
+      />
     </div>
   );
 }

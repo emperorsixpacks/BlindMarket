@@ -1,8 +1,8 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useWalletClient } from 'wagmi';
 import { getIdentityToken, getAccessToken } from '@privy-io/react-auth';
 import { BrowserProvider, formatUnits } from 'ethers';
-import { Button, FormField, FormTextarea } from './bb';
+import { Button, FormField, FormTextarea, Modal, Spinner } from './bb';
 import { aesEncrypt, eciesEncrypt, generateAesKey, sha256, toBase64, toBytes } from '../lib/crypto';
 import { stashAesKey } from '../lib/keyStash';
 import { signAndSendTx } from '../lib/txSigner';
@@ -50,6 +50,16 @@ export default function UseServiceModal({
 
   const priceLabel = `${formatUnits(service.price_raw, 18)} ${symbol}`;
   const busy = phase === 'encrypting' || phase === 'signing' || phase === 'running';
+
+  // Elapsed-time counter for the long "agent is working" wait (up to ~5 min):
+  // a static label reads as hung; a ticking clock reads as alive.
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (phase !== 'running') { setElapsed(0); return; }
+    const t = setInterval(() => setElapsed((s) => s + 1), 1000);
+    return () => clearInterval(t);
+  }, [phase]);
+  const elapsedLabel = `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, '0')}`;
 
   async function pollForResult(taskHash: string, token: string) {
     for (let i = 0; i < MAX_POLLS; i++) {
@@ -161,22 +171,15 @@ export default function UseServiceModal({
           : '';
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
-      onClick={() => { if (!busy) onClose(); }}
+    <Modal
+      open
+      onClose={onClose}
+      dismissable={!busy}
+      title={service.name}
+      subtitle={`${priceLabel} / call`}
+      size="lg"
     >
-      <div
-        className="w-full max-w-lg border border-line bg-surface-1 p-6 max-h-[90vh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-start justify-between gap-3 mb-4">
-          <div>
-            <div className="text-ink font-medium">{service.name}</div>
-            <div className="font-mono text-xs text-ink-3 mt-0.5">{priceLabel} / call</div>
-          </div>
-          <button onClick={() => { if (!busy) onClose(); }} className="text-ink-3 hover:text-ink text-sm" disabled={busy}>✕</button>
-        </div>
-
+      <>
         {(phase === 'input' || phase === 'error') && (
           <div className="space-y-4">
             <FormField label="Your input" hint="This prompt is encrypted to the agent — the platform never sees it.">
@@ -197,7 +200,11 @@ export default function UseServiceModal({
 
         {busy && (
           <div className="py-8 text-center space-y-3">
+            <div className="flex justify-center"><Spinner size={22} /></div>
             <div className="text-sm text-ink">{phaseLabel}</div>
+            {phase === 'running' && (
+              <div className="font-mono text-xs text-ink-3 tabular-nums">{elapsedLabel} elapsed</div>
+            )}
             <div className="text-xs text-ink-3">Don't close this window.</div>
           </div>
         )}
@@ -211,7 +218,7 @@ export default function UseServiceModal({
             </div>
           </div>
         )}
-      </div>
-    </div>
+      </>
+    </Modal>
   );
 }

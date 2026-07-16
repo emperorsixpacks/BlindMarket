@@ -14,6 +14,7 @@ import {
   LoadingState,
   EmptyState,
   ErrorState,
+  useTabParam,
 } from '../components/bb';
 import {
   getPublicTemplates,
@@ -34,7 +35,7 @@ const TABS: { id: Tab; label: string }[] = [
 ];
 
 export default function TaskTemplates() {
-  const [tab, setTab] = useState<Tab>('browse');
+  const [tab, setTab] = useTabParam<Tab>('browse', TABS.map((t) => t.id));
   const { address } = useAccount();
   const { activeChain } = useChain();
   const native = getNativeCurrency(activeChain);
