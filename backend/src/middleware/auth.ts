@@ -153,7 +153,7 @@ function getAddressForChain(wallets: WalletAddress[], chainType: string): string
  * `ownerAddress` claims — generic HS256 tokens without those are rejected,
  * so this isn't a re-introduction of the old SIWE end-user auth.
  */
-function verifyRegistrationToken(token: string): { address: string; ownerAddress?: string } | null {
+export function verifyRegistrationToken(token: string): { address: string; ownerAddress?: string } | null {
   if (!config.jwtSecret) {
     console.warn('[Auth] Registration token rejected: JWT_SECRET not configured');
     return null;

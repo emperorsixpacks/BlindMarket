@@ -15,8 +15,10 @@ export async function getOpenTasks(offset = 0, limit = 20): Promise<TaskMeta[]> 
 }
 
 export async function getTask(taskId: string): Promise<{ onChain: OnChainTask; meta: TaskMeta }> {
-  // Backend returns task fields at top level + nested meta
-  const raw = await get<OnChainTask & { meta: TaskMeta | null }>(`/api/v1/tasks/${taskId}`);
+  // Backend returns task fields at top level + nested meta. Authed so the
+  // poster/worker gets a2aState.resultData (the deliverable) — the backend
+  // withholds it from anonymous callers.
+  const raw = await authedGet<OnChainTask & { meta: TaskMeta | null }>(`/api/v1/tasks/${taskId}`);
   const { meta, ...onChain } = raw;
   return {
     onChain,

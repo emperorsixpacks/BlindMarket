@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, optionalAuth } from '../middleware/auth.js';
+import { loadAgentByWallet } from '../services/deployedAgentStore.js';
 import { AppError } from '../middleware/errorHandler.js';
 import * as escrowService from '../services/escrow.js';
 import * as registryService from '../services/registry.js';
@@ -15,6 +16,8 @@ import { getDb } from '../services/database.js';
 import { rooms } from '../services/socket.js';
 
 export const tasksRouter = Router();
+
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
 // --- Schemas ---
 const createTaskSchema = z.object({
@@ -169,7 +172,7 @@ tasksRouter.get('/', async (req: AuthRequest, res, next) => {
  * GET /api/v1/tasks/:id
  * Get full task details from BlindEscrow + TaskRegistry metadata.
  */
-tasksRouter.get('/:id', async (req, res, next) => {
+tasksRouter.get('/:id', optionalAuth, async (req: AuthRequest, res, next) => {
   try {
     const rawId = req.params.id;
 
@@ -212,6 +215,28 @@ tasksRouter.get('/:id', async (req, res, next) => {
       a2aStore.getState(taskHash),
     ]);
 
+    // The deliverable (resultData) is poster/worker-only. Viewer addresses come
+    // from optionalAuth (Privy JWT wallets, agent platform JWT, or API key).
+    // When the poster is a deployed agent, its human owner(s) qualify too.
+    let canSeeResult = false;
+    if (a2aState?.resultData != null && req.user) {
+      const viewer = new Set(
+        [req.user.address, req.user.ownerAddress, ...(req.user.addresses ?? [])]
+          .filter((a): a is string => typeof a === 'string' && a.startsWith('0x'))
+          .map((a) => a.toLowerCase()),
+      );
+      const poster = String(task.agent).toLowerCase();
+      const worker = String(task.worker).toLowerCase();
+      canSeeResult = viewer.has(poster) || (worker !== ZERO_ADDRESS && viewer.has(worker));
+      if (!canSeeResult && viewer.size > 0) {
+        const posterAgent = await loadAgentByWallet(poster).catch(() => null);
+        if (posterAgent) {
+          canSeeResult = [posterAgent.ownerAddress, ...(posterAgent.authorizedOwners ?? [])]
+            .some((o) => viewer.has(o.toLowerCase()));
+        }
+      }
+    }
+
     const body: ApiResponse = {
       success: true,
       data: {
@@ -224,11 +249,10 @@ tasksRouter.get('/:id', async (req, res, next) => {
         // the authenticated /a2a/tasks/:id/accept response.
         a2aMeta: a2aMeta ? a2aStore.projectPublicMeta(a2aMeta) : null,
         // Strip operator-internal diagnostics (assignError/verifyError) on this
-        // unauthenticated surface. resultData is preserved for now — today's
-        // TaskDetail renders it; making the deliverable poster/executor-only is
-        // P2 confidentiality work (docs/VISION-2.md §8 follow-ups).
+        // surface. resultData (the deliverable) is attached only for the
+        // poster, the assigned worker, or the poster-agent's owner(s).
         a2aState: a2aState
-          ? { ...a2aStore.projectPublicState(a2aState), resultData: a2aState.resultData ?? null }
+          ? { ...a2aStore.projectPublicState(a2aState), resultData: canSeeResult ? a2aState.resultData ?? null : null }
           : null,
         meta: meta ? {
           ...serializeBigInts(meta as unknown as Record<string, unknown>),

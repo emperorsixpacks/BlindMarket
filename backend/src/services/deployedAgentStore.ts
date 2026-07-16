@@ -83,6 +83,15 @@ export async function loadAgent(id: string): Promise<DeployedAgent | null> {
   return rows[0] ? rowToAgent(rows[0]) : null;
 }
 
+export async function loadAgentByWallet(walletAddress: string): Promise<DeployedAgent | null> {
+  const db = await getPool();
+  const { rows } = await db.query<Record<string, unknown>>(
+    'SELECT * FROM deployed_agents WHERE LOWER(wallet_address) = LOWER($1) LIMIT 1',
+    [walletAddress],
+  );
+  return rows[0] ? rowToAgent(rows[0]) : null;
+}
+
 export async function loadAllAgents(): Promise<DeployedAgent[]> {
   const db = await getPool();
   const { rows } = await db.query<Record<string, unknown>>(
