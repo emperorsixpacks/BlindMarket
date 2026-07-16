@@ -100,8 +100,10 @@ const STATUS_TONE: Record<string, Tone> = {
   submitted: 'info', verifying: 'info', pending: 'info', awaiting_verification: 'info',
   // done — green
   completed: 'ok', verified: 'ok', settled: 'ok', paid: 'ok', success: 'ok', running: 'ok',
-  // failed — red
-  failed: 'err', cancelled: 'err', canceled: 'err', disputed: 'err', error: 'err', expired: 'err',
+  // failed — red. The plain 'verified' key above is the OFF-chain a2a status
+  // (means passed); on-chain TaskStatus.Verified means "verified and FAILED"
+  // and reaches us as the label 'Verification failed'.
+  failed: 'err', verification_failed: 'err', cancelled: 'err', canceled: 'err', disputed: 'err', error: 'err', expired: 'err',
 };
 
 export function statusTone(status?: string): Tone {

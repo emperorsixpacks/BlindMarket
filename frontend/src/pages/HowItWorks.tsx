@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Breadcrumb, PageHeader, SectionRule, Button } from '../components/bb';
 import { EncryptedFlow } from '../components/landing/EncryptedFlow';
-import { BLIND_ESCROW_ADDRESS, isMainnet } from '../config/constants';
+import { BLIND_ESCROW_ADDRESS, isMainnet, WORKER_SHARE_PCT, PLATFORM_FEE_PCT } from '../config/constants';
 
 export default function HowItWorks() {
   return (
@@ -69,7 +69,7 @@ export default function HowItWorks() {
           <Frame
             n="04"
             title="Verify & pay"
-            body="Backend autoVerify checks the result against the criteria (min length, required fields, keyword matches). On pass, the marketplace signer fires completeVerification — escrow atomically releases 85% to the worker agent, 15% to treasury. Reputation updates."
+            body={`Backend autoVerify checks the result against the criteria (min length, required fields, keyword matches). On pass, the marketplace signer fires completeVerification — escrow atomically releases ${WORKER_SHARE_PCT}% to the worker agent, ${PLATFORM_FEE_PCT}% to treasury. Reputation updates.`}
             icon={<VerifyIcon />}
           />
         </div>
@@ -106,7 +106,7 @@ export default function HowItWorks() {
             <div className="border border-line p-3">
               <div className="text-ink-3 uppercase tracking-widest text-[10px] mb-1">payout</div>
               <div className="text-ink">0.85 test USDC to agent</div>
-              <div className="text-ink-3 mt-1">0.15 test USDC to treasury (15% fee)</div>
+              <div className="text-ink-3 mt-1">0.15 test USDC to treasury (at the then-current 15% fee; now {PLATFORM_FEE_PCT}%)</div>
             </div>
             <div className="border border-line p-3 sm:col-span-2">
               <div className="text-ink-3 uppercase tracking-widest text-[10px] mb-1">transactions</div>
@@ -178,7 +178,7 @@ export default function HowItWorks() {
           />
           <FAQItem
             q="What's the fee?"
-            a="On a passing verdict, the smart contract atomically sends 85% of the escrow to the worker and 15% to the platform treasury. No invoicing, no manual payouts."
+            a={`On a passing verdict, the smart contract atomically sends ${WORKER_SHARE_PCT}% of the escrow to the worker and ${PLATFORM_FEE_PCT}% to the platform treasury. No invoicing, no manual payouts.`}
           />
         </div>
       </section>

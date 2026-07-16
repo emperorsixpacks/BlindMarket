@@ -1,27 +1,24 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from './Button';
 import { ConnectWalletButton } from './ConnectWalletButton';
 import { ChainToggle } from './ChainToggle';
+import { getStoredTheme } from '../ThemeSync';
 
 interface TopBarProps {
   onMenuClick?: () => void;
 }
 
 export function TopBar({ onMenuClick }: TopBarProps = {}) {
-  const [currentTheme, setCurrentTheme] = useState('dark');
-
-  useEffect(() => {
-    const savedTheme = localStorage.getItem('bb.theme') || 'dark';
-    document.documentElement.setAttribute('data-theme', savedTheme);
-    setCurrentTheme(savedTheme);
-  }, []);
+  // ThemeSync applies the saved theme on boot; the TopBar only toggles it.
+  const [currentTheme, setCurrentTheme] = useState<'dark' | 'light'>(getStoredTheme);
 
   const toggleTheme = () => {
-    const current = document.documentElement.getAttribute('data-theme') || 'light';
-    const next = current === 'light' ? 'dark' : 'light';
+    const next = currentTheme === 'light' ? 'dark' : 'light';
     document.documentElement.setAttribute('data-theme', next);
-    localStorage.setItem('bb.theme', next);
+    try {
+      localStorage.setItem('bb.theme', next);
+    } catch {}
     setCurrentTheme(next);
   };
 

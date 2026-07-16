@@ -34,8 +34,9 @@ export default function AgentMarketplace() {
   const totalAgents = data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(totalAgents / PAGE_SIZE));
 
-  // Reset to page 1 when filters change
-  useEffect(() => { setPage(1); }, [capability, minRating]);
+  // Reset to page 1 when filters or the search query change — otherwise a
+  // new search can strand the user on a now-empty page N.
+  useEffect(() => { setPage(1); }, [capability, minRating, query]);
 
   const columns: Column<AgentSearchResult>[] = [
     {

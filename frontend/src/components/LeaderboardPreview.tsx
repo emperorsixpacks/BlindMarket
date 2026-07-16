@@ -5,8 +5,8 @@ import { truncateAddress } from '../lib/utils';
 
 /**
  * Compact leaderboard surface for the landing page. Shows the top N agents
- * by decayed reputation, each row a single line. Standalone full view lives
- * at /leaderboard (Leaderboard.tsx) — this is just the social-proof preview.
+ * by decayed reputation, each row a single line. This is the only leaderboard
+ * surface — the old standalone /leaderboard route now redirects to /a2a.
  */
 export function LeaderboardPreview({ limit = 5 }: { limit?: number }) {
   const { data, isLoading } = useLeaderboard(limit);

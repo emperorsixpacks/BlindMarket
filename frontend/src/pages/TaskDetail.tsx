@@ -13,7 +13,7 @@ import { CustodyChain } from '../components/CustodyChain';
 import { truncateAddress, formatDate } from '../lib/utils';
 import { buildCancelTask, buildClaimTimeout } from '../services/tasks';
 import { signAndSendTx } from '../lib/txSigner';
-import { getNativeCurrency } from '../config/constants';
+import { getNativeCurrency, WORKER_SHARE_PCT, PLATFORM_FEE_PCT } from '../config/constants';
 import { useChainExplorerUrl } from '../hooks/useChainWallet';
 import { TaskStatus, TaskStatusLabels } from '../types/api';
 
@@ -346,8 +346,8 @@ export default function TaskDetail() {
             )}
             {onChain.status === TaskStatus.Completed && (
               <p className="text-sm text-ink-2 leading-relaxed">
-                <span className="text-ok font-medium">Completed.</span> Escrow released — 85% to{' '}
-                <span className="font-mono text-ink">{truncateAddress(onChain.worker)}</span>, 15% to the
+                <span className="text-ok font-medium">Completed.</span> Escrow released — {WORKER_SHARE_PCT}% to{' '}
+                <span className="font-mono text-ink">{truncateAddress(onChain.worker)}</span>, {PLATFORM_FEE_PCT}% to the
                 treasury. Reputation updated.
               </p>
             )}

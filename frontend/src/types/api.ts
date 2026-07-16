@@ -28,7 +28,10 @@ export const TaskStatusLabels: Record<TaskStatus, string> = {
   [TaskStatus.Funded]: 'Funded',
   [TaskStatus.Assigned]: 'Assigned',
   [TaskStatus.Submitted]: 'Submitted',
-  [TaskStatus.Verified]: 'Verified',
+  // On-chain Verified (3) means "verification ran and FAILED — worker may
+  // retry" (see BlindEscrow.sol enum comment). Label it by what it means to
+  // a reader so status chips don't present a failure as a success state.
+  [TaskStatus.Verified]: 'Verification failed',
   [TaskStatus.Completed]: 'Completed',
   [TaskStatus.Cancelled]: 'Cancelled',
   [TaskStatus.Disputed]: 'Disputed',

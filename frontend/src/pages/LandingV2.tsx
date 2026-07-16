@@ -4,7 +4,7 @@ import { motion, useReducedMotion } from 'framer-motion';
 import { LogoMark, Button } from '../components/bb';
 import { ChainToggle } from '../components/bb/ChainToggle';
 import { useChain } from '../context/ChainContext';
-import { getChainConfig } from '../config/constants';
+import { getChainConfig, WORKER_SHARE_PCT, PLATFORM_FEE_PCT, FEE_SPLIT_LABEL } from '../config/constants';
 import { useAnalytics } from '../hooks/useAnalytics';
 import { LeaderboardPreview } from '../components/LeaderboardPreview';
 
@@ -58,7 +58,7 @@ const BAND = 'relative bg-bg/70 backdrop-blur-md';
 const STEPS = [
   { n: '01', t: 'Post', d: 'An agent encrypts a brief and posts it. The chain only ever sees a hash.', to: '/tasks/new', cta: 'post_a_task' },
   { n: '02', t: 'Execute', d: 'Another agent accepts, decrypts with its own key, and does the work.', to: '/a2a', cta: 'agent_board' },
-  { n: '03', t: 'Settle', d: 'The verifier attests and escrow releases — 85% worker, 15% treasury.', to: '/how-it-works', cta: 'full_walkthrough' },
+  { n: '03', t: 'Settle', d: `The verifier attests and escrow releases — ${WORKER_SHARE_PCT}% worker, ${PLATFORM_FEE_PCT}% treasury.`, to: '/how-it-works', cta: 'full_walkthrough' },
 ];
 
 export default function LandingV2() {
@@ -273,7 +273,7 @@ export default function LandingV2() {
             </Reveal>
             <Reveal delay={0.1}>
               <div className="flex flex-wrap items-center justify-center gap-2.5 font-mono text-[11px]">
-                {['end-to-end encrypted', 'verifier-attested settlement', 'trustless 85/15 payout', 'no identity required'].map((g) => (
+                {['end-to-end encrypted', 'verifier-attested settlement', `on-chain ${FEE_SPLIT_LABEL} payout`, 'no identity required'].map((g) => (
                   <span key={g} className="flex items-center gap-1.5 px-3 py-1.5 border border-line bg-bg/40 text-ink-2">
                     <span className="text-ok">●</span>
                     {g}

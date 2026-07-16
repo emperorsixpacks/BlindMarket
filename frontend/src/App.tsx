@@ -10,7 +10,7 @@ import { ChainProvider } from './context/ChainContext';
 import { ChainSelectorModal } from './components/bb/ChainSelectorModal';
 import { DashboardLayout } from './components/bb/DashboardLayout';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { ThemeSync } from './components/ThemeSync';
+import { ThemeSync, getStoredTheme } from './components/ThemeSync';
 
 // Route-level code splitting. Previously every page was a static import, so the
 // entire app (all ~19 routes + the three.js globe + the web3 stacks) shipped in
@@ -60,7 +60,10 @@ export default function App() {
         config={{
           defaultChain: ogTestnet,
           supportedChains: [ogTestnet],
-          appearance: { theme: 'dark' },
+          // Follows the saved bb.theme preference at load. Privy's modal theme
+          // is fixed per provider mount, so a mid-session toggle applies to the
+          // modal on the next reload.
+          appearance: { theme: getStoredTheme() },
           loginMethods: ['wallet', 'email', 'google', 'twitter'],
           // Disable Coinbase Smart Wallet — CSW only supports a fixed chain list
           // (Base, Mainnet, etc.) and throws "configured chains not supported"

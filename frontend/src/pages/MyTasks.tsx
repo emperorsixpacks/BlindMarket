@@ -57,7 +57,7 @@ interface PostedTask {
   hasCustody?: boolean;
   onChain: null | {
     taskId: string;           // numeric on-chain id, as string
-    status: number;           // 0=Funded 1=Assigned 2=Submitted 3=Verified 4=Completed 5=Cancelled 6=Disputed
+    status: number;           // 0=Funded 1=Assigned 2=Submitted 3=Verified(=failed, retryable) 4=Completed 5=Cancelled 6=Disputed
     reward: string;           // raw bigint as string
     token: string;
     worker: string;
@@ -68,8 +68,11 @@ interface PostedTask {
 
 // On-chain status enum → status string. StatusTag derives the chip colour
 // semantically from this string, so we no longer hand-map status → tone.
+// NB: on-chain 3 (enum name "Verified") means verification ran and FAILED —
+// the worker may retry (BlindEscrow.sol). Distinct from the off-chain a2a
+// status string 'verified', which means passed.
 const STATUS_LABELS: Record<number, string> = {
-  0: 'open', 1: 'assigned', 2: 'submitted', 3: 'verified', 4: 'completed', 5: 'cancelled', 6: 'disputed',
+  0: 'open', 1: 'assigned', 2: 'submitted', 3: 'verification failed', 4: 'completed', 5: 'cancelled', 6: 'disputed',
 };
 
 // ── Chain-aware helpers ─────────────────────────────────────────────────
@@ -189,7 +192,7 @@ export default function MyTasks() {
   const activeCount = tasks.filter(t => [1, 2].includes(effectiveStatus(t))).length;
   const completedCount = tasks.filter(t => effectiveStatus(t) === 4).length;
   // "Total spent" = gross 0G that has irreversibly left the poster — i.e. the
-  // full escrowed amount (worker share + 15% platform fee) of tasks that
+  // full escrowed amount (worker share + platform fee) of tasks that
   // reached on-chain status Completed (4). Active/open tasks are deliberately
   // excluded: their escrow is still refundable on cancel/timeout/dispute, so it
   // isn't "spent" yet. Summed as BigInt wei, then formatted once, to avoid the
@@ -293,7 +296,14 @@ export default function MyTasks() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-px bg-line border-t border-line">
             {filteredTasks.map(t => {
               const status = effectiveStatus(t);
-              const statusLabel = STATUS_LABELS[status] ?? 'open';
+              // Label from the actual source: the numeric map is only correct
+              // for on-chain statuses (where 3 = verification failed). For
+              // off-chain-only tasks show the a2a status string directly —
+              // there 'verified' means PASSED and must not pick up the
+              // on-chain 3 label via effectiveStatus's convenience mapping.
+              const statusLabel = t.onChain
+                ? (STATUS_LABELS[status] ?? 'open')
+                : t.state.status.replace(/_/g, ' ');
               const isDone = status === 3 || status === 4 || status === 6;
               const hasResult = !!t.state.resultData;
               const reasons = t.state.verificationResult;

@@ -2,6 +2,16 @@ import { CONTRACT_ADDRESSES } from './contractAddresses';
 
 export const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 
+// Platform fee — DISPLAY values only. The authoritative feeBps lives on-chain
+// in BlindEscrow (read at settlement time; changed via
+// contracts/scripts/set-fee.ts). Keep this in sync when the fee changes so
+// marketing/product copy stays truthful. 1000 bps = 10% platform / 90% worker
+// (since 2026-07-14; previously 1500 = 15/85).
+export const PLATFORM_FEE_BPS = 1000;
+export const PLATFORM_FEE_PCT = PLATFORM_FEE_BPS / 100; // 10
+export const WORKER_SHARE_PCT = 100 - PLATFORM_FEE_PCT; // 90
+export const FEE_SPLIT_LABEL = `${WORKER_SHARE_PCT}/${PLATFORM_FEE_PCT}`; // "90/10"
+
 const IS_PROD = import.meta.env.PROD;
 
 // Contract-address fallbacks are single-sourced from contracts/deployments/*.json
