@@ -216,7 +216,7 @@ export default function Earnings() {
       width: '160px',
       cell: (a) => (
         <span className="font-mono text-ink-3">
-          {a.walletAddress.slice(0, 8)}…{a.walletAddress.slice(-4)}
+          {a.walletAddress ? `${a.walletAddress.slice(0, 8)}…${a.walletAddress.slice(-4)}` : '—'}
         </span>
       ),
     },

@@ -16,6 +16,10 @@ export default function AgentMetricsPanel({ agentId }: { agentId: string }) {
   const dataRef = useRef<DataPoint[]>([]);
 
   useEffect(() => {
+    // New agent, new chart — otherwise the previous agent's points linger
+    // when the route param changes without a remount.
+    dataRef.current = [];
+    setData([]);
     const fetchStats = async () => {
       try {
         const res = await fetch(`${API_BASE_URL}/api/v1/agents/${agentId}/stats`);

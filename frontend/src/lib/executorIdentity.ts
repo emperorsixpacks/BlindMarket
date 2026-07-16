@@ -34,7 +34,12 @@ export function getOrCreateExecutorIdentity(address: string): {
   publicKey: string;
 } {
   const storageKey = PREFIX + address.toLowerCase();
-  const existing = localStorage.getItem(storageKey);
+  let existing: string | null = null;
+  try {
+    existing = localStorage.getItem(storageKey);
+  } catch {
+    // Storage blocked — regenerate an ephemeral identity for this session.
+  }
   if (existing) {
     try {
       const w = new Wallet(existing);

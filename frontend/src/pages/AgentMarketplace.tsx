@@ -22,6 +22,17 @@ import { getNativeCurrency } from '../config/constants';
 
 const PAGE_SIZE = 20;
 
+// formatUnits THROWS on non-wei strings ("0.5", garbage). One malformed
+// price from the API must not blank the whole agent list.
+function fromPriceLabel(fromPrice: string | null | undefined, sym: string): string | null {
+  if (!fromPrice) return null;
+  try {
+    return `from ${formatUnits(fromPrice, 18)} ${sym} / call`;
+  } catch {
+    return null;
+  }
+}
+
 export default function AgentMarketplace() {
   const [capability, setCapability] = useState('');
   const [minRating, setMinRating] = useState(0);
@@ -122,7 +133,12 @@ export default function AgentMarketplace() {
       ) : (
         <div className="border border-line divide-y divide-line">
           {data.agents.map((r: AgentSearchResult) => {
-            const hasTee = r.badges.some(b => b.type === 'tee' || b.capability === 'tee_verified');
+            // Shape-defensive: a partial row from the API degrades that card,
+            // not the whole list.
+            const badges = r.badges ?? [];
+            const capabilities = r.capabilities ?? [];
+            const hasTee = badges.some(b => b.type === 'tee' || b.capability === 'tee_verified');
+            const priceLabel = fromPriceLabel(r.fromPrice, sym);
             return (
               <Link
                 key={r.address}
@@ -134,16 +150,16 @@ export default function AgentMarketplace() {
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-ink font-semibold truncate group-hover:text-cream transition-colors">{r.name}</span>
                     {hasTee && <span className="text-[10px] font-mono text-ok border border-ok/30 px-1">TEE</span>}
-                    {r.badges.length > 0 && <span className="text-ok text-xs">✓ {r.badges.length}</span>}
+                    {badges.length > 0 && <span className="text-ok text-xs">✓ {badges.length}</span>}
                   </div>
                   <div className="text-[11px] font-mono text-ink-3 mt-0.5">{truncateAddress(r.address)}</div>
-                  {r.capabilities.length > 0 && (
+                  {capabilities.length > 0 && (
                     <div className="flex flex-wrap gap-1 mt-2">
-                      {r.capabilities.slice(0, 4).map((c) => (
+                      {capabilities.slice(0, 4).map((c) => (
                         <Tag key={c} tone="neutral">{c.replace(/_/g, ' ')}</Tag>
                       ))}
-                      {r.capabilities.length > 4 && (
-                        <span className="text-[11px] text-ink-3 self-center">+{r.capabilities.length - 4}</span>
+                      {capabilities.length > 4 && (
+                        <span className="text-[11px] text-ink-3 self-center">+{capabilities.length - 4}</span>
                       )}
                     </div>
                   )}
@@ -151,13 +167,13 @@ export default function AgentMarketplace() {
                 {/* Right rail: the buy signals — rating · work done · entry price */}
                 <div className="col-span-2 sm:col-span-1 flex sm:flex-col items-center sm:items-end justify-between sm:justify-center gap-x-4 gap-y-1 font-mono text-xs sm:text-right border-t sm:border-t-0 border-line/60 pt-3 sm:pt-0">
                   <span className="text-ink">
-                    {r.totalReviews > 0
+                    {r.totalReviews > 0 && r.avgRating != null
                       ? <><span className="text-cream">★</span> {r.avgRating.toFixed(1)} <span className="text-ink-3">({r.totalReviews})</span></>
                       : <span className="text-ink-3">no reviews yet</span>}
                   </span>
                   <span className="text-ink-3">{r.tasksCompleted} tasks done</span>
-                  <span className={r.fromPrice ? 'text-ink' : 'text-ink-3'}>
-                    {r.fromPrice ? `from ${formatUnits(r.fromPrice, 18)} ${sym} / call` : 'no services'}
+                  <span className={priceLabel ? 'text-ink' : 'text-ink-3'}>
+                    {priceLabel ?? 'no services'}
                   </span>
                 </div>
               </Link>

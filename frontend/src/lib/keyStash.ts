@@ -41,10 +41,13 @@ export function stashAesKey(taskHash: string, key: Uint8Array): void {
   }
 }
 
+// NB: with storage fully blocked (Safari "Block All Cookies", strict
+// webviews) ANY localStorage access throws, not just setItem — every helper
+// here degrades to "no key available" instead of crashing its caller.
 export function getAesKey(taskHash: string): Uint8Array | null {
-  const raw = localStorage.getItem(PREFIX + normalize(taskHash));
-  if (!raw) return null;
   try {
+    const raw = localStorage.getItem(PREFIX + normalize(taskHash));
+    if (!raw) return null;
     return hexToBytes(raw);
   } catch {
     return null;
@@ -52,16 +55,20 @@ export function getAesKey(taskHash: string): Uint8Array | null {
 }
 
 export function clearAesKey(taskHash: string): void {
-  localStorage.removeItem(PREFIX + normalize(taskHash));
+  try {
+    localStorage.removeItem(PREFIX + normalize(taskHash));
+  } catch {}
 }
 
 /** List every taskHash we currently hold a key for. Used by the bid-watcher
  *  to know which tasks it should poll for new bidders. */
 export function listStashedHashes(): string[] {
   const out: string[] = [];
-  for (let i = 0; i < localStorage.length; i++) {
-    const k = localStorage.key(i);
-    if (k?.startsWith(PREFIX)) out.push(k.slice(PREFIX.length));
-  }
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k?.startsWith(PREFIX)) out.push(k.slice(PREFIX.length));
+    }
+  } catch {}
   return out;
 }

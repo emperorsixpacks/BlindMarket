@@ -36,7 +36,11 @@ export function ChainProvider({ children }: { children: ReactNode }) {
 
   const dismissSelector = useCallback(() => {
     setShowSelector(false);
-    if (!localStorage.getItem(STORAGE_KEY)) {
+    let saved: string | null = null;
+    try {
+      saved = localStorage.getItem(STORAGE_KEY);
+    } catch {}
+    if (!saved) {
       setActiveChain('og');
     }
   }, [setActiveChain]);

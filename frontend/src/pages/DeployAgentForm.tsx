@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useWalletClient, useBalance } from 'wagmi';
 import { BrowserProvider, parseEther, formatEther } from 'ethers';
@@ -164,6 +164,7 @@ export default function DeployAgentForm() {
   const [toolError, setToolError] = useState('');
 
   const [status, setStatus] = useState<'idle' | 'deploying' | 'funding' | 'done' | 'error'>('idle');
+  const submittingRef = useRef(false);
   const [error, setError] = useState('');
   const [agentId, setAgentId] = useState('');
   const [fundingSkipped, setFundingSkipped] = useState(false);
@@ -248,6 +249,11 @@ export default function DeployAgentForm() {
     e.preventDefault();
     if (!address) return;
     if (!walletClient) return;
+    // Synchronous re-entry guard — the disabled={status…} button only takes
+    // effect on the next render, so a fast double-click could fire two
+    // signature prompts / two deploy POSTs (same pattern as PostTask).
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setStatus('deploying');
     setError('');
     setFundingSkipped(false);
@@ -311,6 +317,8 @@ export default function DeployAgentForm() {
     } catch (err) {
       setError((err as Error).message);
       setStatus('error');
+    } finally {
+      submittingRef.current = false;
     }
   }
 

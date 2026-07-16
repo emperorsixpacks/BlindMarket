@@ -12,7 +12,7 @@ import { CustodyChain } from '../components/CustodyChain';
 import { truncateAddress, formatDate } from '../lib/utils';
 import { buildCancelTask, buildClaimTimeout } from '../services/tasks';
 import { signAndSendTx } from '../lib/txSigner';
-import { getNativeCurrency, WORKER_SHARE_PCT, PLATFORM_FEE_PCT } from '../config/constants';
+import { getNativeCurrency, WORKER_SHARE_PCT, PLATFORM_FEE_PCT, API_BASE_URL } from '../config/constants';
 import { useChainExplorerUrl } from '../hooks/useChainWallet';
 import { TaskStatus, TaskStatusLabels } from '../types/api';
 
@@ -107,10 +107,16 @@ export default function TaskDetail() {
   // boolean named isPoster to make the intent clear in UI conditions.
   const isPoster = address?.toLowerCase() === onChain.agent?.toLowerCase();
   const decimals = meta.decimals ?? 18;
-  const reward = Number(meta.reward) / (10 ** decimals);
+  // meta.reward can be absent on partial/undecryptable metas — render 0
+  // rather than "NaN 0G" in the page's hero number.
+  const rewardRaw = Number(meta.reward);
+  const reward = Number.isFinite(rewardRaw) ? rewardRaw / 10 ** decimals : 0;
 
   const a2aState = onChain.a2aState;
-  const storageBase = (window as any).ENV?.VITE_BACKEND_URL || 'http://localhost:3001';
+  // Storage links go through the same API base as every other call.
+  // (This used to read window.ENV?.VITE_BACKEND_URL — never defined anywhere —
+  // and fell back to localhost:3001, a dead link in every production build.)
+  const storageBase = API_BASE_URL;
 
   const isExpired = Date.now() > Number(onChain.deadline) * 1000;
   const canTimeout = isExpired && [
@@ -157,7 +163,7 @@ export default function TaskDetail() {
             <StatusTag status={TaskStatusLabels[onChain.status]} />
           </div>
           <div className="flex items-center gap-4 text-sm text-ink-3 flex-wrap">
-            <span>{meta.category.replace(/_/g, ' ')}</span>
+            <span>{(meta.category ?? 'unknown').replace(/_/g, ' ')}</span>
             <span>{meta.locationZone || 'Global'}</span>
             <EncryptionIndicator encrypted={true} />
           </div>

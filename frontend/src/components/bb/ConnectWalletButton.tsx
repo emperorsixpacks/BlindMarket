@@ -3,6 +3,7 @@ import { usePrivy } from '@privy-io/react-auth';
 import { useAccount, useChainId, useSwitchChain } from 'wagmi';
 import { ogTestnet } from '../../config/chains';
 import { isMainnet } from '../../config/constants';
+import { copyToClipboard } from '../../lib/utils';
 
 function shortenAddress(addr: string) {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
@@ -77,7 +78,7 @@ function EvmWalletButton({ variant }: Props) {
       {menuOpen && (
         <div className="absolute right-0 top-full mt-1 min-w-[180px] border border-line bg-surface text-[11px] font-mono z-50">
           {address && (
-            <button onClick={() => { navigator.clipboard.writeText(address); setMenuOpen(false); }} className="block w-full text-left px-3 py-2 text-ink-2 hover:bg-surface-2 hover:text-ink transition-colors">
+            <button onClick={() => { copyToClipboard(address); setMenuOpen(false); }} className="block w-full text-left px-3 py-2 text-ink-2 hover:bg-surface-2 hover:text-ink transition-colors">
               copy_address
             </button>
           )}

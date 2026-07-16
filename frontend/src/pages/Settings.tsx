@@ -17,6 +17,7 @@ import {
   isMainnet, OG_CHAIN_ID, OG_RPC_URL,
 } from '../config/constants';
 import { authedGet, authedPost, authedDelete } from '../lib/api';
+import { copyToClipboard } from '../lib/utils';
 
 const NOTIF_KEYS = {
   payout: 'bb.notify.payout',
@@ -24,15 +25,24 @@ const NOTIF_KEYS = {
   dispute: 'bb.notify.dispute',
 } as const;
 
+// try/catch: with storage fully blocked (Safari "Block All Cookies",
+// locked-down webviews) ANY localStorage access throws — and loadBool runs
+// inside a useState initializer, so an unguarded throw kills the whole page.
 function loadBool(key: string, fallback: boolean): boolean {
   if (typeof window === 'undefined') return fallback;
-  const v = window.localStorage.getItem(key);
-  return v == null ? fallback : v === '1';
+  try {
+    const v = window.localStorage.getItem(key);
+    return v == null ? fallback : v === '1';
+  } catch {
+    return fallback;
+  }
 }
 
 function saveBool(key: string, v: boolean) {
   if (typeof window === 'undefined') return;
-  window.localStorage.setItem(key, v ? '1' : '0');
+  try {
+    window.localStorage.setItem(key, v ? '1' : '0');
+  } catch {}
 }
 
 export default function Settings() {
@@ -413,7 +423,7 @@ export default function Settings() {
           <div className="flex items-center gap-2 bg-surface-2 border border-line px-3 py-2.5">
             <code className="flex-1 text-xs font-mono text-cream break-all select-all">{createdKey}</code>
             <button
-              onClick={() => { if (createdKey) navigator.clipboard.writeText(createdKey); }}
+              onClick={() => { if (createdKey) copyToClipboard(createdKey); }}
               className="text-[10px] uppercase tracking-wider text-ink-3 hover:text-ink shrink-0 transition-colors"
             >
               Copy

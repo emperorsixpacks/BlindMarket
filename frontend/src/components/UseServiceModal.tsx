@@ -48,7 +48,20 @@ export default function UseServiceModal({
   const [output, setOutput] = useState<string | null>(null);
   const submittingRef = useRef(false);
 
-  const priceLabel = `${formatUnits(service.price_raw, 18)} ${symbol}`;
+  // The poll loop can run ~5 min; if the parent unmounts this modal (user
+  // navigates away), stop polling and stop touching state.
+  const abortedRef = useRef(false);
+  useEffect(() => () => { abortedRef.current = true; }, []);
+
+  // formatUnits throws on malformed input — never let a bad listing price
+  // crash the modal (and with it the whole agent page).
+  const priceLabel = (() => {
+    try {
+      return `${formatUnits(service.price_raw, 18)} ${symbol}`;
+    } catch {
+      return `— ${symbol}`;
+    }
+  })();
   const busy = phase === 'encrypting' || phase === 'signing' || phase === 'running';
 
   // Elapsed-time counter for the long "agent is working" wait (up to ~5 min):
@@ -64,6 +77,7 @@ export default function UseServiceModal({
   async function pollForResult(taskHash: string, token: string) {
     for (let i = 0; i < MAX_POLLS; i++) {
       await new Promise((r) => setTimeout(r, POLL_MS));
+      if (abortedRef.current) return;
       try {
         const { tasks } = await authedGet<{
           tasks: Array<{ meta: { taskId: string }; state: { status: string; resultData?: Record<string, unknown> } }>;
