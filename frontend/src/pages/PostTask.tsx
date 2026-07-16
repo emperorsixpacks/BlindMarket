@@ -20,7 +20,7 @@ import { stashAesKey } from '../lib/keyStash';
 import { signAndSendTx } from '../lib/txSigner';
 import { authedGet, authedPost } from '../lib/api';
 import { trackEvent } from '../hooks/useAnalytics';
-import { MARKETPLACE_TOKEN_ADDRESS, getNativeCurrency } from '../config/constants';
+import { MARKETPLACE_TOKEN_ADDRESS, getNativeCurrency, WORKER_SHARE_PCT, PLATFORM_FEE_PCT } from '../config/constants';
 import { useChain } from '../context/ChainContext';
 import { useChainAddress } from '../hooks/useChainWallet';
 import { useAuth } from '../context/AuthContext';
@@ -592,9 +592,9 @@ export default function PostTask() {
             <SectionRule num="02" title="Payment" />
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <FormField
-                label={`Bounty (${native.symbol})`}
+                label={`Reward (${native.symbol})`}
                 required
-                hint="90% to worker, 10% protocol fee."
+                hint={`${WORKER_SHARE_PCT}% to worker, ${PLATFORM_FEE_PCT}% protocol fee.`}
               >
                 <FormInput
                   className="font-mono"

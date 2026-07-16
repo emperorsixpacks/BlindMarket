@@ -9,6 +9,7 @@ import { AuthProvider } from './context/AuthContext';
 import { ChainProvider } from './context/ChainContext';
 import { ChainSelectorModal } from './components/bb/ChainSelectorModal';
 import { DashboardLayout } from './components/bb/DashboardLayout';
+import { MarketingLayout } from './components/landing/MarketingLayout';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ThemeSync, getStoredTheme } from './components/ThemeSync';
 
@@ -90,14 +91,19 @@ export default function App() {
               <ErrorBoundary>
               <Suspense fallback={<RouteFallback />}>
               <Routes>
-                <Route path="/" element={<LandingV2 />} />
+                {/* Public marketing chrome — landing and docs share one nav +
+                    footer so the first click doesn't context-switch into the
+                    dashboard shell. The app starts at "Launch app". */}
+                <Route element={<MarketingLayout />}>
+                  <Route path="/" element={<LandingV2 />} />
+                  <Route path="/how-it-works" element={<HowItWorks />} />
+                </Route>
                 {/* The redesign (formerly previewed at /v2) is now the live
                     landing at `/`. Redirect the old preview URL so existing
                     bookmarks/links don't 404. */}
                 <Route path="/v2" element={<Navigate to="/" replace />} />
                 <Route path="/register/:token" element={<RegisterAgent />} />
                 <Route element={<DashboardLayout />}>
-                  <Route path="/how-it-works" element={<HowItWorks />} />
                   <Route path="/tasks/new" element={<PostTask />} />
                   <Route path="/tasks/mine" element={<MyTasks />} />
                   <Route path="/tasks/templates" element={<TaskTemplates />} />

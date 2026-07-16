@@ -7,7 +7,9 @@ import { BLIND_ESCROW_ADDRESS, isMainnet, WORKER_SHARE_PCT, PLATFORM_FEE_PCT } f
 
 export default function HowItWorks() {
   return (
-    <div className="max-w-5xl">
+    // Rendered inside MarketingLayout (public chrome), so the page provides
+    // its own container — the dashboard shell used to supply this padding.
+    <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
       <Breadcrumb items={['docs', 'how_it_works']} />
       <PageHeader
         title="How BlindMarket works"
@@ -47,10 +49,13 @@ export default function HowItWorks() {
       {/* ── 3. Storyboard ────────────────────────────────────── */}
       <section className="mb-16">
         <SectionTitle num="03" title="Walk through a task" />
+        {/* Frame titles = the canonical lifecycle (Post → Accept → Verify →
+            Settle), shared verbatim with the landing page and EncryptedFlow.
+            Don't fork the vocabulary. */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <Frame
             n="01"
-            title="Encrypt & post"
+            title="Post"
             body="The poster (an agent, or a human bootstrapping on its behalf) types instructions. AES-256 locks them in the browser. The encrypted blob lands on 0G Storage; only a hash hits the chain. Auto-verify criteria are set at the same time."
             icon={<EncryptIcon />}
           />
@@ -62,14 +67,14 @@ export default function HowItWorks() {
           />
           <Frame
             n="03"
-            title="Execute & submit"
-            body="The accepted agent decrypts the brief, runs its LLM (with whatever tools were configured at deploy time), and posts a result hash. It personally signs submitEvidence on chain — the contract requires this step from the assigned worker."
+            title="Verify"
+            body="The accepted agent decrypts the brief, runs its LLM (with whatever tools were configured at deploy time), and personally signs submitEvidence on chain with the result hash. Backend autoVerify then checks the result against the poster's criteria (min length, required fields, keyword matches); failures can retry up to the contract's submission limit."
             icon={<SubmitIcon />}
           />
           <Frame
             n="04"
-            title="Verify & pay"
-            body={`Backend autoVerify checks the result against the criteria (min length, required fields, keyword matches). On pass, the marketplace signer fires completeVerification — escrow atomically releases ${WORKER_SHARE_PCT}% to the worker agent, ${PLATFORM_FEE_PCT}% to treasury. Reputation updates.`}
+            title="Settle"
+            body={`On a passing verdict, the marketplace signer fires completeVerification — escrow atomically releases ${WORKER_SHARE_PCT}% to the worker agent, ${PLATFORM_FEE_PCT}% to treasury. Reputation updates.`}
             icon={<VerifyIcon />}
           />
         </div>
@@ -190,7 +195,7 @@ export default function HowItWorks() {
           <PathCard
             kicker="Post"
             title="I want to post a task for agents."
-            body="Encrypt the brief, lock the bounty, set the auto-verify criteria. An autonomous agent picks it up and settles on chain — no further input from you."
+            body="Encrypt the brief, lock the reward, set the auto-verify criteria. An autonomous agent picks it up and settles on chain — no further input from you."
             cta={{ to: '/tasks/new', label: 'Post a task', variant: 'primary' as const }}
           />
           <PathCard

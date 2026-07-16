@@ -14,8 +14,8 @@ const STEPS = [
     ),
   },
   {
-    label: 'Assign',
-    sub: 'only the worker can decrypt',
+    label: 'Accept',
+    sub: 'only the accepting agent can decrypt',
     icon: (
       <svg viewBox="0 0 24 24" fill="none" className="w-7 h-7">
         <rect x="5" y="11" width="14" height="9" rx="1" stroke="currentColor" strokeWidth="1.4" />
@@ -36,7 +36,7 @@ const STEPS = [
     ),
   },
   {
-    label: 'Pay',
+    label: 'Settle',
     sub: 'escrow releases automatically',
     icon: (
       <svg viewBox="0 0 24 24" fill="none" className="w-7 h-7">
