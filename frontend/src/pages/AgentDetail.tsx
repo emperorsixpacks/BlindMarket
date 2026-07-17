@@ -44,6 +44,7 @@ import type { AgentReview, AgentReviewStats, AgentBadge, AgentWebhook, AgentServ
 
 import AgentMetricsPanel from '../components/AgentMetricsPanel';
 import UseServiceModal from '../components/UseServiceModal';
+import UseFromAgentModal from '../components/UseFromAgentModal';
 
 // Top-up amount when the agent runs low on gas. Same default as the deploy
 // funding step — round trip + LLM call + submitEvidence costs ~0.0004 0G, so
@@ -997,6 +998,10 @@ function ServicesTab({
 }) {
   const [publicServices, setPublicServices] = useState<AgentService[] | null>(null);
   const [useService, setUseService] = useState<AgentService | null>(null);
+  // "Use from your agent" — copyable prompt/script for the buyer's OWN agent
+  // to run this rent flow headlessly (works even while this agent is stopped:
+  // the copy block is documentation, the task just waits for it to start).
+  const [agentUseService, setAgentUseService] = useState<AgentService | null>(null);
   const [needsLink, setNeedsLink] = useState(false);
   const [linking, setLinking] = useState(false);
   const retryRef = useRef<null | (() => Promise<void>)>(null);
@@ -1116,13 +1121,22 @@ function ServicesTab({
                       <div className="font-mono text-[11px] text-ink-3 mt-0.5">{s.sold_count} sold{s.avg_rating > 0 ? ` · ★ ${s.avg_rating.toFixed(1)}` : ''}</div>
                     )}
                   </div>
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    label="Use now"
-                    disabled={agentStatus !== 'running' || !s.agent_public_key}
-                    onClick={() => setUseService(s)}
-                  />
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      label="Use from your agent"
+                      disabled={!s.agent_public_key}
+                      onClick={() => setAgentUseService(s)}
+                    />
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      label="Use now"
+                      disabled={agentStatus !== 'running' || !s.agent_public_key}
+                      onClick={() => setUseService(s)}
+                    />
+                  </div>
                 </div>
               </div>
             ))}
@@ -1198,6 +1212,13 @@ function ServicesTab({
           symbol={symbol}
           onClose={() => setUseService(null)}
           onSettled={load}
+        />
+      )}
+      {agentUseService && (
+        <UseFromAgentModal
+          service={agentUseService}
+          symbol={symbol}
+          onClose={() => setAgentUseService(null)}
         />
       )}
     </div>
