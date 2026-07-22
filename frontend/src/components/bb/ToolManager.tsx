@@ -281,22 +281,24 @@ export function ToolManager({ tools, onChange }: ToolManagerProps) {
           {mcpTools.length > 0 && (
             <div className="space-y-2">
               <p className="text-xs text-ink-3">{mcpTools.length} tools found. Select which to import:</p>
-              {mcpTools.map((t, i) => (
-                <label key={i} className="flex items-center gap-3 border border-line px-3 py-2 text-sm cursor-pointer hover:bg-surface-2">
-                  <input
-                    type="checkbox"
-                    checked={mcpSelected.has(i)}
-                    onChange={e => {
-                      const next = new Set(mcpSelected);
-                      e.target.checked ? next.add(i) : next.delete(i);
-                      setMcpSelected(next);
-                    }}
-                    className="accent-cream"
-                  />
-                  <span className="font-medium text-ink">{t.name}</span>
-                  <span className="text-ink-3 text-xs truncate flex-1">{t.description}</span>
-                </label>
-              ))}
+              <div className={`space-y-1 ${mcpTools.length > 8 ? 'max-h-56 overflow-y-auto' : ''}`}>
+                {mcpTools.map((t, i) => (
+                  <label key={i} className="flex items-center gap-3 border border-line px-3 py-2 text-sm cursor-pointer hover:bg-surface-2">
+                    <input
+                      type="checkbox"
+                      checked={mcpSelected.has(i)}
+                      onChange={e => {
+                        const next = new Set(mcpSelected);
+                        e.target.checked ? next.add(i) : next.delete(i);
+                        setMcpSelected(next);
+                      }}
+                      className="accent-cream"
+                    />
+                    <span className="font-medium text-ink shrink-0">{t.name}</span>
+                    <span className="text-ink-3 text-xs truncate flex-1">{t.description}</span>
+                  </label>
+                ))}
+              </div>
               <Button
                 type="button"
                 variant="primary"
@@ -342,23 +344,25 @@ export function ToolManager({ tools, onChange }: ToolManagerProps) {
                 {openApiTitle && <span className="font-medium">{openApiTitle} — </span>}
                 {openApiTools.length} operations found. Select which to import:
               </p>
-              {openApiTools.map((t, i) => (
-                <label key={i} className="flex items-center gap-3 border border-line px-3 py-2 text-sm cursor-pointer hover:bg-surface-2">
-                  <input
-                    type="checkbox"
-                    checked={openApiSelected.has(i)}
-                    onChange={e => {
-                      const next = new Set(openApiSelected);
-                      e.target.checked ? next.add(i) : next.delete(i);
-                      setOpenApiSelected(next);
-                    }}
-                    className="accent-cream"
-                  />
-                  <Tag tone="neutral">{t.execution.method}</Tag>
-                  <span className="font-medium text-ink">{t.name}</span>
-                  <span className="text-ink-3 text-xs truncate flex-1">{t.description}</span>
-                </label>
-              ))}
+              <div className={`space-y-1 ${openApiTools.length > 8 ? 'max-h-56 overflow-y-auto' : ''}`}>
+                {openApiTools.map((t, i) => (
+                  <label key={i} className="flex items-center gap-3 border border-line px-3 py-2 text-sm cursor-pointer hover:bg-surface-2">
+                    <input
+                      type="checkbox"
+                      checked={openApiSelected.has(i)}
+                      onChange={e => {
+                        const next = new Set(openApiSelected);
+                        e.target.checked ? next.add(i) : next.delete(i);
+                        setOpenApiSelected(next);
+                      }}
+                      className="accent-cream"
+                    />
+                    <Tag tone="neutral" className="shrink-0">{t.execution.method}</Tag>
+                    <span className="font-medium text-ink shrink-0">{t.name}</span>
+                    <span className="text-ink-3 text-xs truncate flex-1">{t.description}</span>
+                  </label>
+                ))}
+              </div>
               <Button
                 type="button"
                 variant="primary"
