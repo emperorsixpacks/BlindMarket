@@ -108,8 +108,8 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
 
   // ── Auth requirements ──────────────────────────────────────────────────
 
-  /** Collect unique auth requirements from all tools */
-  const authRequirements = tools.reduce<Record<string, { type: string; key_name: string; secret_ref: string }>>((acc, t) => {
+  /** Collect unique auth requirements from already-imported tools AND pending OpenAPI tools */
+  const authRequirements = [...tools, ...openApiTools].reduce<Record<string, { type: string; key_name: string; secret_ref: string }>>((acc, t) => {
     if ('auth' in t && t.auth.type !== 'none' && t.auth.secret_ref) {
       acc[t.auth.secret_ref] = t.auth;
     }
@@ -250,30 +250,6 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
         ))}
       </div>
 
-      {/* Auth requirements — show when tools need secrets */}
-      {Object.keys(authRequirements).length > 0 && onSecretsChange && (
-        <div className="border border-line p-4 space-y-3">
-          <p className="text-xs text-ink-3">
-            Some tools require authentication. Enter your API keys or tokens:
-          </p>
-          {Object.entries(authRequirements).map(([ref, auth]) => (
-            <div key={ref} className="flex items-center gap-3">
-              <label className="text-xs text-ink font-medium shrink-0 w-40 truncate" title={ref}>
-                {auth.key_name || ref}
-                <span className="text-ink-3 ml-1">({auth.type})</span>
-              </label>
-              <input
-                type="password"
-                value={secrets[ref] ?? ''}
-                onChange={e => onSecretsChange({ ...secrets, [ref]: e.target.value })}
-                placeholder={`Enter ${auth.key_name || 'secret'}`}
-                className="flex-1 px-3 py-1.5 bg-surface-2 text-ink text-xs font-mono border-0 outline-none focus:ring-1 focus:ring-cream/30"
-              />
-            </div>
-          ))}
-        </div>
-      )}
-
       {/* Add buttons */}
       {!showForm && !mode && (
         <div className="flex flex-wrap gap-2">
@@ -375,11 +351,36 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
           />
 
           {openApiTools.length > 0 && (
-            <div className="space-y-2">
+            <div className="space-y-3">
               <p className="text-xs text-ink-3">
                 {openApiTitle && <span className="font-medium">{openApiTitle} — </span>}
                 {openApiTools.length} operations found. Select which to import:
               </p>
+
+              {/* Auth requirements — show immediately after fetching spec */}
+              {Object.keys(authRequirements).length > 0 && onSecretsChange && (
+                <div className="border border-line p-3 space-y-2 bg-surface-2">
+                  <p className="text-xs text-ink-3">
+                    This API requires authentication. Enter your credentials:
+                  </p>
+                  {Object.entries(authRequirements).map(([ref, auth]) => (
+                    <div key={ref} className="flex items-center gap-3">
+                      <label className="text-xs text-ink font-medium shrink-0 w-40 truncate" title={ref}>
+                        {auth.key_name || ref}
+                        <span className="text-ink-3 ml-1">({auth.type})</span>
+                      </label>
+                      <input
+                        type="password"
+                        value={secrets[ref] ?? ''}
+                        onChange={e => onSecretsChange({ ...secrets, [ref]: e.target.value })}
+                        placeholder={`Enter ${auth.key_name || 'secret'}`}
+                        className="flex-1 px-3 py-1.5 bg-surface text-ink text-xs font-mono border-0 outline-none focus:ring-1 focus:ring-cream/30"
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+
               <div className={`space-y-1 ${openApiTools.length > 8 ? 'max-h-56 overflow-y-auto' : ''}`}>
                 {openApiTools.map((t, i) => (
                   <label key={i} className="flex items-center gap-3 border border-line px-3 py-2 text-sm cursor-pointer hover:bg-surface-2">
