@@ -113,12 +113,18 @@ const ToolSchema = z.discriminatedUnion('type', [
     name: z.string().min(1),
     description: z.string().default(''),
     url: z.string().url(),
-    method: z.enum(['GET', 'POST', 'PUT', 'DELETE']),
+    method: z.enum(['GET', 'POST', 'PUT', 'DELETE', 'PATCH']),
     headers: z.array(z.object({
-      name: z.string().min(1),
+      // Accept both "name" (backend) and "key" (frontend) for backward compat
+      name: z.string().min(1).optional(),
+      key: z.string().min(1).optional(),
       value: z.string().min(1),
       isSensitive: z.boolean().default(false),
-    })).optional(),
+    })).optional().transform(arr => arr?.map(h => ({
+      name: h.name ?? h.key ?? '',
+      value: h.value,
+      isSensitive: h.isSensitive,
+    }))),
     queryParams: z.array(z.object({
       name: z.string().min(1),
       value: z.string().min(1),
@@ -140,6 +146,39 @@ const ToolSchema = z.discriminatedUnion('type', [
     name: z.string().min(1),
     description: z.string().default(''),
     code: z.string().min(1),
+  }),
+  z.object({
+    type: z.literal('sandbox'),
+    name: z.string().min(1),
+    description: z.string().default(''),
+    command: z.string().min(1),
+    setup: z.string().optional(),
+    timeout: z.number().int().min(1).max(600).optional(),
+  }),
+  z.object({
+    type: z.literal('tool'),
+    name: z.string().min(1),
+    description: z.string().default(''),
+    input_schema: z.object({
+      type: z.literal('object'),
+      properties: z.record(z.object({
+        type: z.string().default('string'),
+        description: z.string().optional(),
+        enum: z.array(z.string()).optional(),
+        default: z.unknown().optional(),
+      })),
+      required: z.array(z.string()).optional(),
+    }),
+    execution: z.object({
+      method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']),
+      url: z.string().min(1),
+      param_mapping: z.record(z.string()),
+    }),
+    auth: z.object({
+      type: z.enum(['query_param', 'header', 'bearer', 'none']),
+      key_name: z.string().default(''),
+      secret_ref: z.string().default(''),
+    }),
   }),
 ]);
 
