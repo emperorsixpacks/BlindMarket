@@ -1,0 +1,264 @@
+/**
+ * OpenAPI spec parser for BlindMarket.
+ *
+ * Parses OpenAPI 3.x specs (JSON or YAML) and converts operations
+ * into ToolDefinition shape for the execution layer.
+ *
+ * Supports: apiKey, http (bearer/basic) security schemes.
+ */
+
+import type { ToolDefinition, ToolParamSchema } from '../types.js';
+
+// ── OpenAPI types (subset we need) ─────────────────────────────────────────
+
+interface OpenApiSpec {
+  openapi: string;
+  info?: { title?: string; version?: string };
+  servers?: Array<{ url: string }>;
+  paths: Record<string, Record<string, OpenApiOperation>>;
+  components?: {
+    securitySchemes?: Record<string, OpenApiSecurityScheme>;
+  };
+}
+
+interface OpenApiOperation {
+  operationId?: string;
+  summary?: string;
+  description?: string;
+  parameters?: OpenApiParameter[];
+  requestBody?: {
+    content?: Record<string, { schema?: OpenApiSchema }>;
+  };
+  security?: Array<Record<string, string[]>>;
+  tags?: string[];
+}
+
+interface OpenApiParameter {
+  name: string;
+  in: 'query' | 'path' | 'header' | 'cookie';
+  description?: string;
+  required?: boolean;
+  schema?: OpenApiSchema;
+}
+
+interface OpenApiSchema {
+  type?: string;
+  description?: string;
+  enum?: string[];
+  default?: unknown;
+  items?: OpenApiSchema;
+  properties?: Record<string, OpenApiSchema>;
+  required?: string[];
+}
+
+interface OpenApiSecurityScheme {
+  type: 'apiKey' | 'http' | 'oauth2' | 'openIdConnect';
+  name?: string;         // for apiKey: header/query param name
+  in?: 'query' | 'header' | 'cookie';
+  scheme?: string;       // for http: "bearer" or "basic"
+  bearerFormat?: string;
+}
+
+// ── Parser ─────────────────────────────────────────────────────────────────
+
+/**
+ * Parse an OpenAPI spec from a URL or raw content string.
+ * Returns normalized ToolDefinitions.
+ */
+export async function parseOpenApiSpec(
+  source: string,
+): Promise<{ tools: ToolDefinition[]; serverUrl: string; title?: string }> {
+  let spec: OpenApiSpec;
+
+  // Determine if source is a URL or raw content
+  if (source.startsWith('http://') || source.startsWith('https://')) {
+    spec = await fetchAndParseSpec(source);
+  } else {
+    spec = parseSpecContent(source);
+  }
+
+  // Extract server URL
+  const serverUrl = spec.servers?.[0]?.url ?? '';
+  if (!serverUrl) {
+    throw new Error('No server URL found in OpenAPI spec');
+  }
+
+  // Resolve security scheme
+  const globalSecurity = spec.components?.securitySchemes;
+
+  // Convert each operation to a tool
+  const tools: ToolDefinition[] = [];
+
+  for (const [path, methods] of Object.entries(spec.paths)) {
+    for (const [method, operation] of Object.entries(methods)) {
+      if (method === 'parameters' || method === 'summary' || method === 'description') continue;
+      if (!['get', 'post', 'put', 'patch', 'delete'].includes(method.toLowerCase())) continue;
+
+      const tool = operationToTool(
+        path,
+        method.toUpperCase() as ToolDefinition['execution']['method'],
+        operation,
+        globalSecurity,
+      );
+      if (tool) tools.push(tool);
+    }
+  }
+
+  return {
+    tools,
+    serverUrl,
+    title: spec.info?.title,
+  };
+}
+
+function operationToTool(
+  path: string,
+  method: ToolDefinition['execution']['method'],
+  op: OpenApiOperation,
+  securitySchemes?: Record<string, OpenApiSecurityScheme>,
+): ToolDefinition | null {
+  const name = op.operationId ?? sanitizeName(`${method}_${path}`);
+  if (!name) return null;
+
+  const description = op.summary ?? op.description ?? `${method} ${path}`;
+
+  // Build input_schema from parameters
+  const properties: Record<string, ToolParamSchema> = {};
+  const required: string[] = [];
+  const paramMapping: Record<string, string> = {};
+
+  // Path and query parameters
+  for (const param of op.parameters ?? []) {
+    const schema = param.schema ?? { type: 'string' };
+    properties[param.name] = {
+      type: schema.type ?? 'string',
+      description: param.description,
+      enum: schema.enum,
+      default: schema.default,
+    };
+    if (param.required) required.push(param.name);
+    paramMapping[param.name] = param.in === 'path' ? 'path' : param.in === 'header' ? 'header' : 'query';
+  }
+
+  // Request body parameters
+  const jsonContent = op.requestBody?.content?.['application/json'];
+  if (jsonContent?.schema) {
+    const bodySchema = jsonContent.schema;
+    if (bodySchema.properties) {
+      for (const [key, propSchema] of Object.entries(bodySchema.properties)) {
+        properties[key] = {
+          type: propSchema.type ?? 'string',
+          description: propSchema.description,
+          enum: propSchema.enum,
+          default: propSchema.default,
+        };
+        paramMapping[key] = 'body';
+      }
+    }
+    if (bodySchema.required) {
+      required.push(...bodySchema.required);
+    }
+  }
+
+  // Determine auth from operation security or global
+  const auth = resolveAuth(op.security, securitySchemes);
+
+  return {
+    name,
+    description,
+    input_schema: {
+      type: 'object',
+      properties,
+      required: required.length > 0 ? required : undefined,
+    },
+    execution: {
+      method,
+      url: path,  // Relative path; execution layer prepends server URL
+      param_mapping: paramMapping,
+    },
+    auth,
+  };
+}
+
+function resolveAuth(
+  opSecurity?: Array<Record<string, string[]>>,
+  securitySchemes?: Record<string, OpenApiSecurityScheme>,
+): ToolDefinition['auth'] {
+  if (!opSecurity?.length || !securitySchemes) {
+    return { type: 'none', key_name: '', secret_ref: '' };
+  }
+
+  // Use first security scheme
+  const firstScheme = opSecurity[0];
+  const schemeName = Object.keys(firstScheme)[0];
+  const scheme = securitySchemes[schemeName];
+
+  if (!scheme) {
+    return { type: 'none', key_name: '', secret_ref: '' };
+  }
+
+  switch (scheme.type) {
+    case 'apiKey':
+      return {
+        type: scheme.in === 'header' ? 'header' : 'query_param',
+        key_name: scheme.name ?? schemeName,
+        secret_ref: `openapi:${schemeName}`,
+      };
+    case 'http':
+      if (scheme.scheme === 'bearer') {
+        return {
+          type: 'bearer',
+          key_name: 'Authorization',
+          secret_ref: `openapi:${schemeName}`,
+        };
+      }
+      // Basic auth — treat as header
+      return {
+        type: 'header',
+        key_name: 'Authorization',
+        secret_ref: `openapi:${schemeName}`,
+      };
+    default:
+      return { type: 'none', key_name: '', secret_ref: '' };
+  }
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+async function fetchAndParseSpec(url: string): Promise<OpenApiSpec> {
+  const res = await fetch(url, {
+    headers: { Accept: 'application/json, text/yaml, text/plain' },
+    signal: AbortSignal.timeout(15_000),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Failed to fetch OpenAPI spec: ${res.status}`);
+  }
+
+  const text = await res.text();
+  return parseSpecContent(text);
+}
+
+function parseSpecContent(content: string): OpenApiSpec {
+  // Try JSON first
+  try {
+    return JSON.parse(content) as OpenApiSpec;
+  } catch {
+    // Not JSON — try YAML
+  }
+
+  // Try YAML (basic parser — in production, use a proper YAML library)
+  // For now, throw if it's not JSON
+  throw new Error(
+    'Could not parse OpenAPI spec. Only JSON is currently supported. ' +
+    'Please convert your YAML spec to JSON first.'
+  );
+}
+
+function sanitizeName(raw: string): string {
+  return raw
+    .replace(/[^a-zA-Z0-9_]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_|_$/g, '')
+    .slice(0, 64);
+}
