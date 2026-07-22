@@ -113,6 +113,7 @@ const SUI_ADMIN_CAP_ID = process.env.SUI_ADMIN_CAP_ID ?? '0x0';
 // signs completeVerification directly against this contract (trustless).
 const AGENT_ESCROW_ADDRESS = process.env.AGENT_ESCROW_ADDRESS ?? '';
 const AGENT_TOOLS_RAW = process.env.AGENT_TOOLS ?? '[]';
+const AGENT_TOOL_SECRETS_RAW = process.env.AGENT_TOOL_SECRETS ?? '{}';
 const AGENT_CAPABILITIES_RAW = process.env.AGENT_CAPABILITIES ?? '[]';
 const BACKEND_URL = process.env.BACKEND_URL ?? 'http://localhost:3001';
 const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS ?? 30_000);
@@ -464,6 +465,13 @@ try {
   agentTools = JSON.parse(AGENT_TOOLS_RAW);
 } catch (e) {
   log(`failed to parse AGENT_TOOLS: ${e.message}`);
+}
+
+let agentToolSecrets = {};
+try {
+  agentToolSecrets = JSON.parse(AGENT_TOOL_SECRETS_RAW);
+} catch (e) {
+  log(`failed to parse AGENT_TOOL_SECRETS: ${e.message}`);
 }
 
 function getModel() {
@@ -835,7 +843,7 @@ export function buildTools(currentTaskHash = null) {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${AGENT_PLATFORM_TOKEN}`,
               },
-              body: JSON.stringify({ tool: t, args, taskId: currentTaskHash }),
+              body: JSON.stringify({ tool: t, args, taskId: currentTaskHash, secrets: agentToolSecrets }),
             });
 
             const data = await res.json();

@@ -207,6 +207,7 @@ const DeploySchema = z.object({
   // which is the worst UX. Require at least one declared capability up front.
   capabilities: z.array(z.enum(AGENT_CAPABILITIES as unknown as [string, ...string[]])).min(1, 'Agent must declare at least one capability'),
   tools: z.array(ToolSchema).default([]),
+  toolSecrets: z.record(z.string()).default({}),
   storageRef: z.string().optional(),
 });
 

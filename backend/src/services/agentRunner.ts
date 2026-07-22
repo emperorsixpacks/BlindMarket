@@ -146,6 +146,7 @@ export async function deployAgent(params: {
   apiKey: string;
   capabilities: AgentCapability[];
   tools?: AgentTool[];
+  toolSecrets?: Record<string, string>;
   storageRef?: string;
 }): Promise<DeployedAgent> {
   const { privateKey, publicKey } = generateKeyPair();
@@ -162,6 +163,19 @@ export async function deployAgent(params: {
     Buffer.from(params.apiKey, 'utf8'),
     params.ownerPublicKey,
   ).toString('hex');
+
+  // Encrypt per-tool secrets (API keys) with owner's public key
+  const toolSecretEntries = Object.entries(params.toolSecrets ?? {});
+  const toolSecrets: Record<string, string> = {};
+  const encryptedToolSecrets: Record<string, string> = {};
+  for (const [key, val] of toolSecretEntries) {
+    if (!val) continue;
+    toolSecrets[key] = val;
+    encryptedToolSecrets[key] = eciesEncrypt(
+      Buffer.from(val, 'utf8'),
+      params.ownerPublicKey,
+    ).toString('hex');
+  }
 
   let inftTokenId: number | undefined;
   if (inft) {
@@ -206,6 +220,8 @@ export async function deployAgent(params: {
     inftTokenId,
     storageRef: params.storageRef,
     platformToken,
+    toolSecrets: Object.keys(toolSecrets).length > 0 ? toolSecrets : undefined,
+    encryptedToolSecrets: Object.keys(encryptedToolSecrets).length > 0 ? encryptedToolSecrets : undefined,
   };
 
   await saveAgent(agent);
@@ -270,6 +286,7 @@ export async function startAgent(id: string, opts?: { skipResume?: boolean }): P
       AGENT_ESCROW_ADDRESS: config.blindEscrowAddress,
       BACKEND_URL: `http://localhost:${config.port}`,
       AGENT_TOOLS: JSON.stringify(agent.tools ?? []),
+      AGENT_TOOL_SECRETS: JSON.stringify(agent.toolSecrets ?? {}),
       AGENT_CAPABILITIES: JSON.stringify(agent.capabilities ?? []),
       AGENT_MIN_REWARD: agent.minReward ?? '',
       AGENT_MEMORY_NS: `agent:${agent.id}`,
