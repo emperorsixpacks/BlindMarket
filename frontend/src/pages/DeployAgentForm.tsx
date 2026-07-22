@@ -21,15 +21,27 @@ import { AGENT_CAPABILITIES } from '../config/capabilities';
 import { useChainAddress } from '../hooks/useChainWallet';
 import { getNativeCurrency } from '../config/constants';
 
+interface ToolParam {
+  key: string;
+  value?: string;
+  required: boolean;
+}
+
+interface ToolHeader {
+  key: string;
+  value?: string;
+  required: boolean;
+}
+
 interface Tool {
   type: 'http' | 'mcp';
   name: string;
   description: string;
   url: string;
-  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   toolName?: string;
-  headers: { name: string; value: string; isSensitive: boolean }[];
-  queryParams: { name: string; value: string }[];
+  headers: ToolHeader[];
+  queryParams: ToolParam[];
   body: { contentType: 'application/json' | 'application/x-www-form-urlencoded'; payload: string };
 }
 
@@ -120,6 +132,11 @@ function capLabel(cap: string): string {
   return t.charAt(0).toUpperCase() + t.slice(1);
 }
 
+const emptyTool: Tool = {
+  type: 'http', name: '', description: '', url: '', method: 'POST',
+  headers: [], queryParams: [], body: { contentType: 'application/json', payload: '' }
+};
+
 export default function DeployAgentForm() {
   const native = getNativeCurrency('og');
   const address = useChainAddress();
@@ -156,12 +173,16 @@ export default function DeployAgentForm() {
 
   const [tools, setTools] = useState<Tool[]>([]);
   const [capabilities, setCapabilities] = useState<string[]>([]);
-  const [newTool, setNewTool] = useState<Tool>({
-    type: 'http', name: '', description: '', url: '', method: 'POST',
-    headers: [], queryParams: [], body: { contentType: 'application/json', payload: '' }
-  });
+  const [newTool, setNewTool] = useState<Tool>({ ...emptyTool });
   const [showToolForm, setShowToolForm] = useState(false);
   const [toolError, setToolError] = useState('');
+  const [toolMode, setToolMode] = useState<'form' | 'json'>('form');
+  const [jsonText, setJsonText] = useState('');
+  const [jsonParseError, setJsonParseError] = useState('');
+  const [testResult, setTestResult] = useState<{ status: number; body: string } | null>(null);
+  const [testLoading, setTestLoading] = useState(false);
+  const [testExpanded, setTestExpanded] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<{ url?: string; name?: string; body?: string }>({});
 
   const [status, setStatus] = useState<'idle' | 'deploying' | 'funding' | 'done' | 'error'>('idle');
   const submittingRef = useRef(false);
@@ -179,8 +200,6 @@ export default function DeployAgentForm() {
   const deployFundAmt = fundAmount(form.provider);
   const minBal = minOwnerBalance(form.provider);
   const hasEnoughForDeploy = ownerBalanceEther >= parseFloat(minBal);
-
-  // model IDs don't match router API — no per-model pricing shown
 
   const [ogPricing, setOgPricing] = useState<Record<string, { promptUsd: string; completionUsd: string } | null>>({});
 
@@ -226,32 +245,156 @@ export default function DeployAgentForm() {
     });
   }
 
-  function addTool() {
-    setToolError('');
-    if (!newTool.name || !newTool.url) {
-      setToolError('Tool name and URL are required.');
+  function validateTool(tool: Tool, existingNames: string[]): { url?: string; name?: string; body?: string } {
+    const errors: { url?: string; name?: string; body?: string } = {};
+    if (!tool.url) {
+      errors.url = 'URL is required.';
+    } else {
+      try {
+        const parsed = new URL(tool.url);
+        if (!['http:', 'https:'].includes(parsed.protocol)) {
+          errors.url = 'URL must use http or https protocol.';
+        }
+      } catch {
+        errors.url = 'URL must be a valid absolute URL (e.g. https://example.com/api).';
+      }
+    }
+    if (!tool.name) {
+      errors.name = 'Name is required.';
+    } else if (/\s/.test(tool.name)) {
+      errors.name = 'Name must not contain spaces.';
+    } else if (existingNames.includes(tool.name)) {
+      errors.name = 'Name must be unique among existing tools.';
+    }
+    if (tool.body.contentType === 'application/json' && tool.body.payload.trim()) {
+      try {
+        JSON.parse(tool.body.payload);
+      } catch {
+        errors.body = 'Body payload must be valid JSON.';
+      }
+    }
+    return errors;
+  }
+
+  const toolValidation = validateTool(newTool, tools.map(t => t.name));
+  const isToolValid = !toolValidation.url && !toolValidation.name && !toolValidation.body
+    && newTool.name.trim() !== '' && newTool.url.trim() !== '';
+
+  function syncJsonFromTool(tool: Tool) {
+    const json: Record<string, unknown> = {
+      type: tool.type === 'mcp' ? 'MCP' : 'HTTP',
+      name: tool.name,
+      url: tool.url,
+      method: tool.method ?? 'POST',
+      description: tool.description,
+      query_parameters: tool.queryParams.map(p => ({ key: p.key, required: p.required })),
+      headers: tool.headers.map(h => ({ key: h.key, required: h.required })),
+      body_payload: tool.body.payload.trim() ? (() => { try { return JSON.parse(tool.body.payload); } catch { return null; } })() : null,
+    };
+    return JSON.stringify(json, null, 2);
+  }
+
+  function parseJsonToTool(text: string): { tool: Tool | null; error: string } {
+    try {
+      const obj = JSON.parse(text);
+      if (typeof obj !== 'object' || obj === null) return { tool: null, error: 'JSON must be an object.' };
+      const method = (obj.method ?? 'POST').toUpperCase();
+      if (!['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+        return { tool: null, error: `Invalid method: ${obj.method}. Must be GET, POST, PUT, PATCH, or DELETE.` };
+      }
+      const toolType = (obj.type ?? 'HTTP').toUpperCase();
+      const tool: Tool = {
+        type: toolType === 'MCP' ? 'mcp' : 'http',
+        name: obj.name ?? '',
+        url: obj.url ?? '',
+        method: method as Tool['method'],
+        description: obj.description ?? '',
+        queryParams: Array.isArray(obj.query_parameters)
+          ? obj.query_parameters.map((p: Record<string, unknown>) => ({ key: String(p.key ?? ''), value: '', required: Boolean(p.required) }))
+          : [],
+        headers: Array.isArray(obj.headers)
+          ? obj.headers.map((h: Record<string, unknown>) => ({ key: String(h.key ?? ''), value: '', required: Boolean(h.required) }))
+          : [],
+        body: {
+          contentType: 'application/json',
+          payload: obj.body_payload != null ? JSON.stringify(obj.body_payload) : '',
+        },
+      };
+      return { tool, error: '' };
+    } catch {
+      return { tool: null, error: 'Invalid JSON — could not parse.' };
+    }
+  }
+
+  function switchToFormMode() {
+    const { tool, error: parseErr } = parseJsonToTool(jsonText);
+    if (parseErr) {
+      setJsonParseError(parseErr);
       return;
     }
-    if (newTool.body.contentType === 'application/json') {
-      const payload = newTool.body.payload.trim();
-      if (!payload.startsWith('{') || !payload.endsWith('}')) {
-        setToolError('JSON payload must be enclosed in { }.');
-        return;
-      }
-      try { JSON.parse(payload); } catch { setToolError('Invalid JSON payload.'); return; }
+    if (tool) setNewTool(tool);
+    setJsonParseError('');
+    setToolMode('form');
+  }
+
+  function switchToJsonMode() {
+    setJsonText(syncJsonFromTool(newTool));
+    setJsonParseError('');
+    setToolMode('json');
+  }
+
+  function addTool() {
+    setToolError('');
+    setFieldErrors({});
+    const errs = validateTool(newTool, tools.map(t => t.name));
+    if (errs.url || errs.name || errs.body) {
+      setFieldErrors(errs);
+      setToolError('Please fix the errors above before adding the tool.');
+      return;
     }
     setTools(t => [...t, newTool]);
-    setNewTool({ type: 'http', name: '', description: '', url: '', method: 'POST', headers: [], queryParams: [], body: { contentType: 'application/json', payload: '{}' } });
+    setNewTool({ ...emptyTool });
+    setJsonText('');
     setShowToolForm(false);
+    setTestResult(null);
+    setFieldErrors({});
+  }
+
+  async function testCall() {
+    setTestLoading(true);
+    setTestResult(null);
+    setTestExpanded(true);
+    try {
+      let url = newTool.url;
+      const requiredParams = newTool.queryParams.filter(p => p.required && p.key);
+      const qs = requiredParams.map(p => `${encodeURIComponent(p.key)}=placeholder`).join('&');
+      if (qs) url += (url.includes('?') ? '&' : '?') + qs;
+
+      const init: RequestInit = { method: newTool.method ?? 'POST' };
+      const headers: Record<string, string> = {};
+      for (const h of newTool.headers) {
+        if (h.key) headers[h.key] = h.value ?? 'placeholder';
+      }
+      if (['POST', 'PUT', 'PATCH'].includes(newTool.method ?? 'POST') && newTool.body.payload.trim()) {
+        headers['Content-Type'] = newTool.body.contentType;
+        init.body = newTool.body.payload;
+      }
+      if (Object.keys(headers).length) init.headers = headers;
+
+      const res = await fetch(url, init);
+      const bodyText = await res.text();
+      setTestResult({ status: res.status, body: bodyText.slice(0, 5000) });
+    } catch (err) {
+      setTestResult({ status: 0, body: (err as Error).message });
+    } finally {
+      setTestLoading(false);
+    }
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!address) return;
     if (!walletClient) return;
-    // Synchronous re-entry guard — the disabled={status…} button only takes
-    // effect on the next render, so a fast double-click could fire two
-    // signature prompts / two deploy POSTs (same pattern as PostTask).
     if (submittingRef.current) return;
     submittingRef.current = true;
     setStatus('deploying');
@@ -266,7 +409,6 @@ export default function DeployAgentForm() {
       const signature = await signer.signMessage(msg);
       const { recoverPublicKey } = await import('viem');
       const { hashMessage, toBytes } = await import('viem');
-      // Convert ethers signature (hex string) to viem format (ByteArray)
       const sigBytes = toBytes(signature);
       const recoveredPubKey = await recoverPublicKey({ hash: hashMessage(msg), signature: sigBytes });
       ownerPublicKey = recoveredPubKey.slice(2);
@@ -370,6 +512,8 @@ export default function DeployAgentForm() {
         </div>
     );
   }
+
+  const showBody = newTool.type === 'http' && newTool.method && !['GET', 'DELETE'].includes(newTool.method);
 
   return (
     <div>
@@ -531,107 +675,186 @@ export default function DeployAgentForm() {
 
             {showToolForm ? (
               <div className="border border-line p-4 space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <FormField label="Type">
-                    <FormSelect
-                      value={newTool.type}
-                      onChange={e => setNewTool(t => ({ ...t, type: e.target.value as 'http' | 'mcp' }))}
-                      
-                    >
-                      <option value="http">HTTP</option>
-                      <option value="mcp">MCP</option>
-                    </FormSelect>
-                  </FormField>
-                  <FormField label="Name">
-                    <FormInput
-                      value={newTool.name}
-                      onChange={e => setNewTool(t => ({ ...t, name: e.target.value }))}
-                      placeholder="web-search"
-                    />
-                  </FormField>
+                {/* Mode toggle */}
+                <div className="flex items-center gap-0 border border-line w-fit">
+                  <button
+                    type="button"
+                    onClick={() => { if (toolMode !== 'form') switchToFormMode(); }}
+                    className={`px-4 py-1.5 text-xs font-medium transition-colors ${toolMode === 'form' ? 'bg-cream/10 text-cream' : 'text-ink-3 hover:text-ink-2'}`}
+                  >
+                    Form
+                  </button>
+                  <div className="w-px h-4 bg-line"></div>
+                  <button
+                    type="button"
+                    onClick={() => { if (toolMode !== 'json') switchToJsonMode(); }}
+                    className={`px-4 py-1.5 text-xs font-medium transition-colors ${toolMode === 'json' ? 'bg-cream/10 text-cream' : 'text-ink-3 hover:text-ink-2'}`}
+                  >
+                    Paste JSON
+                  </button>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-[1fr_140px] gap-4">
-                  <FormField label="URL / endpoint">
-                    <FormInput
-                      className="font-mono"
-                      value={newTool.url}
-                      onChange={e => setNewTool(t => ({ ...t, url: e.target.value }))}
-                      placeholder="https://..."
-                    />
-                  </FormField>
-                  {newTool.type === 'http' && (
-                    <FormField label="Method">
-                      <FormSelect
-                        value={newTool.method ?? 'POST'}
-                        onChange={e => setNewTool(t => ({ ...t, method: e.target.value as Tool['method'] }))}
-                        className="font-mono"
-                      >
-                        {['GET', 'POST', 'PUT', 'DELETE'].map(m => <option key={m} value={m}>{m}</option>)}
-                      </FormSelect>
-                    </FormField>
-                  )}
-                </div>
-
-                <FormField label="Description">
-                  <FormTextarea
-                    rows={3}
-                    value={newTool.description}
-                    onChange={e => setNewTool(t => ({ ...t, description: e.target.value }))}
-                    placeholder="What this tool does"
-                  />
-                </FormField>
-
-                {newTool.type === 'http' && (
-                  <div className="space-y-4">
-                    <FormField label="Query parameters">
-                      <QueryParamManager params={newTool.queryParams} onChange={(p) => setNewTool(t => ({ ...t, queryParams: p }))} />
-                    </FormField>
-                    <FormField label="Headers">
-                      <HeaderManager headers={newTool.headers} onChange={(h) => setNewTool(t => ({ ...t, headers: h }))} />
-                    </FormField>
-                    <FormField label="Body payload">
-                      <FormSelect
-                        value={newTool.body.contentType}
-                        onChange={e => {
-                          const contentType = e.target.value as 'application/json' | 'application/x-www-form-urlencoded';
-                          setNewTool(t => ({
-                            ...t,
-                            body: {
-                              contentType,
-                              payload: contentType === 'application/json' ? '{}' : ''
-                            }
-                          }));
-                        }}
-                        
-                      >
-                        <option value="application/json">JSON</option>
-                        <option value="application/x-www-form-urlencoded">Form URL encoded</option>
-                      </FormSelect>
-
-                      {newTool.body.contentType === 'application/json' ? (
-                        <FormTextarea
-                          rows={3}
-                          className="font-mono mt-2"
-                          value={newTool.body.payload}
-                          onChange={e => setNewTool(t => ({ ...t, body: { ...t.body, payload: e.target.value } }))}
-                          placeholder='{"key": "value"}'
+                {toolMode === 'form' ? (
+                  <>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <FormField label="Type">
+                        <FormSelect
+                          value={newTool.type}
+                          onChange={e => setNewTool(t => ({ ...t, type: e.target.value as 'http' | 'mcp' }))}
+                        >
+                          <option value="http">HTTP</option>
+                          <option value="mcp">MCP</option>
+                        </FormSelect>
+                      </FormField>
+                      <FormField label="Name">
+                        <FormInput
+                          value={newTool.name}
+                          onChange={e => setNewTool(t => ({ ...t, name: e.target.value }))}
+                          placeholder="web-search"
                         />
-                      ) : (
-                        <QueryParamManager
-                          params={newTool.body.payload ? JSON.parse(newTool.body.payload) : []}
-                          onChange={(p) => setNewTool(t => ({ ...t, body: { ...t.body, payload: JSON.stringify(p) } }))}
+                        {fieldErrors.name && <p className="text-xs text-err mt-1">{fieldErrors.name}</p>}
+                      </FormField>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-[1fr_140px] gap-4">
+                      <FormField label="URL / endpoint">
+                        <FormInput
+                          className="font-mono"
+                          value={newTool.url}
+                          onChange={e => setNewTool(t => ({ ...t, url: e.target.value }))}
+                          placeholder="https://..."
                         />
+                        {fieldErrors.url && <p className="text-xs text-err mt-1">{fieldErrors.url}</p>}
+                      </FormField>
+                      {newTool.type === 'http' && (
+                        <FormField label="Method">
+                          <FormSelect
+                            value={newTool.method ?? 'POST'}
+                            onChange={e => setNewTool(t => ({ ...t, method: e.target.value as Tool['method'] }))}
+                            className="font-mono"
+                          >
+                            {['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].map(m => <option key={m} value={m}>{m}</option>)}
+                          </FormSelect>
+                        </FormField>
                       )}
+                    </div>
+
+                    <FormField label="Description">
+                      <FormTextarea
+                        rows={3}
+                        value={newTool.description}
+                        onChange={e => setNewTool(t => ({ ...t, description: e.target.value }))}
+                        placeholder="What this tool does"
+                      />
                     </FormField>
-                  </div>
+
+                    {newTool.type === 'http' && (
+                      <div className="space-y-4">
+                        <FormField label="Query parameters">
+                          <QueryParamManager params={newTool.queryParams} onChange={(p) => setNewTool(t => ({ ...t, queryParams: p }))} />
+                        </FormField>
+                        <FormField label="Headers">
+                          <HeaderManager headers={newTool.headers} onChange={(h) => setNewTool(t => ({ ...t, headers: h }))} />
+                        </FormField>
+                        {showBody && (
+                          <FormField label="Body payload">
+                            <FormSelect
+                              value={newTool.body.contentType}
+                              onChange={e => {
+                                const contentType = e.target.value as 'application/json' | 'application/x-www-form-urlencoded';
+                                setNewTool(t => ({
+                                  ...t,
+                                  body: {
+                                    contentType,
+                                    payload: contentType === 'application/json' ? '{}' : ''
+                                  }
+                                }));
+                              }}
+                            >
+                              <option value="application/json">JSON</option>
+                              <option value="application/x-www-form-urlencoded">Form URL encoded</option>
+                            </FormSelect>
+
+                            {newTool.body.contentType === 'application/json' ? (
+                              <FormTextarea
+                                rows={3}
+                                className="font-mono mt-2"
+                                value={newTool.body.payload}
+                                onChange={e => setNewTool(t => ({ ...t, body: { ...t.body, payload: e.target.value } }))}
+                                placeholder='{"key": "value"}'
+                              />
+                            ) : (
+                              <QueryParamManager
+                                params={newTool.body.payload ? (() => { try { return JSON.parse(newTool.body.payload); } catch { return []; } })() : []}
+                                onChange={(p) => setNewTool(t => ({ ...t, body: { ...t.body, payload: JSON.stringify(p) } }))}
+                              />
+                            )}
+                            {fieldErrors.body && <p className="text-xs text-err mt-1">{fieldErrors.body}</p>}
+                          </FormField>
+                        )}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  /* JSON mode */
+                  <FormField label="Tool JSON">
+                    <FormTextarea
+                      rows={12}
+                      className="font-mono text-xs"
+                      value={jsonText}
+                      onChange={e => {
+                        setJsonText(e.target.value);
+                        const { tool, error } = parseJsonToTool(e.target.value);
+                        if (tool) setNewTool(tool);
+                        setJsonParseError(error);
+                      }}
+                      placeholder='{"type":"HTTP","name":"...","url":"https://..."}'
+                    />
+                    {jsonParseError && <p className="text-xs text-err mt-1">{jsonParseError}</p>}
+                  </FormField>
                 )}
 
                 {toolError && <p className="text-xs text-err">{toolError}</p>}
 
-                <div className="flex gap-3 pt-1">
-                  <Button type="button" variant="primary" label="Add tool" onClick={addTool} />
-                  <Button type="button" variant="ghost" label="Cancel" onClick={() => { setShowToolForm(false); setToolError(''); }} />
+                {/* Test call + collapsible response */}
+                <div className="space-y-2">
+                  <div className="flex gap-3 pt-1 items-center flex-wrap">
+                    <Button
+                      type="button"
+                      variant="primary"
+                      label="Add tool"
+                      onClick={addTool}
+                      disabled={!isToolValid}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      label={testLoading ? 'Testing…' : 'Test call'}
+                      onClick={testCall}
+                      disabled={testLoading || !newTool.url.trim()}
+                    />
+                    <Button type="button" variant="ghost" label="Cancel" onClick={() => { setShowToolForm(false); setToolError(''); setTestResult(null); setFieldErrors({}); }} />
+                  </div>
+                  {testResult && (
+                    <div className="border border-line">
+                      <button
+                        type="button"
+                        onClick={() => setTestExpanded(!testExpanded)}
+                        className="w-full flex items-center justify-between px-3 py-2 text-xs text-ink-2 hover:bg-surface-2 transition-colors"
+                      >
+                        <span className="flex items-center gap-2">
+                          <span className={`inline-block w-2 h-2 rounded-full ${testResult.status === 0 ? 'bg-err' : testResult.status >= 200 && testResult.status < 300 ? 'bg-ok' : testResult.status >= 400 ? 'bg-err' : 'bg-warn'}`}></span>
+                          Response: {testResult.status === 0 ? 'Network error' : `${testResult.status}`}
+                        </span>
+                        <span className="text-ink-3">{testExpanded ? '▲' : '▼'}</span>
+                      </button>
+                      {testExpanded && (
+                        <pre className="px-3 py-2 bg-surface-2 text-xs font-mono text-ink-2 overflow-x-auto max-h-64 overflow-y-auto border-t border-line whitespace-pre-wrap break-all">
+                          {testResult.body || '(empty response)'}
+                        </pre>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             ) : (
@@ -639,7 +862,7 @@ export default function DeployAgentForm() {
                 type="button"
                 variant="outline"
                 label="+ Add tool or MCP server"
-                onClick={() => { setShowToolForm(true); setToolError(''); }}
+                onClick={() => { setShowToolForm(true); setToolError(''); setToolMode('form'); setJsonText(''); setTestResult(null); setFieldErrors({}); }}
               />
             )}
           </div>
