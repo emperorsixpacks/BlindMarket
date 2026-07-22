@@ -152,10 +152,11 @@ toolsRouter.post('/test', requireAuth, async (req: AuthRequest, res, next) => {
 
 toolsRouter.post('/execute', requireAuth, async (req: AuthRequest, res, next) => {
   try {
-    const { tool, args, taskId } = z.object({
+    const { tool, args, taskId, secrets: reqSecrets } = z.object({
       tool: z.custom<ToolDefinition>(),
       args: z.record(z.unknown()),
       taskId: z.string().optional(),
+      secrets: z.record(z.string()).optional(),
     }).parse(req.body);
 
     // Validate
@@ -168,11 +169,8 @@ toolsRouter.post('/execute', requireAuth, async (req: AuthRequest, res, next) =>
       return;
     }
 
-    // Resolve secrets from the tool's secret_ref values.
-    // In production, this looks up from a secure vault. For now, we use
-    // env vars or a per-agent secrets map stored in the agent's config.
-    const secrets: SecretStore = {};
-    // TODO: resolve from secure vault based on tool.auth.secret_ref
+    // Use secrets from the worker (which got them from the agent's encrypted config)
+    const secrets: SecretStore = reqSecrets ?? {};
 
     const result = await executeTool(tool, args, secrets);
 
