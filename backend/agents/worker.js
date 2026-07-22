@@ -759,6 +759,45 @@ export function buildTools(currentTaskHash = null) {
           }
         },
       });
+    } else if (t.type === 'sandbox') {
+      tools[safeName] = tool({
+        description: t.description,
+        inputSchema: z.object({ input: z.string().describe('Input to pass to the sandbox command.') }),
+        execute: async ({ input }) => {
+          const startMs = Date.now();
+          try {
+            const command = t.command.replace(/\{input\}/g, input);
+            const setup = t.setup ? t.setup.replace(/\{input\}/g, input) : undefined;
+
+            const res = await fetchWithTimeout(`${BACKEND_URL}/api/v1/sandbox/exec`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${AGENT_PLATFORM_TOKEN}`,
+              },
+              body: JSON.stringify({
+                command,
+                setup,
+                taskId: currentTaskHash,
+                timeoutSeconds: t.timeout ?? 300,
+              }),
+            });
+
+            const data = await res.json();
+            if (!data.success) return { error: data.error?.message || 'Sandbox execution failed' };
+
+            return {
+              stdout: data.data.stdout,
+              stderr: data.data.stderr,
+              exitCode: data.data.exitCode,
+              durationSeconds: data.data.durationSeconds,
+              costMicroUnits: data.data.costMicroUnits,
+            };
+          } catch (e) {
+            return { error: `sandbox execution failed: ${e.message}` };
+          }
+        },
+      });
     }
   }
 

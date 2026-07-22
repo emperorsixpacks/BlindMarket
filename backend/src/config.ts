@@ -79,6 +79,14 @@ export const config = {
   // deployments to skip the 12s exclusive-offer window.
   cascadeEnabled: optional('CASCADE_ENABLED', 'true').toLowerCase() === 'true',
 
+  // Railway Sandboxes — ephemeral compute for agent tool execution
+  railwayApiToken: process.env.RAILWAY_API_TOKEN || '',
+  railwayEnvironmentId: process.env.RAILWAY_ENVIRONMENT_ID || '',
+  sandboxIdleTimeoutMinutes: parseInt(optional('SANDBOX_IDLE_TIMEOUT_MINUTES', '5'), 10),
+  sandboxMaxConcurrent: parseInt(optional('SANDBOX_MAX_CONCURRENT', '3'), 10),
+  // Cost per second in micro-units (USDC 6 decimals) for billing agents
+  sandboxCostPerSecond: parseInt(optional('SANDBOX_COST_PER_SECOND', '1000'), 10),
+
   // Key custody / late-joiner re-wrap (docs/TEE-REWRAP-SPEC.md). DEFAULT OFF.
   // When enabled, posters seal the brief AES key to a platform-held custody key
   // so an agent that registers AFTER a task was posted can be served a

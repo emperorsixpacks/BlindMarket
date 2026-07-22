@@ -383,7 +383,20 @@ export interface JsAgentTool {
   code: string;           // JS function body: receives (input: string) => string
 }
 
-export type AgentTool = HttpAgentTool | McpAgentTool | JsAgentTool;
+/** Sandbox tool — agent runs code in an isolated Railway sandbox VM */
+export interface SandboxAgentTool {
+  type: 'sandbox';
+  name: string;
+  description: string;
+  // Shell command to execute in the sandbox (e.g. "python3 script.py", "node -e ...")
+  command: string;
+  // Optional: pre-installed packages or setup commands to run before the main command
+  setup?: string;
+  // Optional: max seconds before auto-kill (default: 300)
+  timeout?: number;
+}
+
+export type AgentTool = HttpAgentTool | McpAgentTool | JsAgentTool | SandboxAgentTool;
 
 // ── Deployed Agent types ─────────────────────────────────────────────────────
 

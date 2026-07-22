@@ -28,6 +28,7 @@ import { statsRouter } from './routes/stats.js';
 import { analyticsRouter } from './routes/analytics.js';
 import { apiKeysRouter } from './routes/apiKeys.js';
 import { adminRouter } from './routes/admin.js';
+import { sandboxRouter } from './routes/sandbox.js';
 import { getDb } from './services/database.js';
 import { startEscrowEventLoop } from './services/escrowEvents.js';
 import { startExpirySweepLoop } from './services/a2aExpirySweep.js';
@@ -82,6 +83,7 @@ app.use('/api/v1/stats', statsRouter);
 app.use('/api/v1/analytics', analyticsRouter);
 app.use('/api/v1/api-keys', apiKeysRouter);
 app.use('/api/v1/admin', adminRouter);
+app.use('/api/v1/sandbox', sandboxRouter);
 app.use('/a2a/v1', a2aProtocolRouter);
 
 // Agent card (A2A discovery)
