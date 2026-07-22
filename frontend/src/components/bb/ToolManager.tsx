@@ -216,12 +216,13 @@ export function ToolManager({ tools, onChange }: ToolManagerProps) {
 
   return (
     <div className="space-y-3">
-      {/* Existing tools list */}
-      {tools.map((t, i) => (
-        <div key={i} className="flex items-center justify-between gap-3 border border-line px-4 py-3 text-sm">
-          <span className="text-ink font-medium truncate">{t.name}</span>
-          <span className="text-ink-3 font-mono text-xs truncate flex-1 text-right">
-            <Tag tone="neutral" className="mr-2">
+      {/* Existing tools list — scrollable if many tools */}
+      <div className={`space-y-2 ${tools.length > 5 ? 'max-h-64 overflow-y-auto' : ''}`}>
+        {tools.map((t, i) => (
+          <div key={i} className="flex items-center justify-between gap-3 border border-line px-4 py-3 text-sm">
+            <span className="text-ink font-medium truncate shrink-0">{t.name}</span>
+            <span className="text-ink-3 font-mono text-xs truncate flex-1 text-right overflow-x-auto whitespace-nowrap">
+              <Tag tone="neutral" className="mr-2 shrink-0">
               {t.type === 'tool' ? 'API' : t.type === 'mcp' ? 'MCP' : t.type === 'sandbox' ? 'Sandbox' : t.type === 'js' ? 'JS' : 'HTTP'}
             </Tag>
             {t.type === 'tool' ? t.execution.url : t.url}
@@ -234,7 +235,8 @@ export function ToolManager({ tools, onChange }: ToolManagerProps) {
             Remove
           </button>
         </div>
-      ))}
+        ))}
+      </div>
 
       {/* Add buttons */}
       {!showForm && !mode && (
