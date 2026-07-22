@@ -23,6 +23,7 @@ import { emitTaskOffer, emitTaskAvailable } from '../services/socket.js';
 import { EXPIRY_GRACE_SEC } from '../services/a2aExpirySweep.js';
 import { config } from '../config.js';
 import * as serviceStore from '../services/serviceStore.js';
+import { consumePendingCost } from '../services/railwaySandbox.js';
 
 export const a2aRouter = Router();
 
@@ -1522,7 +1523,11 @@ a2aRouter.post('/tasks/:id/finalize', requireAuth, async (req: AuthRequest, res,
       const reconciledStatus: 'verified' | 'failed' = settledPass ? 'verified' : 'failed';
       await a2aStore.updateState(taskHash, { status: reconciledStatus, verificationResult: reconciled });
       if (settledPass) {
-        await recordWorkerPayout(taskHash, address, ocId, onChainTask.amount, { serviceId: meta.serviceId });
+        const computeCostMicroUnits = consumePendingCost(taskHash);
+        await recordWorkerPayout(taskHash, address, ocId, onChainTask.amount, {
+          serviceId: meta.serviceId,
+          computeCostMicroUnits,
+        });
       } else {
         await recordWorkerDispute(taskHash, address);
       }
@@ -1564,7 +1569,12 @@ a2aRouter.post('/tasks/:id/finalize', requireAuth, async (req: AuthRequest, res,
     });
 
     if (verificationResult.passed) {
-      await recordWorkerPayout(taskHash, address, ocId, onChainTask.amount, { serviceId: meta.serviceId });
+      // Deduct sandbox compute costs from worker's payout
+      const computeCostMicroUnits = consumePendingCost(taskHash);
+      await recordWorkerPayout(taskHash, address, ocId, onChainTask.amount, {
+        serviceId: meta.serviceId,
+        computeCostMicroUnits,
+      });
     } else {
       await recordWorkerDispute(taskHash, address);
     }
@@ -1680,7 +1690,10 @@ a2aRouter.post('/tasks/:id/verify', requireAuth, async (req: AuthRequest, res, n
     });
 
     if (passed && state.executorAddress) {
-      await recordWorkerPayout(taskHash, state.executorAddress, ocId, onChainTask.amount);
+      const computeCostMicroUnits = consumePendingCost(taskHash);
+      await recordWorkerPayout(taskHash, state.executorAddress, ocId, onChainTask.amount, {
+        computeCostMicroUnits,
+      });
     } else if (!passed && state.executorAddress) {
       await recordWorkerDispute(taskHash, state.executorAddress);
     }
@@ -1831,7 +1844,10 @@ a2aRouter.post('/tasks/:id/verdict', requireAuth, async (req: AuthRequest, res, 
     if (passed && state.executorAddress) {
       // ocId + onChainTask were already resolved + gated above (status must be
       // Completed=4 here), so the payout credit can't be lost to an indexing race.
-      await recordWorkerPayout(taskHash, state.executorAddress, ocId, onChainTask.amount);
+      const computeCostMicroUnits = consumePendingCost(taskHash);
+      await recordWorkerPayout(taskHash, state.executorAddress, ocId, onChainTask.amount, {
+        computeCostMicroUnits,
+      });
     } else if (!passed && state.executorAddress) {
       await recordWorkerDispute(taskHash, state.executorAddress);
     }

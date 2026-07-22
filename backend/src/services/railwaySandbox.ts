@@ -34,8 +34,23 @@ const activeSandboxes = new Map<string, SandboxInstance>();
 // Usage history for billing
 const usageHistory: SandboxUsage[] = [];
 
+// Per-agent accumulated compute costs (taskHash → microUnits) for settlement deduction
+const pendingCosts = new Map<string, number>();
+
 function isEnabled(): boolean {
   return !!config.railwayApiToken && !!config.railwayEnvironmentId;
+}
+
+function activeCount(): number {
+  return activeSandboxes.size;
+}
+
+function checkConcurrencyLimit(): void {
+  if (activeCount() >= config.sandboxMaxConcurrent) {
+    throw new Error(
+      `Sandbox concurrency limit reached (${config.sandboxMaxConcurrent}). Wait for active sandboxes to finish.`
+    );
+  }
 }
 
 /**
@@ -52,6 +67,8 @@ export async function createAndRun(opts: {
   if (!isEnabled()) {
     throw new Error('Railway sandboxes not configured — set RAILWAY_API_TOKEN and RAILWAY_ENVIRONMENT_ID');
   }
+
+  checkConcurrencyLimit();
 
   const startMs = Date.now();
   const timeout = opts.timeoutSeconds ?? 300;
@@ -92,6 +109,12 @@ export async function createAndRun(opts: {
       costMicroUnits: durationSeconds * config.sandboxCostPerSecond,
     };
     usageHistory.push(usage);
+
+    // Accumulate cost for settlement deduction (keyed by taskHash)
+    if (opts.taskId) {
+      const prev = pendingCosts.get(opts.taskId) ?? 0;
+      pendingCosts.set(opts.taskId, prev + usage.costMicroUnits);
+    }
 
     return { sandbox: instance, result };
   } finally {
@@ -145,6 +168,24 @@ export function calculateAgentCost(agentId: string): { totalSeconds: number; tot
   };
 }
 
+/**
+ * Get the accumulated sandbox cost for a task (in micro-units).
+ * Returns 0 if no sandbox was used for this task.
+ */
+export function getPendingCost(taskId: string): number {
+  return pendingCosts.get(taskId) ?? 0;
+}
+
+/**
+ * Consume (claim + clear) the pending sandbox cost for a task.
+ * Called at settlement time so the cost is deducted from the worker's payout.
+ */
+export function consumePendingCost(taskId: string): number {
+  const cost = pendingCosts.get(taskId) ?? 0;
+  if (cost > 0) pendingCosts.delete(taskId);
+  return cost;
+}
+
 export default {
   isEnabled,
   createAndRun,
@@ -152,4 +193,6 @@ export default {
   listActive,
   getUsageHistory,
   calculateAgentCost,
+  getPendingCost,
+  consumePendingCost,
 };

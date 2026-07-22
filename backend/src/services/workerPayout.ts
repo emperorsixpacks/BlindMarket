@@ -56,7 +56,7 @@ export async function recordWorkerPayout(
   executorAddr: string,
   onChainId: string,
   grossAmount: bigint,
-  opts: { rethrow?: boolean; serviceId?: number } = {},
+  opts: { rethrow?: boolean; serviceId?: number; computeCostMicroUnits?: number } = {},
 ): Promise<void> {
   const creditedKey = `a2a:credited:${taskHash.toLowerCase()}`;
   try {
@@ -80,8 +80,14 @@ export async function recordWorkerPayout(
     }
 
     const feeBps = await getFeeBps();
-    const workerShare = (grossAmount * (10_000n - BigInt(feeBps))) / 10_000n;
-    const platformFee = grossAmount - workerShare;
+
+    // Convert micro-units (1e-6 USDC) to 0G chain units (18 decimals).
+    // 1 USDC = 1e6 micro-units = 1e18 chain units, so multiply by 1e12.
+    const computeCostChain = BigInt(Math.floor((opts.computeCostMicroUnits ?? 0) * 1e12));
+    const afterComputeCost = grossAmount > computeCostChain ? grossAmount - computeCostChain : 0n;
+
+    const workerShare = (afterComputeCost * (10_000n - BigInt(feeBps))) / 10_000n;
+    const platformFee = afterComputeCost - workerShare;
 
     // tasksCompleted, reputation, and totalEarnedRaw move as one unit — the task
     // counter is never advanced without crediting the matching earnings.
