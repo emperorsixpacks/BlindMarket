@@ -140,6 +140,7 @@ export default function DeployAgentForm() {
   }, [showTemplateMenu]);
 
   const [tools, setTools] = useState<AnyTool[]>([]);
+  const [toolSecrets, setToolSecrets] = useState<Record<string, string>>({});
   const [capabilities, setCapabilities] = useState<string[]>([]);
 
   const [status, setStatus] = useState<'idle' | 'deploying' | 'funding' | 'done' | 'error'>('idle');
@@ -231,6 +232,7 @@ export default function DeployAgentForm() {
         ownerAddress: address,
         ownerPublicKey,
         capabilities,
+        toolSecrets,
         tools: tools.map(t => {
           // Normalized ToolDefinition — pass through as-is
           if ('input_schema' in t) return t;
@@ -476,7 +478,7 @@ export default function DeployAgentForm() {
         {/* 04 — Tools & MCP servers */}
         <div className="p-6 border-b border-line">
           <SectionRule num="04" title="Tools & MCP servers" side="Optional" />
-          <ToolManager tools={tools} onChange={setTools} />
+          <ToolManager tools={tools} onChange={setTools} secrets={toolSecrets} onSecretsChange={setToolSecrets} />
         </div>
 
         {/* Deploy */}

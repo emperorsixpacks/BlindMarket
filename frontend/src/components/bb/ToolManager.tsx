@@ -68,16 +68,18 @@ export interface ToolDef {
 
 export type AnyTool = LegacyTool | ToolDef;
 
-interface ToolManagerProps {
+export interface ToolManagerProps {
   tools: AnyTool[];
   onChange: (tools: AnyTool[]) => void;
+  secrets?: Record<string, string>;
+  onSecretsChange?: (secrets: Record<string, string>) => void;
 }
 
 // ── Component ──────────────────────────────────────────────────────────────
 
 type ImportMode = 'manual' | 'mcp' | 'openapi';
 
-export function ToolManager({ tools, onChange }: ToolManagerProps) {
+export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: ToolManagerProps) {
   const [mode, setMode] = useState<ImportMode | null>(null);
   const [showForm, setShowForm] = useState(false);
 
@@ -103,6 +105,16 @@ export function ToolManager({ tools, onChange }: ToolManagerProps) {
   const [jsonText, setJsonText] = useState('');
   const [jsonError, setJsonError] = useState('');
   const [manualError, setManualError] = useState('');
+
+  // ── Auth requirements ──────────────────────────────────────────────────
+
+  /** Collect unique auth requirements from all tools */
+  const authRequirements = tools.reduce<Record<string, { type: string; key_name: string; secret_ref: string }>>((acc, t) => {
+    if ('auth' in t && t.auth.type !== 'none' && t.auth.secret_ref) {
+      acc[t.auth.secret_ref] = t.auth;
+    }
+    return acc;
+  }, {});
 
   // ── MCP connect ────────────────────────────────────────────────────────
 
@@ -237,6 +249,30 @@ export function ToolManager({ tools, onChange }: ToolManagerProps) {
         </div>
         ))}
       </div>
+
+      {/* Auth requirements — show when tools need secrets */}
+      {Object.keys(authRequirements).length > 0 && onSecretsChange && (
+        <div className="border border-line p-4 space-y-3">
+          <p className="text-xs text-ink-3">
+            Some tools require authentication. Enter your API keys or tokens:
+          </p>
+          {Object.entries(authRequirements).map(([ref, auth]) => (
+            <div key={ref} className="flex items-center gap-3">
+              <label className="text-xs text-ink font-medium shrink-0 w-40 truncate" title={ref}>
+                {auth.key_name || ref}
+                <span className="text-ink-3 ml-1">({auth.type})</span>
+              </label>
+              <input
+                type="password"
+                value={secrets[ref] ?? ''}
+                onChange={e => onSecretsChange({ ...secrets, [ref]: e.target.value })}
+                placeholder={`Enter ${auth.key_name || 'secret'}`}
+                className="flex-1 px-3 py-1.5 bg-surface-2 text-ink text-xs font-mono border-0 outline-none focus:ring-1 focus:ring-cream/30"
+              />
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Add buttons */}
       {!showForm && !mode && (
