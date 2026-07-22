@@ -355,13 +355,48 @@ export type TaskForensicCategory = 'physical_presence' | 'location_based' | 'cre
 
 // ── Agent Tool types ─────────────────────────────────────────────────────────
 
+// ── Normalized Tool Definition (v2) ────────────────────────────────────────
+// Every tool — regardless of import path (MCP, OpenAPI, manual) — normalizes
+// to this shape. The agent never sees URLs, methods, or auth at runtime;
+// it only picks a tool and fills in input_schema arguments.
+
+export interface ToolParamSchema {
+  type: string;          // JSON Schema type: "string", "number", "boolean", "array", "object"
+  description?: string;
+  enum?: string[];
+  default?: unknown;
+  items?: { type: string };  // for array type
+}
+
+export interface ToolDefinition {
+  name: string;
+  description: string;   // written for the LLM: what it does and when to call it
+  input_schema: {
+    type: 'object';
+    properties: Record<string, ToolParamSchema>;
+    required?: string[];
+  };
+  execution: {
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+    url: string;           // may contain {param} placeholders
+    param_mapping: Record<string, string>;  // input_schema key → "query" | "body" | "path" | "header"
+  };
+  auth: {
+    type: 'query_param' | 'header' | 'bearer' | 'none';
+    key_name: string;      // e.g. "api_key", "Authorization"
+    secret_ref: string;    // pointer to stored secret, NEVER the literal key
+  };
+}
+
+// ── Legacy Tool Types (kept for backward compat, deprecated) ────────────────
+
 /** HTTP tool — agent calls an external REST endpoint */
 export interface HttpAgentTool {
   type: 'http';
   name: string;           // tool name exposed to the LLM
   description: string;
   url: string;            // endpoint URL (may include {param} placeholders)
-  method: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
   headers?: Record<string, string>;
   bodyTemplate?: string;  // JSON template with {{param}} substitutions
 }
@@ -388,15 +423,12 @@ export interface SandboxAgentTool {
   type: 'sandbox';
   name: string;
   description: string;
-  // Shell command to execute in the sandbox (e.g. "python3 script.py", "node -e ...")
   command: string;
-  // Optional: pre-installed packages or setup commands to run before the main command
   setup?: string;
-  // Optional: max seconds before auto-kill (default: 300)
   timeout?: number;
 }
 
-export type AgentTool = HttpAgentTool | McpAgentTool | JsAgentTool | SandboxAgentTool;
+export type AgentTool = HttpAgentTool | McpAgentTool | JsAgentTool | SandboxAgentTool | ToolDefinition;
 
 // ── Deployed Agent types ─────────────────────────────────────────────────────
 
