@@ -798,6 +798,54 @@ export function buildTools(currentTaskHash = null) {
           }
         },
       });
+    } else if (t.type === 'tool') {
+      // Normalized ToolDefinition — typed input_schema, backend execution layer
+      const inputProps = t.input_schema?.properties ?? {};
+      const inputRequired = t.input_schema?.required ?? [];
+
+      // Build a Zod schema from the input_schema properties
+      /** @type {Record<string, import('zod').ZodTypeAny>} */
+      const zodShape = {};
+      for (const [key, prop] of Object.entries(inputProps)) {
+        const p = prop;
+        let field;
+        switch (p.type) {
+          case 'number': field = z.number(); break;
+          case 'boolean': field = z.boolean(); break;
+          case 'integer': field = z.number().int(); break;
+          default: field = z.string(); break;
+        }
+        if (p.description) field = field.describe(p.description);
+        if (p.enum) field = z.enum(p.enum);
+        if (!inputRequired.includes(key)) field = field.optional();
+        zodShape[key] = field;
+      }
+      const inputSchema = Object.keys(zodShape).length > 0
+        ? z.object(zodShape)
+        : z.object({ input: z.string().optional() });
+
+      tools[safeName] = tool({
+        description: t.description,
+        inputSchema,
+        execute: async (args) => {
+          try {
+            const res = await fetchWithTimeout(`${BACKEND_URL}/api/v1/tools/execute`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${AGENT_PLATFORM_TOKEN}`,
+              },
+              body: JSON.stringify({ tool: t, args, taskId: currentTaskHash }),
+            });
+
+            const data = await res.json();
+            if (!data.success) return { error: data.error?.message || 'Tool execution failed' };
+            return data.data;
+          } catch (e) {
+            return { error: `tool execution failed: ${e.message}` };
+          }
+        },
+      });
     }
   }
 
