@@ -98,6 +98,10 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
   const [openApiTools, setOpenApiTools] = useState<ToolDef[]>([]);
   const [openApiSelected, setOpenApiSelected] = useState<Set<number>>(new Set());
   const [openApiTitle, setOpenApiTitle] = useState('');
+  // Auth override — when spec doesn't declare security schemes
+  const [openApiAuthType, setOpenApiAuthType] = useState<'none' | 'bearer' | 'api_key_header' | 'api_key_query'>('none');
+  const [openApiAuthKeyName, setOpenApiAuthKeyName] = useState('Authorization');
+  const [openApiAuthSecretRef, setOpenApiAuthSecretRef] = useState('');
 
   // Manual state
   const [toolMode, setToolMode] = useState<'form' | 'json'>('form');
@@ -115,6 +119,15 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
     }
     return acc;
   }, {});
+
+  // If user set a manual auth override, inject it as a requirement
+  if (openApiAuthType !== 'none' && openApiAuthSecretRef) {
+    authRequirements[openApiAuthSecretRef] = {
+      type: openApiAuthType === 'bearer' ? 'bearer' : openApiAuthType === 'api_key_header' ? 'header' : 'query_param',
+      key_name: openApiAuthKeyName,
+      secret_ref: openApiAuthSecretRef,
+    };
+  }
 
   // ── MCP connect ────────────────────────────────────────────────────────
 
@@ -177,12 +190,30 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
   }, [openApiSource]);
 
   const importSelectedOpenApi = useCallback(() => {
-    const selected = openApiTools.filter((_, i) => openApiSelected.has(i));
+    let selected = openApiTools.filter((_, i) => openApiSelected.has(i));
+
+    // Apply manual auth override to all selected tools if set
+    if (openApiAuthType !== 'none' && openApiAuthSecretRef) {
+      selected = selected.map(t => ({
+        ...t,
+        auth: {
+          type: openApiAuthType === 'bearer' ? 'bearer' as const
+            : openApiAuthType === 'api_key_header' ? 'header' as const
+            : 'query_param' as const,
+          key_name: openApiAuthKeyName,
+          secret_ref: openApiAuthSecretRef,
+        },
+      }));
+    }
+
     onChange([...tools, ...selected]);
     setMode(null);
     setOpenApiTools([]);
     setOpenApiSource('');
-  }, [openApiTools, openApiSelected, tools, onChange]);
+    setOpenApiAuthType('none');
+    setOpenApiAuthKeyName('Authorization');
+    setOpenApiAuthSecretRef('');
+  }, [openApiTools, openApiSelected, tools, onChange, openApiAuthType, openApiAuthKeyName, openApiAuthSecretRef]);
 
   // ── Manual add ─────────────────────────────────────────────────────────
 
@@ -357,7 +388,49 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
                 {openApiTools.length} operations found. Select which to import:
               </p>
 
-              {/* Auth requirements — show immediately after fetching spec */}
+              {/* Auth override — when spec doesn't declare security schemes */}
+              <div className="border border-line p-3 space-y-2 bg-surface-2">
+                <p className="text-xs text-ink-3 font-medium">Authentication</p>
+                <div className="flex items-center gap-3">
+                  <label className="text-xs text-ink shrink-0">Auth type:</label>
+                  <select
+                    value={openApiAuthType}
+                    onChange={e => setOpenApiAuthType(e.target.value as typeof openApiAuthType)}
+                    className="px-2 py-1 bg-surface text-ink text-xs border-0 outline-none"
+                  >
+                    <option value="none">None (spec-declared or no auth)</option>
+                    <option value="bearer">Bearer Token</option>
+                    <option value="api_key_header">API Key (Header)</option>
+                    <option value="api_key_query">API Key (Query Param)</option>
+                  </select>
+                </div>
+                {openApiAuthType !== 'none' && (
+                  <>
+                    <div className="flex items-center gap-3">
+                      <label className="text-xs text-ink shrink-0 w-28">Header/Param name:</label>
+                      <input
+                        type="text"
+                        value={openApiAuthKeyName}
+                        onChange={e => setOpenApiAuthKeyName(e.target.value)}
+                        placeholder={openApiAuthType === 'bearer' ? 'Authorization' : 'X-API-Key'}
+                        className="flex-1 px-2 py-1 bg-surface text-ink text-xs font-mono border-0 outline-none focus:ring-1 focus:ring-cream/30"
+                      />
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <label className="text-xs text-ink shrink-0 w-28">Secret ref:</label>
+                      <input
+                        type="text"
+                        value={openApiAuthSecretRef}
+                        onChange={e => setOpenApiAuthSecretRef(e.target.value)}
+                        placeholder="e.g. github_token"
+                        className="flex-1 px-2 py-1 bg-surface text-ink text-xs font-mono border-0 outline-none focus:ring-1 focus:ring-cream/30"
+                      />
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* Auth requirements from spec-declared schemes OR manual override */}
               {Object.keys(authRequirements).length > 0 && onSecretsChange && (
                 <div className="border border-line p-3 space-y-2 bg-surface-2">
                   <p className="text-xs text-ink-3">
