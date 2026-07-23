@@ -122,6 +122,10 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
   const [jsonText, setJsonText] = useState('');
   const [jsonError, setJsonError] = useState('');
   const [manualError, setManualError] = useState('');
+  // Manual auth
+  const [manualAuthType, setManualAuthType] = useState<'none' | 'bearer' | 'header' | 'query_param'>('none');
+  const [manualAuthKeyName, setManualAuthKeyName] = useState('Authorization');
+  const [manualAuthSecretRef, setManualAuthSecretRef] = useState('');
 
   // ── Auth requirements ──────────────────────────────────────────────────
 
@@ -257,11 +261,33 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
       setManualError('Tool name must be unique');
       return;
     }
-    onChange([...tools, manualTool]);
+
+    // For HTTP tools with auth, convert to ToolDef so auth is preserved
+    if (manualTool.type === 'http' && manualAuthType !== 'none') {
+      const toolDef: ToolDef = {
+        type: 'tool',
+        name: manualTool.name,
+        description: manualTool.description,
+        input_schema: { type: 'object', properties: {} },
+        execution: { method: 'POST', url: manualTool.url, param_mapping: {} },
+        auth: {
+          type: manualAuthType as ToolDef['auth']['type'],
+          key_name: manualAuthKeyName,
+          secret_ref: manualAuthSecretRef,
+        },
+      };
+      onChange([...tools, toolDef]);
+    } else {
+      onChange([...tools, manualTool]);
+    }
+
     setManualTool({ ...emptyLegacyTool });
+    setManualAuthType('none');
+    setManualAuthKeyName('Authorization');
+    setManualAuthSecretRef('');
     setShowForm(false);
     setManualError('');
-  }, [manualTool, tools, onChange]);
+  }, [manualTool, tools, onChange, manualAuthType, manualAuthKeyName, manualAuthSecretRef]);
 
   const addJsonTool = useCallback(() => {
     try {
@@ -570,9 +596,51 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
               </FormField>
 
               {manualTool.type === 'http' && (
-                <FormField label="URL">
-                  <FormInput className="font-mono" value={manualTool.url} onChange={e => setManualTool(t => ({ ...t, url: e.target.value }))} placeholder="https://api.example.com/endpoint" />
-                </FormField>
+                <>
+                  <FormField label="URL">
+                    <FormInput className="font-mono" value={manualTool.url} onChange={e => setManualTool(t => ({ ...t, url: e.target.value }))} placeholder="https://api.example.com/endpoint" />
+                  </FormField>
+                  <div className="border border-line p-3 space-y-2 bg-surface-2">
+                    <p className="text-xs text-ink-3 font-medium">Auth (optional)</p>
+                    <div className="flex items-center gap-3">
+                      <label className="text-xs text-ink shrink-0">Type:</label>
+                      <select
+                        value={manualAuthType}
+                        onChange={e => setManualAuthType(e.target.value as typeof manualAuthType)}
+                        className="px-2 py-1 bg-surface text-ink text-xs border-0 outline-none"
+                      >
+                        <option value="none">None</option>
+                        <option value="bearer">Bearer Token</option>
+                        <option value="header">API Key (Header)</option>
+                        <option value="query_param">API Key (Query)</option>
+                      </select>
+                    </div>
+                    {manualAuthType !== 'none' && (
+                      <>
+                        <div className="flex items-center gap-3">
+                          <label className="text-xs text-ink shrink-0 w-28">Header/Param:</label>
+                          <input
+                            type="text"
+                            value={manualAuthKeyName}
+                            onChange={e => setManualAuthKeyName(e.target.value)}
+                            placeholder={manualAuthType === 'bearer' ? 'Authorization' : 'X-API-Key'}
+                            className="flex-1 px-2 py-1 bg-surface text-ink text-xs font-mono border-0 outline-none focus:ring-1 focus:ring-cream/30"
+                          />
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <label className="text-xs text-ink shrink-0 w-28">Secret ref:</label>
+                          <input
+                            type="text"
+                            value={manualAuthSecretRef}
+                            onChange={e => setManualAuthSecretRef(e.target.value)}
+                            placeholder="e.g. my_api_key"
+                            className="flex-1 px-2 py-1 bg-surface text-ink text-xs font-mono border-0 outline-none focus:ring-1 focus:ring-cream/30"
+                          />
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </>
               )}
               {manualTool.type === 'mcp' && <McpForm tool={manualTool} onChange={setManualTool} />}
               {manualTool.type === 'js' && <JsForm tool={manualTool} onChange={setManualTool} />}
