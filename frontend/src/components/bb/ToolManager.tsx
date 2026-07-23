@@ -64,6 +64,20 @@ export interface ToolDef {
     key_name: string;
     secret_ref: string;
   };
+  /** DSL metadata from the backend — carries needs_review, intent, etc. */
+  _dsl?: ToolDSLMeta;
+}
+
+/** DSL metadata returned alongside tools from import endpoints */
+export interface ToolDSLMeta {
+  name: string;
+  intent: string;
+  when_to_use: string;
+  side_effects: string;
+  retry_safe: boolean;
+  needs_review: boolean;
+  error_semantics?: Array<{ condition: string; meaning: string }>;
+  sequencing?: { typically_follows?: string[]; typically_precedes?: string[] };
 }
 
 export type AnyTool = LegacyTool | ToolDef;
@@ -146,10 +160,17 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
         protocolVersion: string;
         toolCount: number;
         tools: ToolDef[];
+        dsls?: ToolDSLMeta[];
       }>('/api/v1/tools/mcp/connect', { url: mcpUrl, headers });
 
-      setMcpTools(res.tools);
-      setMcpSelected(new Set(res.tools.map((_, i) => i)));
+      // Attach DSL metadata to each tool
+      const toolsWithDsl = res.tools.map((t, i) => ({
+        ...t,
+        _dsl: res.dsls?.[i],
+      }));
+
+      setMcpTools(toolsWithDsl);
+      setMcpSelected(new Set(toolsWithDsl.map((_, i) => i)));
     } catch (e: any) {
       setMcpError(e.message || 'Failed to connect to MCP server');
     } finally {
@@ -177,11 +198,18 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
         serverUrl: string;
         toolCount: number;
         tools: ToolDef[];
+        dsls?: ToolDSLMeta[];
       }>('/api/v1/tools/openapi/import', { source: openApiSource });
 
-      setOpenApiTools(res.tools);
+      // Attach DSL metadata to each tool
+      const toolsWithDsl = res.tools.map((t, i) => ({
+        ...t,
+        _dsl: res.dsls?.[i],
+      }));
+
+      setOpenApiTools(toolsWithDsl);
       setOpenApiTitle(res.title ?? '');
-      setOpenApiSelected(new Set(res.tools.map((_, i) => i)));
+      setOpenApiSelected(new Set(toolsWithDsl.map((_, i) => i)));
     } catch (e: any) {
       setOpenApiError(e.message || 'Failed to import OpenAPI spec');
     } finally {
@@ -261,9 +289,17 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
     <div className="space-y-3">
       {/* Existing tools list — scrollable if many tools */}
       <div className={`space-y-2 ${tools.length > 5 ? 'max-h-64 overflow-y-auto' : ''}`}>
-        {tools.map((t, i) => (
+        {tools.map((t, i) => {
+          const dsl = 'type' in t && t.type === 'tool' ? t._dsl : undefined;
+          const needsReview = dsl?.needs_review;
+          return (
           <div key={i} className="flex items-center justify-between gap-3 border border-line px-4 py-3 text-sm">
-            <span className="text-ink font-medium truncate shrink-0">{t.name}</span>
+            <div className="flex items-center gap-2 shrink-0 min-w-0">
+              <span className="text-ink font-medium truncate">{t.name}</span>
+              {needsReview && (
+                <Tag tone="warn" className="shrink-0">needs review</Tag>
+              )}
+            </div>
             <span className="text-ink-3 font-mono text-xs truncate flex-1 text-right overflow-x-auto whitespace-nowrap">
               <Tag tone="neutral" className="mr-2 shrink-0">
               {t.type === 'tool' ? 'API' : t.type === 'mcp' ? 'MCP' : t.type === 'sandbox' ? 'Sandbox' : t.type === 'js' ? 'JS' : 'HTTP'}
@@ -278,7 +314,8 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
             Remove
           </button>
         </div>
-        ))}
+        );
+        })}
       </div>
 
       {/* Add buttons */}
@@ -338,6 +375,9 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
                       className="accent-cream"
                     />
                     <span className="font-medium text-ink shrink-0">{t.name}</span>
+                    {t._dsl?.needs_review && (
+                      <Tag tone="warn" className="shrink-0">needs review</Tag>
+                    )}
                     <span className="text-ink-3 text-xs truncate flex-1">{t.description}</span>
                   </label>
                 ))}
@@ -469,6 +509,9 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
                     />
                     <Tag tone="neutral" className="shrink-0">{t.execution.method}</Tag>
                     <span className="font-medium text-ink shrink-0">{t.name}</span>
+                    {t._dsl?.needs_review && (
+                      <Tag tone="warn" className="shrink-0">needs review</Tag>
+                    )}
                     <span className="text-ink-3 text-xs truncate flex-1">{t.description}</span>
                   </label>
                 ))}
