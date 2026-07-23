@@ -123,6 +123,11 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
   const [jsonText, setJsonText] = useState('');
   const [jsonError, setJsonError] = useState('');
   const [manualError, setManualError] = useState('');
+  // Manual DSL fields
+  const [manualIntent, setManualIntent] = useState('');
+  const [manualWhenToUse, setManualWhenToUse] = useState('');
+  const [manualSideEffects, setManualSideEffects] = useState<'none' | 'creates_resource' | 'modifies_resource' | 'destructive'>('none');
+  const [manualRetrySafe, setManualRetrySafe] = useState(true);
 
   // ── Auth requirements ──────────────────────────────────────────────────
 
@@ -254,11 +259,44 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
       setManualError('Tool name must be unique');
       return;
     }
-    onChange([...tools, manualTool]);
+    // Convert to ToolDef with DSL metadata
+    const toolDef: ToolDef = {
+      type: 'tool',
+      name: manualTool.name,
+      description: manualTool.description,
+      input_schema: {
+        type: 'object',
+        properties: Object.fromEntries(
+          manualTool.queryParams.map(p => [p.key, { type: 'string', description: p.key }])
+        ),
+        required: manualTool.queryParams.filter(p => p.required).map(p => p.key),
+      },
+      execution: {
+        method: manualTool.method ?? 'POST',
+        url: manualTool.url,
+        param_mapping: Object.fromEntries(
+          manualTool.queryParams.map(p => [p.key, 'query'])
+        ),
+      },
+      auth: { type: 'none', key_name: '', secret_ref: '' },
+      _dsl: {
+        name: manualTool.name,
+        intent: manualIntent || manualTool.description,
+        when_to_use: manualWhenToUse,
+        side_effects: manualSideEffects,
+        retry_safe: manualRetrySafe,
+        needs_review: !manualWhenToUse,
+      },
+    };
+    onChange([...tools, toolDef]);
     setManualTool({ ...emptyLegacyTool });
+    setManualIntent('');
+    setManualWhenToUse('');
+    setManualSideEffects('none');
+    setManualRetrySafe(true);
     setShowForm(false);
     setManualError('');
-  }, [manualTool, tools, onChange]);
+  }, [manualTool, tools, onChange, manualIntent, manualWhenToUse, manualSideEffects, manualRetrySafe]);
 
   const addJsonTool = useCallback(() => {
     try {
@@ -565,6 +603,33 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
               <FormField label="Description">
                 <FormTextarea rows={2} value={manualTool.description} onChange={e => setManualTool(t => ({ ...t, description: e.target.value }))} placeholder="What this tool does" />
               </FormField>
+
+              {/* DSL fields — semantic metadata for better agent performance */}
+              <div className="border border-line p-3 space-y-3 bg-surface-2">
+                <p className="text-xs text-ink-3 font-medium">Tool metadata (optional, improves agent accuracy)</p>
+                <FormField label="Intent">
+                  <FormInput value={manualIntent} onChange={e => setManualIntent(e.target.value)} placeholder="One sentence — what this tool fundamentally does" />
+                </FormField>
+                <FormField label="When to use">
+                  <FormTextarea rows={2} value={manualWhenToUse} onChange={e => setManualWhenToUse(e.target.value)} placeholder="Decision rule for the model — when should it call this tool?" />
+                </FormField>
+                <div className="grid grid-cols-2 gap-3">
+                  <FormField label="Side effects">
+                    <FormSelect value={manualSideEffects} onChange={e => setManualSideEffects(e.target.value as typeof manualSideEffects)}>
+                      <option value="none">None</option>
+                      <option value="creates_resource">Creates resource</option>
+                      <option value="modifies_resource">Modifies resource</option>
+                      <option value="destructive">Destructive</option>
+                    </FormSelect>
+                  </FormField>
+                  <FormField label="Safe to retry">
+                    <FormSelect value={manualRetrySafe ? 'yes' : 'no'} onChange={e => setManualRetrySafe(e.target.value === 'yes')}>
+                      <option value="yes">Yes</option>
+                      <option value="no">No</option>
+                    </FormSelect>
+                  </FormField>
+                </div>
+              </div>
 
               {manualTool.type === 'http' && <HttpForm tool={manualTool} onChange={setManualTool} />}
               {manualTool.type === 'mcp' && <McpForm tool={manualTool} onChange={setManualTool} />}
