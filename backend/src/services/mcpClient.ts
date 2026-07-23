@@ -7,7 +7,9 @@
  * MCP tools are normalized to ToolDefinition shape for the execution layer.
  */
 
-import type { ToolDefinition, ToolParamSchema } from '../types.js';
+import type { ToolDefinition, ToolDSL, ToolParamSchema } from '../types.js';
+import { compileFromMcp, type McpToolInput } from './toolDslCompiler.js';
+import { renderToolDefinition } from './toolDslRenderer.js';
 
 // ── MCP JSON-RPC types ─────────────────────────────────────────────────────
 
@@ -53,6 +55,7 @@ export interface McpConnection {
   serverName?: string;
   protocolVersion?: string;
   tools: ToolDefinition[];
+  dsls: ToolDSL[];
 }
 
 /**
@@ -84,13 +87,13 @@ export async function mcpInitialize(
 
 /**
  * List tools from an MCP server.
- * Returns normalized ToolDefinitions ready for the execution layer.
+ * Returns normalized ToolDefinitions and DSL objects.
  */
 export async function mcpListTools(
   serverUrl: string,
   headers: Record<string, string> = {},
   timeoutMs = 15_000,
-): Promise<ToolDefinition[]> {
+): Promise<{ tools: ToolDefinition[]; dsls: ToolDSL[] }> {
   const request: JsonRpcRequest = {
     jsonrpc: '2.0',
     id: 2,
@@ -105,8 +108,12 @@ export async function mcpListTools(
   const result = res.result as { tools?: McpTool[] };
   const tools = result.tools ?? [];
 
-  // Normalize each MCP tool to ToolDefinition shape
-  return tools.map(mcpTool => normalizeMcpTool(mcpTool, serverUrl));
+  // Normalize each MCP tool through DSL
+  const normalized = tools.map(mcpTool => normalizeMcpTool(mcpTool, serverUrl));
+  return {
+    tools: normalized.map(n => n.tool),
+    dsls: normalized.map(n => n.dsl),
+  };
 }
 
 /**
@@ -149,67 +156,33 @@ export async function mcpConnect(
   const initResult = await mcpInitialize(serverUrl, authHeaders);
 
   // List tools
-  const tools = await mcpListTools(serverUrl, authHeaders);
+  const { tools, dsls } = await mcpListTools(serverUrl, authHeaders);
 
   return {
     url: serverUrl,
     serverName: initResult.serverInfo?.name,
     protocolVersion: initResult.protocolVersion,
     tools,
+    dsls,
   };
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 /**
- * Normalize an MCP tool to our ToolDefinition shape.
- *
+ * Normalize an MCP tool into a DSL and render to ToolDefinition.
  * MCP tools use JSON-RPC and handle their own transport, so the execution
  * layer routes calls back through mcpCallTool instead of building raw HTTP.
- * We store the MCP endpoint URL in execution.url and use a special
- * method "MCP" to signal this.
  */
-function normalizeMcpTool(mcpTool: McpTool, serverUrl: string): ToolDefinition {
-  const properties: Record<string, ToolParamSchema> = {};
-  const required: string[] = [];
-
-  if (mcpTool.inputSchema?.properties) {
-    for (const [key, schema] of Object.entries(mcpTool.inputSchema.properties)) {
-      const s = schema as Record<string, unknown>;
-      properties[key] = {
-        type: (s.type as string) ?? 'string',
-        description: s.description as string | undefined,
-        enum: s.enum as string[] | undefined,
-        default: s.default,
-      };
-    }
-  }
-
-  if (mcpTool.inputSchema?.required) {
-    required.push(...mcpTool.inputSchema.required);
-  }
-
-  return {
-    name: mcpTool.name,
-    description: mcpTool.description ?? `MCP tool: ${mcpTool.name}`,
-    input_schema: {
-      type: 'object',
-      properties,
-      required: required.length > 0 ? required : undefined,
-    },
-    execution: {
-      // "MCP" is a sentinel — the execution layer knows to route through
-      // the MCP client instead of building a raw HTTP request
-      method: 'GET',
-      url: serverUrl,
-      param_mapping: {},
-    },
-    auth: {
-      type: 'none',
-      key_name: '',
-      secret_ref: '',
-    },
+function normalizeMcpTool(mcpTool: McpTool, serverUrl: string): { tool: ToolDefinition; dsl: ToolDSL } {
+  const dsl = compileFromMcp(mcpTool as McpToolInput, serverUrl);
+  // Override execution to use MCP sentinel method
+  dsl.execution = {
+    method: 'GET',
+    url: serverUrl,
+    param_mapping: {},
   };
+  return { tool: renderToolDefinition(dsl), dsl };
 }
 
 /**

@@ -7,7 +7,9 @@
  * Supports: apiKey, http (bearer/basic) security schemes.
  */
 
-import type { ToolDefinition, ToolParamSchema } from '../types.js';
+import type { ToolDefinition, ToolDSL, ToolParamSchema } from '../types.js';
+import { compileFromOpenApi, type OpenApiOperationInput } from './toolDslCompiler.js';
+import { renderToolDefinition } from './toolDslRenderer.js';
 
 // ── OpenAPI types (subset we need) ─────────────────────────────────────────
 
@@ -64,11 +66,11 @@ interface OpenApiSecurityScheme {
 
 /**
  * Parse an OpenAPI spec from a URL or raw content string.
- * Returns normalized ToolDefinitions.
+ * Returns DSL objects (rich metadata) and rendered ToolDefinitions (for execution).
  */
 export async function parseOpenApiSpec(
   source: string,
-): Promise<{ tools: ToolDefinition[]; serverUrl: string; title?: string }> {
+): Promise<{ tools: ToolDefinition[]; dsls: ToolDSL[]; serverUrl: string; title?: string }> {
   let spec: OpenApiSpec;
 
   // Determine if source is a URL or raw content
@@ -88,7 +90,8 @@ export async function parseOpenApiSpec(
   const globalSecurity = spec.components?.securitySchemes;
   const globalSecurityReq = spec.security;
 
-  // Convert each operation to a tool
+  // Convert each operation to DSL, then render to ToolDefinition
+  const dsls: ToolDSL[] = [];
   const tools: ToolDefinition[] = [];
 
   for (const [path, methods] of Object.entries(spec.paths)) {
@@ -96,22 +99,64 @@ export async function parseOpenApiSpec(
       if (method === 'parameters' || method === 'summary' || method === 'description') continue;
       if (!['get', 'post', 'put', 'patch', 'delete'].includes(method.toLowerCase())) continue;
 
-      const tool = operationToTool(
+      const opInput: OpenApiOperationInput = {
+        operationId: operation.operationId,
+        summary: operation.summary,
+        description: operation.description,
+        method: method.toUpperCase(),
         path,
-        method.toUpperCase() as ToolDefinition['execution']['method'],
-        operation,
-        globalSecurity,
-        globalSecurityReq,
-      );
-      if (tool) tools.push(tool);
+        parameters: operation.parameters as OpenApiOperationInput['parameters'],
+        requestBody: operation.requestBody as OpenApiOperationInput['requestBody'],
+        security: operation.security,
+        securitySchemes: globalSecurity as OpenApiOperationInput['securitySchemes'],
+      };
+
+      const dsl = compileFromOpenApi(opInput);
+      applyAuthFromSecurity(dsl, operation.security ?? globalSecurityReq, globalSecurity);
+      dsls.push(dsl);
+      tools.push(renderToolDefinition(dsl));
     }
   }
 
   return {
     tools,
+    dsls,
     serverUrl,
     title: spec.info?.title,
   };
+}
+
+/** Apply auth config from OpenAPI security schemes to a DSL */
+function applyAuthFromSecurity(
+  dsl: ToolDSL,
+  opSecurity?: Array<Record<string, string[]>>,
+  securitySchemes?: Record<string, OpenApiSecurityScheme>,
+): void {
+  const security = opSecurity?.[0];
+  if (!security || !securitySchemes) return;
+
+  const schemeName = Object.keys(security)[0];
+  const scheme = securitySchemes[schemeName];
+  if (!scheme) return;
+
+  switch (scheme.type) {
+    case 'apiKey':
+      dsl.auth = {
+        type: scheme.in === 'header' ? 'header' : 'query_param',
+        key_name: scheme.name ?? schemeName,
+        secret_ref: `openapi:${schemeName}`,
+      };
+      break;
+    case 'http':
+      if (scheme.scheme?.toLowerCase() === 'bearer') {
+        dsl.auth = {
+          type: 'bearer',
+          key_name: 'Authorization',
+          secret_ref: `openapi:${schemeName}`,
+        };
+      }
+      break;
+  }
 }
 
 function operationToTool(

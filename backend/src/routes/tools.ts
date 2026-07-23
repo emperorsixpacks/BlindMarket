@@ -61,6 +61,7 @@ toolsRouter.post('/mcp/connect', requireAuth, async (req: AuthRequest, res, next
         protocolVersion: connection.protocolVersion,
         toolCount: tools.length,
         tools,
+        dsls: connection.dsls,
       },
     } satisfies ApiResponse);
   } catch (e: any) {
@@ -91,6 +92,7 @@ toolsRouter.post('/openapi/import', requireAuth, async (req: AuthRequest, res, n
         serverUrl: result.serverUrl,
         toolCount: tools.length,
         tools,
+        dsls: result.dsls,
       },
     } satisfies ApiResponse);
   } catch (e: any) {
