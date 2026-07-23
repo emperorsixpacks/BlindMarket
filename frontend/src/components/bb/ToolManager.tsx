@@ -649,11 +649,16 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
           ) : (
             <FormField label="Tool JSON">
               <FormTextarea
-                rows={10}
+                rows={14}
                 className="font-mono text-xs"
                 value={jsonText}
                 onChange={e => { setJsonText(e.target.value); setJsonError(''); }}
-                placeholder='{"type":"http","name":"...","url":"https://..."}'
+                placeholder={`{
+  "type": "http",
+  "name": "web-search",
+  "description": "Search the web for information",
+  "url": "https://api.example.com/search"
+}`}
               />
               {jsonError && <p className="text-xs text-err mt-1">{jsonError}</p>}
             </FormField>
