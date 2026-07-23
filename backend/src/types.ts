@@ -386,6 +386,67 @@ export interface ToolDefinition {
     key_name: string;      // e.g. "api_key", "Authorization"
     secret_ref: string;    // pointer to stored secret, NEVER the literal key
   };
+  /** Optional parameter groups for runtime validation (from DSL) */
+  parameter_groups?: ToolDSLParameterGroup[];
+}
+
+// ── Tool Definition DSL (v3) ───────────────────────────────────────────────
+// Rich intermediate representation that every import path compiles into.
+// Captures semantic meaning that raw HTTP/MCP shape loses — what a param
+// actually represents, when to use this tool, what errors mean, sequencing.
+
+export type ToolDSLSemanticType =
+  | 'domain' | 'email' | 'person_name' | 'url' | 'date'
+  | 'free_text' | 'enum' | 'id' | 'number';
+
+export type ToolDSLSideEffect = 'none' | 'creates_resource' | 'modifies_resource' | 'destructive';
+
+export interface ToolDSLParameter {
+  name: string;
+  semantic_type: ToolDSLSemanticType;
+  json_type: 'string' | 'number' | 'boolean' | 'array' | 'object';
+  required: boolean;
+  description: string;
+  format_hint?: string;
+  example?: string;
+  enum_values?: string[];
+}
+
+export interface ToolDSLParameterGroup {
+  type: 'require_one_of' | 'require_together';
+  params: string[];
+}
+
+export interface ToolDSLOutput {
+  description: string;
+  key_fields?: Array<{ name: string; description: string }>;
+}
+
+export interface ToolDSLErrorSemantics {
+  condition: string;
+  meaning: string;
+}
+
+export interface ToolDSLSequencing {
+  typically_follows?: string[];
+  typically_precedes?: string[];
+}
+
+export interface ToolDSL {
+  name: string;
+  intent: string;
+  when_to_use: string;
+  parameters: ToolDSLParameter[];
+  parameter_groups?: ToolDSLParameterGroup[];
+  output?: ToolDSLOutput;
+  side_effects: ToolDSLSideEffect;
+  retry_safe: boolean;
+  error_semantics?: ToolDSLErrorSemantics[];
+  sequencing?: ToolDSLSequencing;
+  execution: ToolDefinition['execution'];
+  auth: ToolDefinition['auth'];
+  /** True when imported via OpenAPI/MCP and semantic fields are incomplete */
+  needs_review: boolean;
 }
 
 // ── Legacy Tool Types (kept for backward compat, deprecated) ────────────────
@@ -428,7 +489,7 @@ export interface SandboxAgentTool {
   timeout?: number;
 }
 
-export type AgentTool = HttpAgentTool | McpAgentTool | JsAgentTool | SandboxAgentTool | ToolDefinition;
+export type AgentTool = HttpAgentTool | McpAgentTool | JsAgentTool | SandboxAgentTool | ToolDefinition | ToolDSL;
 
 // ── Deployed Agent types ─────────────────────────────────────────────────────
 
