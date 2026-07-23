@@ -9,7 +9,6 @@
 import { useState, useCallback } from 'react';
 import { Button, Tag, FormField, FormInput, FormSelect, FormTextarea } from './index';
 import { HeaderManager } from './HeaderManager';
-import { QueryParamManager } from './QueryParamManager';
 import { authedPost } from '../../lib/api';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -246,8 +245,12 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
   // ── Manual add ─────────────────────────────────────────────────────────
 
   const addManualTool = useCallback(() => {
-    if (!manualTool.name.trim() || !manualTool.url.trim()) {
-      setManualError('Name and URL are required');
+    if (!manualTool.name.trim()) {
+      setManualError('Name is required');
+      return;
+    }
+    if (manualTool.type === 'http' && !manualTool.url.trim()) {
+      setManualError('URL is required for HTTP tools');
       return;
     }
     if (tools.some(t => t.name === manualTool.name)) {
@@ -563,10 +566,14 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
               </div>
 
               <FormField label="Description">
-                <FormTextarea rows={2} value={manualTool.description} onChange={e => setManualTool(t => ({ ...t, description: e.target.value }))} placeholder="What this tool does" />
+                <FormTextarea rows={2} value={manualTool.description} onChange={e => setManualTool(t => ({ ...t, description: e.target.value }))} placeholder="What this tool does — the agent uses this to determine what to send" />
               </FormField>
 
-              {manualTool.type === 'http' && <HttpForm tool={manualTool} onChange={setManualTool} />}
+              {manualTool.type === 'http' && (
+                <FormField label="URL">
+                  <FormInput className="font-mono" value={manualTool.url} onChange={e => setManualTool(t => ({ ...t, url: e.target.value }))} placeholder="https://api.example.com/endpoint" />
+                </FormField>
+              )}
               {manualTool.type === 'mcp' && <McpForm tool={manualTool} onChange={setManualTool} />}
               {manualTool.type === 'js' && <JsForm tool={manualTool} onChange={setManualTool} />}
               {manualTool.type === 'sandbox' && <SandboxForm tool={manualTool} onChange={setManualTool} />}
@@ -597,34 +604,6 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
 }
 
 // ── Sub-forms for each tool type ───────────────────────────────────────────
-
-function HttpForm({ tool, onChange }: { tool: LegacyTool; onChange: (t: LegacyTool) => void }) {
-  return (
-    <div className="space-y-3">
-      <div className="grid grid-cols-1 sm:grid-cols-[1fr_120px] gap-3">
-        <FormField label="URL">
-          <FormInput className="font-mono" value={tool.url} onChange={e => onChange({ ...tool, url: e.target.value })} placeholder="https://api.example.com/endpoint" />
-        </FormField>
-        <FormField label="Method">
-          <FormSelect value={tool.method ?? 'POST'} onChange={e => onChange({ ...tool, method: e.target.value as LegacyTool['method'] })}>
-            {['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].map(m => <option key={m} value={m}>{m}</option>)}
-          </FormSelect>
-        </FormField>
-      </div>
-      <FormField label="Query parameters">
-        <QueryParamManager params={tool.queryParams} onChange={p => onChange({ ...tool, queryParams: p })} />
-      </FormField>
-      <FormField label="Headers">
-        <HeaderManager headers={tool.headers} onChange={h => onChange({ ...tool, headers: h })} />
-      </FormField>
-      {['POST', 'PUT', 'PATCH'].includes(tool.method ?? 'POST') && (
-        <FormField label="Body payload">
-          <FormTextarea rows={3} className="font-mono text-xs" value={tool.body.payload} onChange={e => onChange({ ...tool, body: { ...tool.body, payload: e.target.value } })} placeholder='{"key": "value"}' />
-        </FormField>
-      )}
-    </div>
-  );
-}
 
 function McpForm({ tool, onChange }: { tool: LegacyTool; onChange: (t: LegacyTool) => void }) {
   return (
