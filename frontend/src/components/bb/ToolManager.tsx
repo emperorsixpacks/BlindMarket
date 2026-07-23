@@ -94,7 +94,6 @@ type ImportMode = 'manual' | 'mcp' | 'openapi';
 
 export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: ToolManagerProps) {
   const [mode, setMode] = useState<ImportMode | null>(null);
-  const [showForm, setShowForm] = useState(false);
 
   // MCP state
   const [mcpUrl, setMcpUrl] = useState('');
@@ -285,7 +284,6 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
     setManualAuthType('none');
     setManualAuthKeyName('Authorization');
     setManualAuthSecretRef('');
-    setShowForm(false);
     setManualError('');
   }, [manualTool, tools, onChange, manualAuthType, manualAuthKeyName, manualAuthSecretRef]);
 
@@ -299,7 +297,6 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
         onChange([...tools, obj as LegacyTool]);
       }
       setJsonText('');
-      setShowForm(false);
       setJsonError('');
     } catch {
       setJsonError('Invalid JSON');
@@ -348,11 +345,11 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
       </div>
 
       {/* Add buttons */}
-      {!showForm && !mode && (
+      {!mode && (
         <div className="flex flex-wrap gap-2">
-          <Button type="button" variant="outline" label="+ Import from MCP" onClick={() => { setMode('mcp'); setShowForm(false); }} />
-          <Button type="button" variant="outline" label="+ Import from OpenAPI" onClick={() => { setMode('openapi'); setShowForm(false); }} />
-          <Button type="button" variant="outline" label="+ Add manually" onClick={() => { setMode('manual'); setShowForm(true); }} />
+          <Button type="button" variant="outline" label="+ Import from MCP" onClick={() => setMode('mcp')} />
+          <Button type="button" variant="outline" label="+ Import from OpenAPI" onClick={() => setMode('openapi')} />
+          <Button type="button" variant="outline" label="+ Add manually" onClick={() => setMode('manual')} />
         </div>
       )}
 
@@ -558,7 +555,7 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
       )}
 
       {/* ── Manual Entry ─────────────────────────────────────────────── */}
-      {mode === 'manual' && showForm && (
+      {mode === 'manual' && (
         <div className="border border-line p-4 space-y-4">
           <div className="flex items-center justify-between">
             <h4 className="text-sm font-semibold text-ink">Add Tool Manually</h4>
@@ -695,7 +692,7 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
 
           <div className="flex gap-2">
             <Button type="button" variant="primary" label="Add tool" onClick={toolMode === 'form' ? addManualTool : addJsonTool} />
-            <Button type="button" variant="ghost" label="Cancel" onClick={() => { setMode(null); setShowForm(false); setManualError(''); }} />
+            <Button type="button" variant="ghost" label="Cancel" onClick={() => { setMode(null); setManualError(''); }} />
           </div>
         </div>
       )}
