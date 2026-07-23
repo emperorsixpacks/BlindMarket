@@ -135,6 +135,12 @@ export async function executeTool(
   timeoutMs = 30_000,
 ): Promise<ToolExecutionResult> {
   try {
+    // Validate parameter_groups before execution
+    const groupError = validateParameterGroups(tool, args);
+    if (groupError) {
+      return { success: false, error: groupError };
+    }
+
     // Build headers
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -263,4 +269,36 @@ export function validateToolDefinition(tool: ToolDefinition): string[] {
   }
 
   return errors;
+}
+
+// ── Parameter groups validation ─────────────────────────────────────────────
+
+/**
+ * Validate parameter_groups constraints (require_one_of, require_together).
+ * Returns null if valid, or an error message describing the violation.
+ */
+function validateParameterGroups(
+  tool: ToolDefinition,
+  args: Record<string, unknown>,
+): string | null {
+  if (!tool.parameter_groups) return null;
+
+  for (const group of tool.parameter_groups) {
+    if (group.type === 'require_one_of') {
+      // At least one param in the group must be present
+      const hasAny = group.params.some(p => args[p] !== undefined && args[p] !== null && args[p] !== '');
+      if (!hasAny) {
+        return `At least one of [${group.params.join(', ')}] is required`;
+      }
+    } else if (group.type === 'require_together') {
+      // If any param in the group is present, all must be
+      const present = group.params.filter(p => args[p] !== undefined && args[p] !== null && args[p] !== '');
+      if (present.length > 0 && present.length < group.params.length) {
+        const missing = group.params.filter(p => !present.includes(p));
+        return `[${group.params.join(', ')}] must all be provided together — missing: ${missing.join(', ')}`;
+      }
+    }
+  }
+
+  return null;
 }
