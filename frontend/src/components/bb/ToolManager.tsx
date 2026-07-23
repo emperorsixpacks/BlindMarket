@@ -563,12 +563,39 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
           <div className="flex items-center justify-between">
             <h4 className="text-sm font-semibold text-ink">Add Tool Manually</h4>
             <div className="flex items-center gap-0 border border-line w-fit">
-              <button type="button" onClick={() => setToolMode('form')}
+              <button type="button" onClick={() => {
+                // Sync: parse JSON into form when switching to form mode
+                if (jsonText.trim()) {
+                  try {
+                    const obj = JSON.parse(jsonText);
+                    setManualTool(t => ({
+                      ...t,
+                      name: obj.name ?? t.name,
+                      description: obj.description ?? t.description,
+                      url: obj.url ?? t.url,
+                      method: obj.method ?? t.method,
+                    }));
+                  } catch { /* ignore parse errors */ }
+                }
+                setToolMode('form');
+              }}
                 className={`px-3 py-1 text-xs font-medium transition-colors ${toolMode === 'form' ? 'bg-cream/10 text-cream' : 'text-ink-3 hover:text-ink-2'}`}>
                 Form
               </button>
               <div className="w-px h-4 bg-line" />
-              <button type="button" onClick={() => setToolMode('json')}
+              <button type="button" onClick={() => {
+                // Sync: serialize form into JSON when switching to JSON mode
+                const obj: Record<string, unknown> = {
+                  type: manualTool.type,
+                  name: manualTool.name,
+                  description: manualTool.description,
+                };
+                if (manualTool.type === 'http') {
+                  obj.url = manualTool.url;
+                }
+                setJsonText(JSON.stringify(obj, null, 2));
+                setToolMode('json');
+              }}
                 className={`px-3 py-1 text-xs font-medium transition-colors ${toolMode === 'json' ? 'bg-cream/10 text-cream' : 'text-ink-3 hover:text-ink-2'}`}>
                 Paste JSON
               </button>
