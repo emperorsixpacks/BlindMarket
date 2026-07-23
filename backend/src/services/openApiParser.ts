@@ -16,6 +16,7 @@ interface OpenApiSpec {
   info?: { title?: string; version?: string };
   servers?: Array<{ url: string }>;
   paths: Record<string, Record<string, OpenApiOperation>>;
+  security?: Array<Record<string, string[]>>;
   components?: {
     securitySchemes?: Record<string, OpenApiSecurityScheme>;
   };
@@ -83,8 +84,9 @@ export async function parseOpenApiSpec(
     throw new Error('No server URL found in OpenAPI spec');
   }
 
-  // Resolve security scheme
+  // Resolve security scheme — fall back to global security
   const globalSecurity = spec.components?.securitySchemes;
+  const globalSecurityReq = spec.security;
 
   // Convert each operation to a tool
   const tools: ToolDefinition[] = [];
@@ -99,6 +101,7 @@ export async function parseOpenApiSpec(
         method.toUpperCase() as ToolDefinition['execution']['method'],
         operation,
         globalSecurity,
+        globalSecurityReq,
       );
       if (tool) tools.push(tool);
     }
@@ -116,6 +119,7 @@ function operationToTool(
   method: ToolDefinition['execution']['method'],
   op: OpenApiOperation,
   securitySchemes?: Record<string, OpenApiSecurityScheme>,
+  globalSecurity?: Array<Record<string, string[]>>,
 ): ToolDefinition | null {
   const name = op.operationId ?? sanitizeName(`${method}_${path}`);
   if (!name) return null;
@@ -160,8 +164,8 @@ function operationToTool(
     }
   }
 
-  // Determine auth from operation security or global
-  const auth = resolveAuth(op.security, securitySchemes);
+  // Determine auth from operation security, falling back to global security
+  const auth = resolveAuth(op.security ?? globalSecurity, securitySchemes);
 
   return {
     name,
