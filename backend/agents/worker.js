@@ -828,6 +828,17 @@ export function buildTools(currentTaskHash = null) {
         if (!inputRequired.includes(key)) field = field.optional();
         zodShape[key] = field;
       }
+
+      // For POST/PUT/PATCH with no required params, add a free-form body field
+      // so the LLM can construct the right payload based on the description
+      const hasBodyMethod = ['POST', 'PUT', 'PATCH'].includes(t.execution?.method);
+      const hasRequired = inputRequired.length > 0;
+      if (hasBodyMethod && !hasRequired && Object.keys(zodShape).length === 0) {
+        zodShape.body = z.string().optional().describe(
+          'JSON body to send. Construct based on what the tool description says the API expects.'
+        );
+      }
+
       const inputSchema = Object.keys(zodShape).length > 0
         ? z.object(zodShape)
         : z.object({ input: z.string().optional() });

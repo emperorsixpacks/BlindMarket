@@ -72,6 +72,15 @@ function buildBody(
   args: Record<string, unknown>,
   paramMapping: Record<string, string>,
 ): string | undefined {
+  // Free-form body: LLM sends a `body` string, parse as JSON
+  if (args.body && typeof args.body === 'string') {
+    try {
+      return JSON.stringify(JSON.parse(args.body));
+    } catch {
+      return args.body;
+    }
+  }
+
   const bodyObj: Record<string, unknown> = {};
   let hasBody = false;
 

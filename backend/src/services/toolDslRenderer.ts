@@ -12,7 +12,7 @@ import type { ToolDSL, ToolDefinition } from '../types.js';
  * Compose the model-facing description from DSL fields.
  *
  * Old flat schema: just the stored description string.
- * New: intent + when_to_use + error guidance + sequencing notes.
+ * New: intent + when_to_use + body guidance + error guidance + sequencing notes.
  */
 export function renderDescription(dsl: ToolDSL): string {
   const parts: string[] = [];
@@ -22,6 +22,24 @@ export function renderDescription(dsl: ToolDSL): string {
 
   // Decision rule for when to use
   if (dsl.when_to_use) parts.push(`When to use: ${dsl.when_to_use}`);
+
+  // Body construction guidance for POST/PUT/PATCH
+  const hasBodyMethod = ['POST', 'PUT', 'PATCH'].includes(dsl.execution.method);
+  if (hasBodyMethod) {
+    const hasRequired = dsl.parameters.some(p => p.required);
+    if (!hasRequired) {
+      parts.push('Construct the JSON body based on what this API endpoint expects. Use the parameter descriptions as guidance for what fields to include.');
+    } else {
+      const requiredParams = dsl.parameters.filter(p => p.required);
+      const paramGuide = requiredParams.map(p => {
+        let desc = `${p.name} (${p.semantic_type})`;
+        if (p.format_hint) desc += ` — ${p.format_hint}`;
+        if (p.example) desc += `, e.g. "${p.example}"`;
+        return desc;
+      }).join(', ');
+      parts.push(`Required body fields: ${paramGuide}. Include additional fields as needed based on the API's expectations.`);
+    }
+  }
 
   // Error semantics — short note on notable codes
   if (dsl.error_semantics && dsl.error_semantics.length > 0) {
@@ -53,21 +71,24 @@ export function renderDescription(dsl: ToolDSL): string {
 
 /**
  * Render DSL parameters into a JSON Schema input_schema for the model.
- * Format hints and examples are folded into each property's description
- * so the model sees them at argument-fill time.
+ * Format hints, examples, and semantic type guidance are folded into each
+ * property's description so the model sees them at argument-fill time.
  */
 export function renderInputSchema(dsl: ToolDSL): ToolDefinition['input_schema'] {
   const properties: Record<string, ToolDefinition['input_schema']['properties'][string]> = {};
   const required: string[] = [];
 
   for (const param of dsl.parameters) {
-    let desc = param.description;
-    if (param.format_hint) desc += ` (${param.format_hint})`;
-    if (param.example) desc += ` e.g. "${param.example}"`;
+    // Build rich description like the built-in tools do
+    const parts: string[] = [];
+    parts.push(param.description);
+    if (param.format_hint) parts.push(`Format: ${param.format_hint}`);
+    if (param.example) parts.push(`Example: "${param.example}"`);
+    if (param.enum_values) parts.push(`Must be one of: ${param.enum_values.join(', ')}`);
 
     properties[param.name] = {
       type: param.json_type,
-      description: desc,
+      description: parts.join('. '),
       enum: param.enum_values,
     };
 
