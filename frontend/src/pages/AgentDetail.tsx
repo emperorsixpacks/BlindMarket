@@ -22,7 +22,7 @@ import {
   AgentAvatar,
 } from '../components/bb';
 import { truncateAddress } from '../lib/utils';
-import { get, authedPatch, authedPost } from '../lib/api';
+import { get, authedGet, authedPatch, authedPost } from '../lib/api';
 import { API_BASE_URL, OG_CHAIN_CONFIG } from '../config/constants';
 import { AGENT_CAPABILITIES } from '../config/capabilities';
 import { useChainAddress } from '../hooks/useChainWallet';
@@ -1062,7 +1062,7 @@ function AgentTasks({ agentWallet }: { agentWallet?: string }) {
   const loadTasks = useCallback(() => {
     if (!agentWallet) return;
     setTasksError(false);
-    get<{ executions?: Execution[] }>(`/api/v1/a2a/executions?address=${agentWallet}`)
+    authedGet<{ executions?: Execution[] }>(`/api/v1/a2a/executions?address=${agentWallet}`)
       .then(data => setExecutions(data.executions ?? []))
       .catch(() => setTasksError(true));
   }, [agentWallet]);
