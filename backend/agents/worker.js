@@ -299,6 +299,47 @@ function log(msg) {
   );
 }
 
+// ── Tool Error Reporting ─────────────────────────────────────────────────────
+// Reports failed tool executions to the backend so the agent owner can
+// investigate (dead API keys, rate limits, service outages, etc.).
+
+/**
+ * @param {object} params
+ * @param {string} params.toolName
+ * @param {string} params.toolType - 'tool'|'http'|'mcp'|'js'|'sandbox'
+ * @param {string} params.url
+ * @param {string} params.method
+ * @param {number|null} params.statusCode
+ * @param {string} params.error
+ * @param {object} [params.args] - original tool args (truncated to 2000 chars)
+ * @param {string} [params.responseOutput] - response body (truncated to 2000 chars)
+ * @param {number} [params.durationMs]
+ */
+function reportToolError({ toolName, toolType, url, method, statusCode, error, args, responseOutput, durationMs }) {
+  const payload = {
+    agentId: AGENT_ID,
+    agentName: AGENT_NAME,
+    toolName,
+    toolType,
+    url: url ?? '',
+    method: method ?? '',
+    statusCode: statusCode ?? null,
+    error: String(error ?? '').slice(0, 500),
+    requestInput: args ? JSON.stringify(args).slice(0, 2000) : '',
+    responseOutput: String(responseOutput ?? '').slice(0, 2000),
+    durationMs: durationMs ?? 0,
+  };
+  // Fire-and-forget — don't block the agent if reporting fails
+  fetchWithTimeout(`${BACKEND_URL}/api/v1/tools/error-logs`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${AGENT_PLATFORM_TOKEN}`,
+    },
+    body: JSON.stringify(payload),
+  }).catch(() => {});
+}
+
 let agentCapabilities = [];
 try {
   const parsed = JSON.parse(AGENT_CAPABILITIES_RAW);
@@ -847,6 +888,7 @@ export function buildTools(currentTaskHash = null) {
         description: t.description,
         inputSchema,
         execute: async (args) => {
+          const startTime = Date.now();
           try {
             // MCP tools: route via JSON-RPC to the MCP server directly
             if (t.source === 'mcp' && t.mcp_endpoint) {
@@ -860,9 +902,26 @@ export function buildTools(currentTaskHash = null) {
                   params: { name: t.mcp_tool_name ?? t.name, arguments: args },
                 }),
               });
-              const mcpData = await mcpRes.json();
-              if (mcpData.error) return { error: mcpData.error.message || 'MCP tool call failed' };
-              return mcpData.result;
+              const mcpText = await mcpRes.text();
+              let mcpData;
+              try { mcpData = JSON.parse(mcpText); } catch { mcpData = null; }
+              if (mcpData?.error) {
+                reportToolError({
+                  toolName: t.name, toolType: 'mcp', url: t.mcp_endpoint, method: 'POST',
+                  statusCode: mcpRes.status, error: mcpData.error.message || 'MCP tool call failed',
+                  args, responseOutput: mcpText.slice(0, 2000), durationMs: Date.now() - startTime,
+                });
+                return { error: mcpData.error.message || 'MCP tool call failed' };
+              }
+              if (!mcpRes.ok) {
+                reportToolError({
+                  toolName: t.name, toolType: 'mcp', url: t.mcp_endpoint, method: 'POST',
+                  statusCode: mcpRes.status, error: `MCP HTTP ${mcpRes.status}: ${mcpText.slice(0, 200)}`,
+                  args, responseOutput: mcpText.slice(0, 2000), durationMs: Date.now() - startTime,
+                });
+                return { error: `MCP HTTP ${mcpRes.status}` };
+              }
+              return mcpData?.result ?? mcpData;
             }
 
             // All other tools: route through backend execution layer
@@ -876,9 +935,25 @@ export function buildTools(currentTaskHash = null) {
             });
 
             const data = await res.json();
-            if (!data.success) return { error: data.error?.message || 'Tool execution failed' };
+            if (!data.success) {
+              const toolUrl = t.execution?.url ?? '';
+              const toolMethod = t.execution?.method ?? '';
+              reportToolError({
+                toolName: t.name, toolType: t.source ?? 'tool', url: toolUrl, method: toolMethod,
+                statusCode: res.status, error: data.error?.message || 'Tool execution failed',
+                args, responseOutput: JSON.stringify(data).slice(0, 2000), durationMs: Date.now() - startTime,
+              });
+              return { error: data.error?.message || 'Tool execution failed' };
+            }
             return data.data;
           } catch (e) {
+            const toolUrl = t.execution?.url ?? t.mcp_endpoint ?? '';
+            const toolMethod = t.execution?.method ?? 'POST';
+            reportToolError({
+              toolName: t.name, toolType: t.source ?? 'tool', url: toolUrl, method: toolMethod,
+              statusCode: null, error: e.message,
+              args, responseOutput: '', durationMs: Date.now() - startTime,
+            });
             return { error: `tool execution failed: ${e.message}` };
           }
         },
