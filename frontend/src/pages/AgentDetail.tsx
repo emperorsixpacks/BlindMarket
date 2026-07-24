@@ -701,28 +701,17 @@ export default function AgentDetail() {
             ))}
           </div>
 
-          <div className="flex-1 p-5 overflow-y-auto max-h-[520px] relative" ref={logContainerRef} onScroll={handleLogScroll}>
+          <div className="flex-1 relative">
+          <div className="p-5 overflow-y-auto h-full max-h-[520px]" ref={logContainerRef} onScroll={handleLogScroll}>
             {displayTab === 'logs' && (
-              <>
-              <div className="flex flex-col">
-              {logs.length > 0 ? logs.map((line, i) => {
-                // Strip any leftover ANSI escape sequences from older buffered
-                // log lines (the worker no longer emits them when forked, but
-                // Redis may still hold pre-fix entries until the ring rotates).
+              logs.length > 0 ? logs.map((line, i) => {
                 const clean = line.replace(/\x1b\[[0-9;]*m/g, '');
-
-                // Worker emits each line as `YYYY-MM-DD HH:MM:SS ...`. Pull
-                // out the timestamp so we can render it dimmed and aligned,
-                // making the actual message easier to scan. Lines without a
-                // timestamp (startup errors, legacy entries) just render whole.
                 const tsMatch = clean.match(/^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:Z|))\s+(.*)$/);
                 const isErr = clean.includes('[err]');
                 return (
                   <div key={i} className={`px-3 py-1.5 text-xs font-mono flex gap-3 ${isErr ? 'text-err bg-err/10' : 'text-ink-3 hover:bg-surface-2'}`}>
                     {tsMatch ? (
                       <>
-                        {/* Show both date and local time so the log timeline is
-                            unambiguous across restarts and multi-day runs. */}
                         <span className="text-ink-3/60 shrink-0" title={tsMatch[1]}>
                           {new Date(tsMatch[1].replace('Z', '').replace(' ', 'T') + 'Z').toLocaleString([], { hour12: false })}
                         </span>
@@ -741,31 +730,7 @@ export default function AgentDetail() {
                     ? 'Live output will stream here as the agent works.'
                     : 'Start the agent to begin streaming its logs.'}
                 />
-              )}
-              </div>
-              {logs.length > 0 && (
-                <div className="sticky bottom-0 flex justify-end gap-1.5 py-2">
-                  <button
-                    onClick={scrollToTop}
-                    className="w-8 h-8 flex items-center justify-center bg-surface-4 hover:bg-surface-5 text-ink-1 rounded-full border border-line shadow-lg transition-all hover:scale-110"
-                    title="Scroll to top"
-                  >
-                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M3 10l5-5 5 5" />
-                    </svg>
-                  </button>
-                  <button
-                    onClick={scrollToBottom}
-                    className={`w-8 h-8 flex items-center justify-center rounded-full border border-line shadow-lg transition-all hover:scale-110 ${autoScroll ? 'bg-cream/20 text-cream border-cream/40' : 'bg-surface-4 hover:bg-surface-5 text-ink-1'}`}
-                    title={autoScroll ? 'Auto-scroll on (click to disable)' : 'Scroll to bottom'}
-                  >
-                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M3 6l5 5 5-5" />
-                    </svg>
-                  </button>
-                </div>
-              )}
-              </>
+              )
             )}
 
             {displayTab === 'tools' && (
@@ -1071,6 +1036,29 @@ export default function AgentDetail() {
             )}
 
             {displayTab === 'metrics' && <AgentMetricsPanel agentId={id!} />}
+          </div>
+          {displayTab === 'logs' && logs.length > 0 && (
+            <div className="absolute bottom-3 right-3 z-10 flex flex-col gap-1.5">
+              <button
+                onClick={scrollToTop}
+                className="w-8 h-8 flex items-center justify-center bg-surface-4 hover:bg-surface-5 text-ink-1 rounded-full border border-line shadow-lg transition-all hover:scale-110"
+                title="Scroll to top"
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 10l5-5 5 5" />
+                </svg>
+              </button>
+              <button
+                onClick={scrollToBottom}
+                className={`w-8 h-8 flex items-center justify-center rounded-full border border-line shadow-lg transition-all hover:scale-110 ${autoScroll ? 'bg-cream/20 text-cream border-cream/40' : 'bg-surface-4 hover:bg-surface-5 text-ink-1'}`}
+                title={autoScroll ? 'Auto-scroll on (click to disable)' : 'Scroll to bottom'}
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 6l5 5 5-5" />
+                </svg>
+              </button>
+            </div>
+          )}
           </div>
         </div>
       </div>
