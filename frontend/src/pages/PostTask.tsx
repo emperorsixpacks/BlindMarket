@@ -83,6 +83,10 @@ export default function PostTask() {
     verifierAddress: '',
     verifierPublicKey: '',
     acceptance: '',
+    // Custom verification criteria for auto-verify mode
+    criteriaContains: '',
+    criteriaForbidden: '',
+    criteriaPassThreshold: '60',
   });
   // Registered agents the poster can designate as a verifier. Fetched from the
   // public executors list (no auth needed) — we need each agent's publicKey to
@@ -289,7 +293,12 @@ export default function PostTask() {
       const verificationMode = isAgentVerify ? ('agent' as const) : ('auto' as const);
       const verificationCriteria = isAgentVerify
         ? (form.acceptance.trim() ? { acceptance: form.acceptance.trim() } : undefined)
-        : { min_length: 10 };
+        : {
+            min_length: 10,
+            ...(form.criteriaContains.trim() ? { contains_keywords: form.criteriaContains.split(',').map(s => s.trim()).filter(Boolean) } : {}),
+            ...(form.criteriaForbidden.trim() ? { forbidden_phrases: form.criteriaForbidden.split(',').map(s => s.trim()).filter(Boolean) } : {}),
+            pass_threshold: parseInt(form.criteriaPassThreshold) || 60,
+          };
       const verifierAddress = isAgentVerify ? form.verifierAddress.toLowerCase() : undefined;
 
       // 6. Get unsigned tx from backend (with the rootHash + wrappedKeys bundle)
@@ -537,10 +546,36 @@ export default function PostTask() {
                 </div>
 
                 {form.verificationMode === 'auto' ? (
-                  <p className="text-xs text-ink-3 leading-relaxed">
-                    Submissions are checked against built-in criteria (minimum length, required
-                    fields) and escrow releases automatically — no further input from you.
-                  </p>
+                  <div className="space-y-3">
+                    <p className="text-xs text-ink-3 leading-relaxed">
+                      Submissions are scored against your criteria. Escrow releases automatically when the score passes.
+                    </p>
+                    <FormField label="Required keywords" hint="Comma-separated. Output must contain these words/phrases.">
+                      <FormInput
+                        value={form.criteriaContains}
+                        onChange={e => setForm(f => ({ ...f, criteriaContains: e.target.value }))}
+                        placeholder="e.g. function, return, sort"
+                      />
+                    </FormField>
+                    <FormField label="Forbidden phrases" hint="Comma-separated. Output must NOT contain these — catches excuses like 'unable to complete'.">
+                      <FormInput
+                        value={form.criteriaForbidden}
+                        onChange={e => setForm(f => ({ ...f, criteriaForbidden: e.target.value }))}
+                        placeholder="e.g. unable to complete, service unavailable, outside my control"
+                      />
+                    </FormField>
+                    <FormField label={`Pass threshold: ${form.criteriaPassThreshold}%`} hint="Minimum score (0–100) to auto-approve. Higher = stricter.">
+                      <input
+                        type="range"
+                        min="10"
+                        max="100"
+                        step="5"
+                        value={form.criteriaPassThreshold}
+                        onChange={e => setForm(f => ({ ...f, criteriaPassThreshold: e.target.value }))}
+                        className="w-full accent-cream"
+                      />
+                    </FormField>
+                  </div>
                 ) : (
                   <div className="space-y-3">
                     <div>
