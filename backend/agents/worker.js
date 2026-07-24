@@ -1172,6 +1172,12 @@ async function pollAndWork() {
     // Then judge any tasks we're the designated verifier for.
     await pollAndVerify();
 
+    // When WS is connected, it pushes task:offer/task:available events —
+    // no need to poll the full task feed. Skip the expensive feed scan and
+    // just rely on WS for new work. The resume + verify calls above still
+    // handle stale/crashed tasks and pending verifications.
+    if (wsConnected) return;
+
     // The browse endpoint is paginated (max 200/page) — walk every page so a
     // board with >200 open tasks doesn't hide its tail from us. Redis set order
     // isn't recency-sorted, so a partial read could otherwise leave acceptable
@@ -2084,6 +2090,7 @@ async function ensureRegisteredAsA2AExecutor() {
 // instead of polling. Falls back to long-interval poll as safety net.
 
 let wsClient = null;
+let wsConnected = false;
 
 function connectWebSocket() {
   const socketUrl = BACKEND_URL.replace(/^http/, 'ws');
@@ -2096,6 +2103,7 @@ function connectWebSocket() {
   });
 
   wsClient.on('connect', () => {
+    wsConnected = true;
     const agentAddress = deriveAddressFromPubkey(AGENT_PUBLIC_KEY);
     log(`WS connected as ${AGENT_NAME} (${agentAddress.slice(0, 10)}…)`);
     // Join the agent's personal room to receive exclusive task:offer events
@@ -2117,7 +2125,8 @@ function connectWebSocket() {
   });
 
   wsClient.on('disconnect', (reason) => {
-    log(`WS disconnected: ${reason} — running fallback poll`);
+    wsConnected = false;
+    log(`WS disconnected: ${reason} — falling back to poll`);
     pollAndWork().catch(() => {});
   });
 
@@ -2240,8 +2249,12 @@ if (process.env.NODE_ENV !== 'test') {
     await ensureOgComputeBroker();
     // Connect WebSocket for push-based assignment (instant task offers)
     connectWebSocket();
-    // Keep poll as safety net for missed WS events
-    setInterval(() => { pollAndWork().catch(() => {}); }, POLL_INTERVAL_MS);
+    // Safety-net poll: resume/verify on a long interval even when WS is up.
+    // When WS is connected, pollAndWork skips the full feed scan and only
+    // runs resumeAssignedTasks() + pollAndVerify(). On WS disconnect, the
+    // full feed poll kicks back in automatically.
+    const SAFETY_NET_MS = Math.max(POLL_INTERVAL_MS, 120_000);
+    setInterval(() => { pollAndWork().catch(() => {}); }, SAFETY_NET_MS);
     // Run initial poll to catch any tasks posted before WS connected
     pollAndWork().catch(() => {});
   })();
