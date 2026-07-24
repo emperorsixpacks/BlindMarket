@@ -130,7 +130,7 @@ export default function Messages() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_400px] gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_480px] gap-6">
         {/* Message list */}
         <Panel>
           <div className="flex gap-4 mb-4 border-b border-line pb-3">
@@ -236,12 +236,12 @@ export default function Messages() {
             </div>
 
             {selectedMsg && (
-              <div className="mb-4 pb-4 border-b border-line">
+              <div className="mb-5 pb-5 border-b border-line">
                 {selectedMsg.subject && (
                   <div className="text-sm font-semibold text-ink mb-2">{selectedMsg.subject}</div>
                 )}
-                <div className="text-xs text-ink-2 mb-2">{selectedMsg.body}</div>
-                <div className="flex items-center gap-2 text-[10px] font-mono text-ink-3">
+                <div className="text-sm text-ink-2 leading-relaxed whitespace-pre-wrap break-words">{selectedMsg.body}</div>
+                <div className="flex items-center gap-2 text-[10px] font-mono text-ink-3 mt-3">
                   <span>from {shortAddr(selectedMsg.from_address)}</span>
                   <span>·</span>
                   <span>{timeAgo(selectedMsg.created_at)}</span>
@@ -263,7 +263,7 @@ export default function Messages() {
                     value={replyBody}
                     onChange={(e) => setReplyBody(e.target.value)}
                     placeholder="Type your message…"
-                    rows={6}
+                    rows={8}
                   />
                 </FormField>
                 <div className="flex gap-2">
