@@ -63,6 +63,12 @@ export interface ToolDef {
     key_name: string;
     secret_ref: string;
   };
+  /** Where this tool came from */
+  source?: 'manual' | 'openapi' | 'mcp';
+  /** MCP-specific fields */
+  mcp_endpoint?: string;
+  mcp_tool_name?: string;
+  mcp_headers?: Record<string, string>;
   /** DSL metadata from the backend — carries needs_review, intent, etc. */
   _dsl?: ToolDSLMeta;
 }
@@ -456,12 +462,13 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
             <Button type="button" variant="ghost" label="Cancel" onClick={() => { setMode(null); setOpenApiTools([]); }} />
           </div>
 
-          <FormField label="Spec URL or paste JSON">
-            <FormInput
-              className="font-mono"
+          <FormField label="Spec URL or paste JSON/YAML">
+            <FormTextarea
+              rows={6}
+              className="font-mono text-xs"
               value={openApiSource}
               onChange={e => setOpenApiSource(e.target.value)}
-              placeholder="https://api.example.com/openapi.json"
+              placeholder={"https://api.example.com/openapi.json\n\n— or paste the spec directly —\n{\n  \"openapi\": \"3.0.0\",\n  \"info\": { \"title\": \"My API\" },\n  \"paths\": {}\n}"}
             />
           </FormField>
 
