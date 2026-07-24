@@ -938,10 +938,13 @@ export function buildTools(currentTaskHash = null) {
             if (!data.success) {
               const toolUrl = t.execution?.url ?? '';
               const toolMethod = t.execution?.method ?? '';
+              // The actual HTTP status from the upstream API is nested in
+              // data.data.status (the route always returns HTTP 200).
+              const upstreamStatus = data.data?.status ?? res.status;
               reportToolError({
                 toolName: t.name, toolType: t.source ?? 'tool', url: toolUrl, method: toolMethod,
-                statusCode: res.status, error: data.error?.message || 'Tool execution failed',
-                args, responseOutput: JSON.stringify(data).slice(0, 2000), durationMs: Date.now() - startTime,
+                statusCode: upstreamStatus, error: data.error?.message || 'Tool execution failed',
+                args, responseOutput: JSON.stringify(data.data ?? data).slice(0, 2000), durationMs: Date.now() - startTime,
               });
               return { error: data.error?.message || 'Tool execution failed' };
             }

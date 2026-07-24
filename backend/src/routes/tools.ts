@@ -15,6 +15,7 @@ import { validateToolDefinition, executeTool, type SecretStore } from '../servic
 import { mcpConnect } from '../services/mcpClient.js';
 import { parseOpenApiSpec } from '../services/openApiParser.js';
 import { reportToolError, getToolErrorLogs, clearToolErrorLogs } from '../services/toolErrorLog.js';
+import { getAgent } from '../services/agentRunner.js';
 
 export const toolsRouter = Router();
 
@@ -216,6 +217,22 @@ toolsRouter.post('/error-logs', requireAuth, async (req: AuthRequest, res, next)
 toolsRouter.get('/error-logs', requireAuth, async (req: AuthRequest, res, next) => {
   try {
     const agentId = req.query.agentId as string | undefined;
+
+    // Authorization: if querying a specific agent, verify the caller owns it.
+    if (agentId) {
+      const agent = await getAgent(agentId);
+      if (!agent) {
+        res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Agent not found' } });
+        return;
+      }
+      const caller = req.user!.address.toLowerCase();
+      const ownerSet = new Set([agent.ownerAddress, ...(agent.authorizedOwners ?? [])].map(a => a.toLowerCase()));
+      if (!ownerSet.has(caller)) {
+        res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Only the agent owner can view error logs' } });
+        return;
+      }
+    }
+
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 50));
     const offset = Math.max(0, parseInt(req.query.offset as string) || 0);
     const result = getToolErrorLogs({ agentId, limit, offset });
@@ -231,6 +248,22 @@ toolsRouter.get('/error-logs', requireAuth, async (req: AuthRequest, res, next) 
 toolsRouter.delete('/error-logs', requireAuth, async (req: AuthRequest, res, next) => {
   try {
     const agentId = (req.body as any)?.agentId as string | undefined;
+
+    // Authorization: if clearing a specific agent's logs, verify the caller owns it.
+    if (agentId) {
+      const agent = await getAgent(agentId);
+      if (!agent) {
+        res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Agent not found' } });
+        return;
+      }
+      const caller = req.user!.address.toLowerCase();
+      const ownerSet = new Set([agent.ownerAddress, ...(agent.authorizedOwners ?? [])].map(a => a.toLowerCase()));
+      if (!ownerSet.has(caller)) {
+        res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Only the agent owner can clear error logs' } });
+        return;
+      }
+    }
+
     const cleared = clearToolErrorLogs(agentId);
     res.json({ success: true, data: { cleared } } satisfies ApiResponse);
   } catch (e: any) {
