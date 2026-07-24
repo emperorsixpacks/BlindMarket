@@ -704,28 +704,7 @@ export default function AgentDetail() {
           <div className="flex-1 p-5 overflow-y-auto max-h-[520px] relative" ref={logContainerRef} onScroll={handleLogScroll}>
             {displayTab === 'logs' && (
               <>
-              {logs.length > 0 && (
-                <div className="absolute bottom-4 right-4 z-10 flex flex-col gap-1.5">
-                  <button
-                    onClick={scrollToTop}
-                    className="w-8 h-8 flex items-center justify-center bg-surface-4 hover:bg-surface-5 text-ink-1 rounded-full border border-line shadow-lg transition-all hover:scale-110"
-                    title="Scroll to top"
-                  >
-                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M3 10l5-5 5 5" />
-                    </svg>
-                  </button>
-                  <button
-                    onClick={scrollToBottom}
-                    className={`w-8 h-8 flex items-center justify-center rounded-full border border-line shadow-lg transition-all hover:scale-110 ${autoScroll ? 'bg-cream/20 text-cream border-cream/40' : 'bg-surface-4 hover:bg-surface-5 text-ink-1'}`}
-                    title={autoScroll ? 'Auto-scroll on (click to disable)' : 'Scroll to bottom'}
-                  >
-                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M3 6l5 5 5-5" />
-                    </svg>
-                  </button>
-                </div>
-              )}
+              <div className="flex flex-col">
               {logs.length > 0 ? logs.map((line, i) => {
                 // Strip any leftover ANSI escape sequences from older buffered
                 // log lines (the worker no longer emits them when forked, but
@@ -762,6 +741,29 @@ export default function AgentDetail() {
                     ? 'Live output will stream here as the agent works.'
                     : 'Start the agent to begin streaming its logs.'}
                 />
+              )}
+              </div>
+              {logs.length > 0 && (
+                <div className="sticky bottom-0 flex justify-end gap-1.5 py-2">
+                  <button
+                    onClick={scrollToTop}
+                    className="w-8 h-8 flex items-center justify-center bg-surface-4 hover:bg-surface-5 text-ink-1 rounded-full border border-line shadow-lg transition-all hover:scale-110"
+                    title="Scroll to top"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M3 10l5-5 5 5" />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={scrollToBottom}
+                    className={`w-8 h-8 flex items-center justify-center rounded-full border border-line shadow-lg transition-all hover:scale-110 ${autoScroll ? 'bg-cream/20 text-cream border-cream/40' : 'bg-surface-4 hover:bg-surface-5 text-ink-1'}`}
+                    title={autoScroll ? 'Auto-scroll on (click to disable)' : 'Scroll to bottom'}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M3 6l5 5 5-5" />
+                    </svg>
+                  </button>
+                </div>
               )}
               </>
             )}
