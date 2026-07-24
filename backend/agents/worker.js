@@ -848,6 +848,24 @@ export function buildTools(currentTaskHash = null) {
         inputSchema,
         execute: async (args) => {
           try {
+            // MCP tools: route via JSON-RPC to the MCP server directly
+            if (t.source === 'mcp' && t.mcp_endpoint) {
+              const mcpRes = await fetchWithTimeout(t.mcp_endpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...(t.mcp_headers ?? {}) },
+                body: JSON.stringify({
+                  jsonrpc: '2.0',
+                  id: Date.now(),
+                  method: 'tools/call',
+                  params: { name: t.mcp_tool_name ?? t.name, arguments: args },
+                }),
+              });
+              const mcpData = await mcpRes.json();
+              if (mcpData.error) return { error: mcpData.error.message || 'MCP tool call failed' };
+              return mcpData.result;
+            }
+
+            // All other tools: route through backend execution layer
             const res = await fetchWithTimeout(`${BACKEND_URL}/api/v1/tools/execute`, {
               method: 'POST',
               headers: {
