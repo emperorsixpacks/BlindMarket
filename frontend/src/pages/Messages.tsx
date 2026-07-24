@@ -52,6 +52,7 @@ export default function Messages() {
   const [replySubject, setReplySubject] = useState('');
   const [selectedMsg, setSelectedMsg] = useState<Message | null>(null);
   const [replyTaskId, setReplyTaskId] = useState<string | undefined>(undefined);
+  const [repliedIds, setRepliedIds] = useState<Set<number>>(new Set());
 
   useSocket('platform', { 'message:new': () => qc.invalidateQueries({ queryKey: ['messages'] }) });
 
@@ -82,9 +83,12 @@ export default function Messages() {
     mutationFn: (body: { to: string; taskId?: string; subject?: string; body: string }) =>
       authedPost('/api/v1/messages/send', body),
     onSuccess: () => {
+      if (selectedMsg) setRepliedIds(prev => new Set(prev).add(selectedMsg.id));
       setReplyTo(null);
       setReplyBody('');
       setReplySubject('');
+      setSelectedMsg(null);
+      setReplyTaskId(undefined);
       qc.invalidateQueries({ queryKey: ['messages'] });
     },
   });
@@ -94,9 +98,9 @@ export default function Messages() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['messages'] }),
   });
 
-  const messages = inboxData?.messages ?? [];
+  const messages = (inboxData?.messages ?? []).filter(m => !repliedIds.has(m.id));
   const sent = sentData?.messages ?? [];
-  const unread = inboxData?.unread ?? 0;
+  const unread = messages.filter(m => !m.read_at).length;
 
   const handleSend = () => {
     if (!replyTo || !replyBody.trim()) return;
