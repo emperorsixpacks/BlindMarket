@@ -304,23 +304,26 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
 
   const addJsonTool = useCallback(() => {
     try {
-      const obj = JSON.parse(jsonText);
-      // Detect ToolDef by shape: has input_schema + execution + auth
-      const looksLikeToolDef = obj.input_schema && obj.execution && obj.auth;
-      if (obj.type === 'tool' || looksLikeToolDef) {
-        // Normalize: ensure type='tool' and fill defaults
-        const toolDef: ToolDef = {
-          type: 'tool',
-          name: obj.name ?? '',
-          description: obj.description ?? '',
-          input_schema: obj.input_schema ?? { type: 'object', properties: {} },
-          execution: obj.execution ?? { method: 'POST', url: '', param_mapping: {} },
-          auth: obj.auth ?? { type: 'none', key_name: '', secret_ref: '' },
-        };
-        onChange([...tools, toolDef]);
-      } else {
-        onChange([...tools, obj as LegacyTool]);
+      let obj = JSON.parse(jsonText);
+      // Handle array of tools
+      const items = Array.isArray(obj) ? obj : [obj];
+      const newTools: AnyTool[] = [];
+      for (const item of items) {
+        const looksLikeToolDef = item.input_schema && item.execution && item.auth;
+        if (item.type === 'tool' || looksLikeToolDef) {
+          newTools.push({
+            type: 'tool',
+            name: item.name ?? '',
+            description: item.description ?? '',
+            input_schema: item.input_schema ?? { type: 'object', properties: {} },
+            execution: item.execution ?? { method: 'POST', url: '', param_mapping: {} },
+            auth: item.auth ?? { type: 'none', key_name: '', secret_ref: '' },
+          } as ToolDef);
+        } else {
+          newTools.push(item as LegacyTool);
+        }
       }
+      onChange([...tools, ...newTools]);
       setJsonText('');
       setJsonError('');
     } catch {
@@ -589,41 +592,45 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
                 // JSON → Form: parse JSON into form ONLY if jsonText has content
                 if (jsonText.trim()) {
                   try {
-                    const obj = JSON.parse(jsonText);
-                    setManualTool(t => ({
-                      ...t,
-                      name: obj.name ?? t.name,
-                      description: obj.description ?? t.description,
-                      url: obj.execution?.url ?? obj.url ?? t.url,
-                      method: (obj.execution?.method ?? obj.method ?? 'POST') as LegacyTool['method'],
-                      toolName: obj.toolName ?? t.toolName,
-                      code: obj.code ?? t.code,
-                      command: obj.command ?? t.command,
-                      setup: obj.setup ?? t.setup,
-                      timeout: obj.timeout ?? t.timeout,
-                    }));
-                    if (obj.input_schema?.properties) {
-                      const entries = Object.entries(obj.input_schema.properties) as Array<[string, { type?: string; description?: string }]>;
-                      setManualParams(entries.map(([name, prop]) => ({
-                        name,
-                        type: prop.type ?? 'string',
-                        description: prop.description ?? '',
-                        required: (obj.input_schema.required ?? []).includes(name),
-                      })));
-                    } else {
-                      setManualParams([]);
-                    }
-                    if (obj.execution) {
-                      setManualMethod(obj.execution.method ?? 'POST');
-                      setManualParamMapping(obj.execution.param_mapping ?? {});
-                    } else {
-                      setManualMethod('POST');
-                      setManualParamMapping({});
-                    }
-                    if (obj.auth) {
-                      setManualAuthType(obj.auth.type ?? 'none');
-                      setManualAuthKeyName(obj.auth.key_name ?? '');
-                      setManualAuthSecretRef(obj.auth.secret_ref ?? '');
+                    let obj = JSON.parse(jsonText);
+                    // Handle array: take the first tool definition
+                    if (Array.isArray(obj)) obj = obj[0] ?? {};
+                    if (obj && typeof obj === 'object') {
+                      setManualTool(t => ({
+                        ...t,
+                        name: obj.name ?? t.name,
+                        description: obj.description ?? t.description,
+                        url: obj.execution?.url ?? obj.url ?? t.url,
+                        method: (obj.execution?.method ?? obj.method ?? 'POST') as LegacyTool['method'],
+                        toolName: obj.toolName ?? t.toolName,
+                        code: obj.code ?? t.code,
+                        command: obj.command ?? t.command,
+                        setup: obj.setup ?? t.setup,
+                        timeout: obj.timeout ?? t.timeout,
+                      }));
+                      if (obj.input_schema?.properties) {
+                        const entries = Object.entries(obj.input_schema.properties) as Array<[string, { type?: string; description?: string }]>;
+                        setManualParams(entries.map(([name, prop]) => ({
+                          name,
+                          type: prop.type ?? 'string',
+                          description: prop.description ?? '',
+                          required: (obj.input_schema.required ?? []).includes(name),
+                        })));
+                      } else {
+                        setManualParams([]);
+                      }
+                      if (obj.execution) {
+                        setManualMethod(obj.execution.method ?? 'POST');
+                        setManualParamMapping(obj.execution.param_mapping ?? {});
+                      } else {
+                        setManualMethod('POST');
+                        setManualParamMapping({});
+                      }
+                      if (obj.auth) {
+                        setManualAuthType(obj.auth.type ?? 'none');
+                        setManualAuthKeyName(obj.auth.key_name ?? '');
+                        setManualAuthSecretRef(obj.auth.secret_ref ?? '');
+                      }
                     }
                   } catch { /* ignore parse errors */ }
                 }
