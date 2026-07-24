@@ -14,6 +14,7 @@ import type { ToolDefinition } from '../types.js';
 import { validateToolDefinition, executeTool, type SecretStore } from '../services/toolExecutor.js';
 import { mcpConnect } from '../services/mcpClient.js';
 import { parseOpenApiSpec } from '../services/openApiParser.js';
+import { reportToolError, getToolErrorLogs, clearToolErrorLogs } from '../services/toolErrorLog.js';
 
 export const toolsRouter = Router();
 
@@ -180,6 +181,58 @@ toolsRouter.post('/execute', requireAuth, async (req: AuthRequest, res, next) =>
       success: true,
       data: result,
     } satisfies ApiResponse);
+  } catch (e: any) {
+    next(e);
+  }
+});
+
+// ── POST /api/v1/tools/error-logs ──────────────────────────────────────────
+// Agent reports a failed tool execution (HTTP error, timeout, network error).
+
+toolsRouter.post('/error-logs', requireAuth, async (req: AuthRequest, res, next) => {
+  try {
+    const entry = reportToolError(z.object({
+      agentId: z.string(),
+      agentName: z.string(),
+      toolName: z.string(),
+      toolType: z.string(),
+      url: z.string(),
+      method: z.string(),
+      statusCode: z.number().nullable(),
+      error: z.string(),
+      requestInput: z.string().default(''),
+      responseOutput: z.string().default(''),
+      durationMs: z.number().default(0),
+    }).parse(req.body));
+    res.json({ success: true, data: entry } satisfies ApiResponse);
+  } catch (e: any) {
+    next(e);
+  }
+});
+
+// ── GET /api/v1/tools/error-logs ───────────────────────────────────────────
+// Owner views error logs, optionally filtered by agentId.
+
+toolsRouter.get('/error-logs', requireAuth, async (req: AuthRequest, res, next) => {
+  try {
+    const agentId = req.query.agentId as string | undefined;
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 50));
+    const offset = Math.max(0, parseInt(req.query.offset as string) || 0);
+    const result = getToolErrorLogs({ agentId, limit, offset });
+    res.json({ success: true, data: result } satisfies ApiResponse);
+  } catch (e: any) {
+    next(e);
+  }
+});
+
+// ── DELETE /api/v1/tools/error-logs ────────────────────────────────────────
+// Clear error logs (optionally for a specific agent).
+
+toolsRouter.delete('/error-logs', requireAuth, async (req: AuthRequest, res, next) => {
+  try {
+    const agentId = (req.body as any)?.agentId as string | undefined;
+    const cleared = clearToolErrorLogs(agentId);
+    res.json({ success: true, data: { cleared } } satisfies ApiResponse);
   } catch (e: any) {
     next(e);
   }
