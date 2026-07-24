@@ -27,6 +27,7 @@ import { API_BASE_URL, OG_CHAIN_CONFIG } from '../config/constants';
 import { AGENT_CAPABILITIES } from '../config/capabilities';
 import { useChainAddress } from '../hooks/useChainWallet';
 import { getNativeCurrency } from '../config/constants';
+import { ToolManager, type AnyTool } from '../components/bb/ToolManager';
 import {
   getAgentReviews,
   submitReview,
@@ -124,6 +125,8 @@ export default function AgentDetail() {
   const [editModel, setEditModel] = useState('');
   const [editCapabilities, setEditCapabilities] = useState<string[]>([]);
   const [editMinReward, setEditMinReward] = useState('');
+  const [editTools, setEditTools] = useState<AnyTool[]>([]);
+  const [toolsSaved, setToolsSaved] = useState(false);
 
   // Reviews state
   const [reviews, setReviews] = useState<AgentReview[]>([]);
@@ -182,6 +185,7 @@ export default function AgentDetail() {
           // disabling the min-reward gate so the agent accepted 0-reward tasks.
           data.minReward ? formatUnits(data.minReward, 18) : '',
         );
+        setEditTools((data.tools ?? []) as AnyTool[]);
       })
       // A rejected fetch can't tell 404 from a transient 500/network drop, so
       // surface a retryable error rather than masquerading as "not found".
@@ -211,7 +215,7 @@ export default function AgentDetail() {
 
   // Fetch error logs for the errors tab
   useEffect(() => {
-    if (!id || displayTab !== 'errors') return;
+    if (!id || tab !== 'errors') return;
     let cancelled = false;
     setErrorLogsLoading(true);
     get<{ entries: any[]; total: number }>(`/api/v1/tools/error-logs?agentId=${id}`)
@@ -274,6 +278,14 @@ export default function AgentDetail() {
           : undefined,
       }),
     onSuccess: (data) => { setAgent(data); setTab('logs'); },
+  });
+
+  const saveTools = useMutation({
+    mutationFn: () =>
+      authedPatch<AgentDetails>(`/api/v1/agents/${id}`, {
+        tools: editTools,
+      }),
+    onSuccess: (data) => { setAgent(data); setToolsSaved(true); },
   });
 
   // Signature-gated owner-link recovery. When start/stop 403s because the agent
@@ -730,7 +742,28 @@ export default function AgentDetail() {
             )}
 
             {displayTab === 'tools' && (
-              (agent.tools ?? []).length === 0 ? (
+              isOwner ? (
+                <div className="space-y-4">
+                  {toolsSaved && (
+                    <div className="border border-cream/30 bg-cream/5 p-4 text-sm text-ink-2">
+                      Tools saved. <strong>Restart the agent</strong> for changes to take effect — stop then start.
+                    </div>
+                  )}
+                  <ToolManager
+                    tools={editTools}
+                    onChange={setEditTools}
+                  />
+                  <div className="flex items-center gap-3">
+                    <Button
+                      variant="primary"
+                      onClick={() => saveTools.mutate()}
+                      disabled={saveTools.isPending}
+                      label={saveTools.isPending ? 'Saving…' : 'Save tools'}
+                    />
+                    {saveTools.isError && <span className="text-xs text-err">Save failed</span>}
+                  </div>
+                </div>
+              ) : (agent.tools ?? []).length === 0 ? (
                 <EmptyState
                   icon="settings"
                   title="No tools configured"
