@@ -261,8 +261,8 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
       return;
     }
 
-    // For HTTP tools with auth, convert to ToolDef so auth is preserved
-    if (manualTool.type === 'http' && manualAuthType !== 'none') {
+    // For HTTP tools, always convert to ToolDef so input_schema and auth are preserved
+    if (manualTool.type === 'http') {
       const toolDef: ToolDef = {
         type: 'tool',
         name: manualTool.name,
@@ -290,9 +290,19 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
   const addJsonTool = useCallback(() => {
     try {
       const obj = JSON.parse(jsonText);
-      // Accept both legacy and normalized shapes
-      if (obj.type === 'tool') {
-        onChange([...tools, obj as ToolDef]);
+      // Detect ToolDef by shape: has input_schema + execution + auth
+      const looksLikeToolDef = obj.input_schema && obj.execution && obj.auth;
+      if (obj.type === 'tool' || looksLikeToolDef) {
+        // Normalize: ensure type='tool' and fill defaults
+        const toolDef: ToolDef = {
+          type: 'tool',
+          name: obj.name ?? '',
+          description: obj.description ?? '',
+          input_schema: obj.input_schema ?? { type: 'object', properties: {} },
+          execution: obj.execution ?? { method: 'POST', url: '', param_mapping: {} },
+          auth: obj.auth ?? { type: 'none', key_name: '', secret_ref: '' },
+        };
+        onChange([...tools, toolDef]);
       } else {
         onChange([...tools, obj as LegacyTool]);
       }
@@ -569,9 +579,20 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
                       ...t,
                       name: obj.name ?? t.name,
                       description: obj.description ?? t.description,
-                      url: obj.url ?? t.url,
-                      method: obj.method ?? t.method,
+                      url: obj.execution?.url ?? obj.url ?? t.url,
+                      method: (obj.execution?.method ?? obj.method ?? 'POST') as LegacyTool['method'],
+                      toolName: obj.toolName ?? t.toolName,
+                      code: obj.code ?? t.code,
+                      command: obj.command ?? t.command,
+                      setup: obj.setup ?? t.setup,
+                      timeout: obj.timeout ?? t.timeout,
                     }));
+                    // Sync auth state if present
+                    if (obj.auth) {
+                      setManualAuthType(obj.auth.type ?? 'none');
+                      setManualAuthKeyName(obj.auth.key_name ?? '');
+                      setManualAuthSecretRef(obj.auth.secret_ref ?? '');
+                    }
                   } catch { /* ignore parse errors */ }
                 }
                 setToolMode('form');
@@ -583,12 +604,29 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
               <button type="button" onClick={() => {
                 // Sync: serialize form into JSON when switching to JSON mode
                 const obj: Record<string, unknown> = {
-                  type: manualTool.type,
                   name: manualTool.name,
                   description: manualTool.description,
                 };
                 if (manualTool.type === 'http') {
-                  obj.url = manualTool.url;
+                  obj.input_schema = { type: 'object', properties: {} };
+                  obj.execution = { method: 'POST', url: manualTool.url, param_mapping: {} };
+                  obj.auth = {
+                    type: manualAuthType,
+                    key_name: manualAuthKeyName,
+                    secret_ref: manualAuthSecretRef,
+                  };
+                } else if (manualTool.type === 'mcp') {
+                  obj.type = 'mcp';
+                  obj.endpointUrl = manualTool.url;
+                  obj.toolName = manualTool.toolName;
+                } else if (manualTool.type === 'js') {
+                  obj.type = 'js';
+                  obj.code = manualTool.code;
+                } else if (manualTool.type === 'sandbox') {
+                  obj.type = 'sandbox';
+                  obj.command = manualTool.command;
+                  obj.setup = manualTool.setup;
+                  obj.timeout = manualTool.timeout;
                 }
                 setJsonText(JSON.stringify(obj, null, 2));
                 setToolMode('json');
@@ -678,10 +716,21 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
                 value={jsonText}
                 onChange={e => { setJsonText(e.target.value); setJsonError(''); }}
                 placeholder={`{
-  "type": "http",
-  "name": "web-search",
-  "description": "Search the web for information",
-  "url": "https://api.example.com/search"
+  "name": "upload_svg",
+  "description": "Upload an SVG file and get a shareable URL...",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "file": { "type": "string", "description": "SVG markup" }
+    },
+    "required": ["file"]
+  },
+  "execution": {
+    "method": "POST",
+    "url": "https://api.example.com/upload",
+    "param_mapping": { "file": "body" }
+  },
+  "auth": { "type": "none" }
 }`}
               />
               {jsonError && <p className="text-xs text-err mt-1">{jsonError}</p>}
