@@ -269,7 +269,7 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
       setManualError('URL is required for HTTP tools');
       return;
     }
-    if (tools.some(t => t.name === manualTool.name)) {
+    if (editingIndex === null && tools.some(t => t.name === manualTool.name)) {
       setManualError('Tool name must be unique');
       return;
     }
