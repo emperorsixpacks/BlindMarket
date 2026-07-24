@@ -218,7 +218,7 @@ export default function AgentDetail() {
     if (!id || tab !== 'errors') return;
     let cancelled = false;
     setErrorLogsLoading(true);
-    get<{ entries: any[]; total: number }>(`/api/v1/tools/error-logs?agentId=${id}`)
+    authedGet<{ entries: any[]; total: number }>(`/api/v1/tools/error-logs?agentId=${id}`)
       .then((result) => {
         if (!cancelled) {
           setErrorLogs(result.entries);
