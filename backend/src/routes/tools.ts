@@ -178,9 +178,9 @@ toolsRouter.post('/execute', requireAuth, async (req: AuthRequest, res, next) =>
     const result = await executeTool(tool, args, secrets);
 
     res.json({
-      success: true,
+      success: result.success,
       data: result,
-    } satisfies ApiResponse);
+    });
   } catch (e: any) {
     next(e);
   }
