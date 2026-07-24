@@ -125,6 +125,11 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
   const [manualAuthType, setManualAuthType] = useState<'none' | 'bearer' | 'header' | 'query_param'>('none');
   const [manualAuthKeyName, setManualAuthKeyName] = useState('Authorization');
   const [manualAuthSecretRef, setManualAuthSecretRef] = useState('');
+  // Manual input_schema params
+  const [manualParams, setManualParams] = useState<Array<{ name: string; type: string; description: string; required: boolean }>>([]);
+  // Manual execution
+  const [manualMethod, setManualMethod] = useState<'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'>('POST');
+  const [manualParamMapping, setManualParamMapping] = useState<Record<string, string>>({});
 
   // ── Auth requirements ──────────────────────────────────────────────────
 
@@ -263,12 +268,19 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
 
     // For HTTP tools, always convert to ToolDef so input_schema and auth are preserved
     if (manualTool.type === 'http') {
+      const properties: Record<string, { type: string; description: string }> = {};
+      for (const p of manualParams) {
+        if (p.name.trim()) {
+          properties[p.name.trim()] = { type: p.type, description: p.description };
+        }
+      }
+      const required = manualParams.filter(p => p.required && p.name.trim()).map(p => p.name.trim());
       const toolDef: ToolDef = {
         type: 'tool',
         name: manualTool.name,
         description: manualTool.description,
-        input_schema: { type: 'object', properties: {} },
-        execution: { method: 'POST', url: manualTool.url, param_mapping: {} },
+        input_schema: { type: 'object', properties, ...(required.length > 0 ? { required } : {}) },
+        execution: { method: manualMethod, url: manualTool.url, param_mapping: manualParamMapping },
         auth: {
           type: manualAuthType as ToolDef['auth']['type'],
           key_name: manualAuthKeyName,
@@ -284,8 +296,11 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
     setManualAuthType('none');
     setManualAuthKeyName('Authorization');
     setManualAuthSecretRef('');
+    setManualParams([]);
+    setManualMethod('POST');
+    setManualParamMapping({});
     setManualError('');
-  }, [manualTool, tools, onChange, manualAuthType, manualAuthKeyName, manualAuthSecretRef]);
+  }, [manualTool, tools, onChange, manualAuthType, manualAuthKeyName, manualAuthSecretRef, manualParams, manualMethod, manualParamMapping]);
 
   const addJsonTool = useCallback(() => {
     try {
@@ -587,6 +602,26 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
                       setup: obj.setup ?? t.setup,
                       timeout: obj.timeout ?? t.timeout,
                     }));
+                    // Sync input_schema params
+                    if (obj.input_schema?.properties) {
+                      const entries = Object.entries(obj.input_schema.properties) as Array<[string, { type?: string; description?: string }]>;
+                      setManualParams(entries.map(([name, prop]) => ({
+                        name,
+                        type: prop.type ?? 'string',
+                        description: prop.description ?? '',
+                        required: (obj.input_schema.required ?? []).includes(name),
+                      })));
+                    } else {
+                      setManualParams([]);
+                    }
+                    // Sync execution
+                    if (obj.execution) {
+                      setManualMethod(obj.execution.method ?? 'POST');
+                      setManualParamMapping(obj.execution.param_mapping ?? {});
+                    } else {
+                      setManualMethod('POST');
+                      setManualParamMapping({});
+                    }
                     // Sync auth state if present
                     if (obj.auth) {
                       setManualAuthType(obj.auth.type ?? 'none');
@@ -608,8 +643,13 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
                   description: manualTool.description,
                 };
                 if (manualTool.type === 'http') {
-                  obj.input_schema = { type: 'object', properties: {} };
-                  obj.execution = { method: 'POST', url: manualTool.url, param_mapping: {} };
+                  const properties: Record<string, { type: string; description: string }> = {};
+                  for (const p of manualParams) {
+                    if (p.name.trim()) properties[p.name.trim()] = { type: p.type, description: p.description };
+                  }
+                  const required = manualParams.filter(p => p.required && p.name.trim()).map(p => p.name.trim());
+                  obj.input_schema = { type: 'object', properties, ...(required.length > 0 ? { required } : {}) };
+                  obj.execution = { method: manualMethod, url: manualTool.url, param_mapping: manualParamMapping };
                   obj.auth = {
                     type: manualAuthType,
                     key_name: manualAuthKeyName,
@@ -662,6 +702,58 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
                   <FormField label="URL">
                     <FormInput className="font-mono" value={manualTool.url} onChange={e => setManualTool(t => ({ ...t, url: e.target.value }))} placeholder="https://api.example.com/endpoint" />
                   </FormField>
+                  <FormField label="Method">
+                    <FormSelect value={manualMethod} onChange={e => setManualMethod(e.target.value as typeof manualMethod)}>
+                      <option value="POST">POST</option>
+                      <option value="GET">GET</option>
+                      <option value="PUT">PUT</option>
+                      <option value="PATCH">PATCH</option>
+                      <option value="DELETE">DELETE</option>
+                    </FormSelect>
+                  </FormField>
+
+                  {/* Parameters */}
+                  <div className="border border-line p-3 space-y-2 bg-surface-2">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs text-ink-3 font-medium">Parameters</p>
+                      <button type="button" onClick={() => setManualParams(p => [...p, { name: '', type: 'string', description: '', required: false }])} className="text-xs text-cream hover:underline">+ Add</button>
+                    </div>
+                    {manualParams.length === 0 && <p className="text-xs text-ink-3">No parameters — agent will send an empty body or construct one from the description.</p>}
+                    {manualParams.map((p, i) => (
+                      <div key={i} className="grid grid-cols-[1fr_80px_1fr_auto_auto] gap-2 items-center">
+                        <input type="text" value={p.name} onChange={e => setManualParams(ps => ps.map((x, j) => j === i ? { ...x, name: e.target.value } : x))} placeholder="param_name" className="px-2 py-1 bg-surface text-ink text-xs font-mono border-0 outline-none focus:ring-1 focus:ring-cream/30" />
+                        <select value={p.type} onChange={e => setManualParams(ps => ps.map((x, j) => j === i ? { ...x, type: e.target.value } : x))} className="px-2 py-1 bg-surface text-ink text-xs border-0 outline-none">
+                          <option value="string">string</option>
+                          <option value="integer">integer</option>
+                          <option value="number">number</option>
+                          <option value="boolean">boolean</option>
+                          <option value="object">object</option>
+                          <option value="array">array</option>
+                        </select>
+                        <input type="text" value={p.description} onChange={e => setManualParams(ps => ps.map((x, j) => j === i ? { ...x, description: e.target.value } : x))} placeholder="description" className="px-2 py-1 bg-surface text-ink text-xs border-0 outline-none focus:ring-1 focus:ring-cream/30" />
+                        <label className="flex items-center gap-1 text-xs text-ink-3 whitespace-nowrap">
+                          <input type="checkbox" checked={p.required} onChange={e => setManualParams(ps => ps.map((x, j) => j === i ? { ...x, required: e.target.checked } : x))} className="accent-cream" />
+                          req
+                        </label>
+                        <button type="button" onClick={() => setManualParams(ps => ps.filter((_, j) => j !== i))} className="text-xs text-err hover:underline">✕</button>
+                      </div>
+                    ))}
+                    {manualParams.length > 0 && (
+                      <div className="border-t border-line pt-2 mt-2">
+                        <p className="text-xs text-ink-3 font-medium mb-1">Param mapping (where each param goes)</p>
+                        {manualParams.filter(p => p.name).map(p => (
+                          <div key={p.name} className="flex items-center gap-2 mb-1">
+                            <span className="text-xs text-ink font-mono w-24 truncate">{p.name}</span>
+                            <select value={manualParamMapping[p.name] ?? 'body'} onChange={e => setManualParamMapping(m => ({ ...m, [p.name]: e.target.value }))} className="px-2 py-1 bg-surface text-ink text-xs border-0 outline-none">
+                              <option value="body">body</option>
+                              <option value="query">query</option>
+                              <option value="header">header</option>
+                            </select>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                   <div className="border border-line p-3 space-y-2 bg-surface-2">
                     <p className="text-xs text-ink-3 font-medium">Auth (optional)</p>
                     <div className="flex items-center gap-3">
