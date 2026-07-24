@@ -19,6 +19,40 @@ export interface AutoVerifyResult {
 }
 
 /**
+ * System-level forbidden phrases — always applied regardless of poster config.
+ * Catches common failure excuses that agents produce when they can't deliver.
+ * Weight is low (0.5) so a single mention doesn't auto-fail, but repeated
+ * failure language tanks the score enough to cross the threshold.
+ */
+const DEFAULT_FORBIDDEN_PHRASES = [
+  'unable to complete',
+  'could not complete',
+  "couldn't complete",
+  'was unable to',
+  'was not able to',
+  'could not fulfill',
+  "couldn't fulfill",
+  'service unavailable',
+  'service is currently',
+  'service appears to be',
+  'experiencing technical difficulties',
+  'outside my control',
+  'not my control',
+  'beyond my control',
+  'apologize.*unable',
+  'sorry.*unable',
+  'regret.*unable',
+  'failed to deliver',
+  'unable to deliver',
+  'could not deliver',
+  "couldn't deliver",
+  'incomplete.*task',
+  'task.*incomplete',
+  'status.*incomplete',
+  'status.*failed',
+];
+
+/**
  * Verify agent output against task criteria.
  *
  * Backward-compatible: old { required_fields, min_length, contains_keywords }
@@ -87,7 +121,7 @@ export function autoVerify(
     });
   }
 
-  // Forbidden phrases
+  // Forbidden phrases — poster's custom list
   if (criteria.forbidden_phrases?.length) {
     rubrics.push({
       name: 'forbidden_phrases',
@@ -95,6 +129,13 @@ export function autoVerify(
       fn: NoForbiddenPhrases(criteria.forbidden_phrases),
     });
   }
+
+  // System-level forbidden phrases — always applied, catches failure excuses
+  rubrics.push({
+    name: 'system_failure_detection',
+    weight: 0.5,
+    fn: NoForbiddenPhrases(DEFAULT_FORBIDDEN_PHRASES),
+  });
 
   // Regex pattern — reject ReDoS-prone patterns (star height >= 2) before
   // compiling, so a malicious verification criterion can't freeze the backend.
