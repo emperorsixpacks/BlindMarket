@@ -586,7 +586,7 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
             <h4 className="text-sm font-semibold text-ink">Add Tool Manually</h4>
             <div className="flex items-center gap-0 border border-line w-fit">
               <button type="button" onClick={() => {
-                // Sync: parse JSON into form when switching to form mode
+                // JSON → Form: parse JSON into form ONLY if jsonText has content
                 if (jsonText.trim()) {
                   try {
                     const obj = JSON.parse(jsonText);
@@ -602,7 +602,6 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
                       setup: obj.setup ?? t.setup,
                       timeout: obj.timeout ?? t.timeout,
                     }));
-                    // Sync input_schema params
                     if (obj.input_schema?.properties) {
                       const entries = Object.entries(obj.input_schema.properties) as Array<[string, { type?: string; description?: string }]>;
                       setManualParams(entries.map(([name, prop]) => ({
@@ -614,7 +613,6 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
                     } else {
                       setManualParams([]);
                     }
-                    // Sync execution
                     if (obj.execution) {
                       setManualMethod(obj.execution.method ?? 'POST');
                       setManualParamMapping(obj.execution.param_mapping ?? {});
@@ -622,7 +620,6 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
                       setManualMethod('POST');
                       setManualParamMapping({});
                     }
-                    // Sync auth state if present
                     if (obj.auth) {
                       setManualAuthType(obj.auth.type ?? 'none');
                       setManualAuthKeyName(obj.auth.key_name ?? '');
@@ -637,38 +634,40 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
               </button>
               <div className="w-px h-4 bg-line" />
               <button type="button" onClick={() => {
-                // Sync: serialize form into JSON when switching to JSON mode
-                const obj: Record<string, unknown> = {
-                  name: manualTool.name,
-                  description: manualTool.description,
-                };
-                if (manualTool.type === 'http') {
-                  const properties: Record<string, { type: string; description: string }> = {};
-                  for (const p of manualParams) {
-                    if (p.name.trim()) properties[p.name.trim()] = { type: p.type, description: p.description };
-                  }
-                  const required = manualParams.filter(p => p.required && p.name.trim()).map(p => p.name.trim());
-                  obj.input_schema = { type: 'object', properties, ...(required.length > 0 ? { required } : {}) };
-                  obj.execution = { method: manualMethod, url: manualTool.url, param_mapping: manualParamMapping };
-                  obj.auth = {
-                    type: manualAuthType,
-                    key_name: manualAuthKeyName,
-                    secret_ref: manualAuthSecretRef,
+                // Form → JSON: only serialize if jsonText is empty (user hasn't pasted anything yet)
+                if (!jsonText.trim()) {
+                  const obj: Record<string, unknown> = {
+                    name: manualTool.name,
+                    description: manualTool.description,
                   };
-                } else if (manualTool.type === 'mcp') {
-                  obj.type = 'mcp';
-                  obj.endpointUrl = manualTool.url;
-                  obj.toolName = manualTool.toolName;
-                } else if (manualTool.type === 'js') {
-                  obj.type = 'js';
-                  obj.code = manualTool.code;
-                } else if (manualTool.type === 'sandbox') {
-                  obj.type = 'sandbox';
-                  obj.command = manualTool.command;
-                  obj.setup = manualTool.setup;
-                  obj.timeout = manualTool.timeout;
+                  if (manualTool.type === 'http') {
+                    const properties: Record<string, { type: string; description: string }> = {};
+                    for (const p of manualParams) {
+                      if (p.name.trim()) properties[p.name.trim()] = { type: p.type, description: p.description };
+                    }
+                    const required = manualParams.filter(p => p.required && p.name.trim()).map(p => p.name.trim());
+                    obj.input_schema = { type: 'object', properties, ...(required.length > 0 ? { required } : {}) };
+                    obj.execution = { method: manualMethod, url: manualTool.url, param_mapping: manualParamMapping };
+                    obj.auth = {
+                      type: manualAuthType,
+                      key_name: manualAuthKeyName,
+                      secret_ref: manualAuthSecretRef,
+                    };
+                  } else if (manualTool.type === 'mcp') {
+                    obj.type = 'mcp';
+                    obj.endpointUrl = manualTool.url;
+                    obj.toolName = manualTool.toolName;
+                  } else if (manualTool.type === 'js') {
+                    obj.type = 'js';
+                    obj.code = manualTool.code;
+                  } else if (manualTool.type === 'sandbox') {
+                    obj.type = 'sandbox';
+                    obj.command = manualTool.command;
+                    obj.setup = manualTool.setup;
+                    obj.timeout = manualTool.timeout;
+                  }
+                  setJsonText(JSON.stringify(obj, null, 2));
                 }
-                setJsonText(JSON.stringify(obj, null, 2));
                 setToolMode('json');
               }}
                 className={`px-3 py-1 text-xs font-medium transition-colors ${toolMode === 'json' ? 'bg-cream/10 text-cream' : 'text-ink-3 hover:text-ink-2'}`}>
