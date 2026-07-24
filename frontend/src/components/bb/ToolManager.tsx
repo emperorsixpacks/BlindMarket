@@ -136,6 +136,8 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
   // Manual execution
   const [manualMethod, setManualMethod] = useState<'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'>('POST');
   const [manualParamMapping, setManualParamMapping] = useState<Record<string, string>>({});
+  // Edit mode
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
 
   // ── Auth requirements ──────────────────────────────────────────────────
 
@@ -293,9 +295,21 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
           secret_ref: manualAuthSecretRef,
         },
       };
-      onChange([...tools, toolDef]);
+      if (editingIndex !== null) {
+        const updated = [...tools];
+        updated[editingIndex] = toolDef;
+        onChange(updated);
+      } else {
+        onChange([...tools, toolDef]);
+      }
     } else {
-      onChange([...tools, manualTool]);
+      if (editingIndex !== null) {
+        const updated = [...tools];
+        updated[editingIndex] = manualTool;
+        onChange(updated);
+      } else {
+        onChange([...tools, manualTool]);
+      }
     }
 
     setManualTool({ ...emptyLegacyTool });
@@ -306,7 +320,9 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
     setManualMethod('POST');
     setManualParamMapping({});
     setManualError('');
-  }, [manualTool, tools, onChange, manualAuthType, manualAuthKeyName, manualAuthSecretRef, manualParams, manualMethod, manualParamMapping]);
+    setEditingIndex(null);
+    setMode(null);
+  }, [manualTool, tools, onChange, manualAuthType, manualAuthKeyName, manualAuthSecretRef, manualParams, manualMethod, manualParamMapping, editingIndex]);
 
   const addJsonTool = useCallback(() => {
     try {
@@ -330,8 +346,17 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
         }
       }
       onChange([...tools, ...newTools]);
+      // Reset everything
       setJsonText('');
       setJsonError('');
+      setMode(null);
+      setManualTool({ ...emptyLegacyTool });
+      setManualParams([]);
+      setManualMethod('POST');
+      setManualParamMapping({});
+      setManualAuthType('none');
+      setManualAuthKeyName('Authorization');
+      setManualAuthSecretRef('');
     } catch {
       setJsonError('Invalid JSON');
     }
@@ -341,7 +366,53 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
 
   const removeTool = useCallback((index: number) => {
     onChange(tools.filter((_, i) => i !== index));
-  }, [tools, onChange]);
+    if (editingIndex === index) setEditingIndex(null);
+    else if (editingIndex !== null && editingIndex > index) setEditingIndex(editingIndex - 1);
+  }, [tools, onChange, editingIndex]);
+
+  // ── Edit tool ─────────────────────────────────────────────────────────
+
+  const editTool = useCallback((index: number) => {
+    const t = tools[index];
+    setEditingIndex(index);
+    setMode('manual');
+    setToolMode('form');
+    setJsonText('');
+
+    if ('type' in t && t.type === 'tool') {
+      // ToolDef — populate form from tool definition
+      setManualTool(ot => ({
+        ...ot,
+        type: 'http',
+        name: t.name,
+        description: t.description,
+        url: t.execution?.url ?? '',
+      }));
+      // Populate params from input_schema
+      const props = t.input_schema?.properties ?? {};
+      const required = t.input_schema?.required ?? [];
+      setManualParams(Object.entries(props).map(([name, prop]) => ({
+        name,
+        type: prop.type ?? 'string',
+        description: prop.description ?? '',
+        required: required.includes(name),
+      })));
+      setManualMethod(t.execution?.method ?? 'POST');
+      setManualParamMapping(t.execution?.param_mapping ?? {});
+      setManualAuthType(t.auth?.type ?? 'none');
+      setManualAuthKeyName(t.auth?.key_name ?? '');
+      setManualAuthSecretRef(t.auth?.secret_ref ?? '');
+    } else {
+      // LegacyTool
+      setManualTool({ ...t } as LegacyTool);
+      setManualParams([]);
+      setManualMethod((t as LegacyTool).method ?? 'POST');
+      setManualParamMapping({});
+      setManualAuthType('none');
+      setManualAuthKeyName('Authorization');
+      setManualAuthSecretRef('');
+    }
+  }, [tools]);
 
   // ── Render ─────────────────────────────────────────────────────────────
 
@@ -353,7 +424,7 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
           const dsl = 'type' in t && t.type === 'tool' ? t._dsl : undefined;
           const needsReview = dsl?.needs_review;
           return (
-          <div key={i} className="flex items-center justify-between gap-3 border border-line px-4 py-3 text-sm">
+          <div key={i} className="flex items-center justify-between gap-3 border border-line px-4 py-3 text-sm cursor-pointer hover:bg-surface-2 transition-colors" onClick={() => editTool(i)}>
             <div className="flex items-center gap-2 shrink-0 min-w-0">
               <span className="text-ink font-medium truncate">{t.name}</span>
               {needsReview && (
@@ -368,7 +439,7 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
           </span>
           <button
             type="button"
-            onClick={() => removeTool(i)}
+            onClick={(e) => { e.stopPropagation(); removeTool(i); }}
             className="text-ink-3 hover:text-err transition-colors shrink-0"
           >
             Remove
@@ -593,7 +664,7 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
       {mode === 'manual' && (
         <div className="border border-line p-4 space-y-4">
           <div className="flex items-center justify-between">
-            <h4 className="text-sm font-semibold text-ink">Add Tool Manually</h4>
+            <h4 className="text-sm font-semibold text-ink">{editingIndex !== null ? 'Edit Tool' : 'Add Tool Manually'}</h4>
             <div className="flex items-center gap-0 border border-line w-fit">
               <button type="button" onClick={() => {
                 // JSON → Form: parse JSON into form ONLY if jsonText has content
@@ -845,7 +916,7 @@ export function ToolManager({ tools, onChange, secrets = {}, onSecretsChange }: 
           {manualError && <p className="text-xs text-err">{manualError}</p>}
 
           <div className="flex gap-2">
-            <Button type="button" variant="primary" label="Add tool" onClick={toolMode === 'form' ? addManualTool : addJsonTool} />
+            <Button type="button" variant="primary" label={editingIndex !== null ? 'Save changes' : 'Add tool'} onClick={toolMode === 'form' ? addManualTool : addJsonTool} />
             <Button type="button" variant="ghost" label="Cancel" onClick={() => { setMode(null); setManualError(''); }} />
           </div>
         </div>
