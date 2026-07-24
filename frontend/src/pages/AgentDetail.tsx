@@ -70,11 +70,12 @@ interface AgentDetails {
   decayedReputation?: { rawScore: number; decayedScore: number; tasksCompleted: number; disputes: number };
 }
 
-type Tab = 'logs' | 'tools' | 'tasks' | 'services' | 'reviews' | 'webhooks' | 'edit' | 'metrics';
+type Tab = 'logs' | 'tools' | 'errors' | 'tasks' | 'services' | 'reviews' | 'webhooks' | 'edit' | 'metrics';
 
 const TAB_LABELS: Record<Tab, string> = {
   logs: 'Logs',
   tools: 'Tools',
+  errors: 'Errors',
   tasks: 'Tasks',
   services: 'Services',
   reviews: 'Reviews',
@@ -100,6 +101,9 @@ export default function AgentDetail() {
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
+  const [errorLogs, setErrorLogs] = useState<any[]>([]);
+  const [errorLogsTotal, setErrorLogsTotal] = useState(0);
+  const [errorLogsLoading, setErrorLogsLoading] = useState(false);
   const [tab, setTabParam] = useTabParam<Tab>('logs', Object.keys(TAB_LABELS) as Tab[]);
   const [searchParams] = useSearchParams();
   // Audience-aware default: buyers land on the storefront (Services), the
@@ -204,6 +208,23 @@ export default function AgentDetail() {
       .catch(() => {});
     return () => { cancelled = true; };
   }, [agent?.walletAddress]);
+
+  // Fetch error logs for the errors tab
+  useEffect(() => {
+    if (!id || displayTab !== 'errors') return;
+    let cancelled = false;
+    setErrorLogsLoading(true);
+    get<{ entries: any[]; total: number }>(`/api/v1/tools/error-logs?agentId=${id}`)
+      .then((result) => {
+        if (!cancelled) {
+          setErrorLogs(result.entries);
+          setErrorLogsTotal(result.total);
+        }
+      })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setErrorLogsLoading(false); });
+    return () => { cancelled = true; };
+  }, [id, tab]);
 
   useEffect(() => {
     if (!id) return;
@@ -363,7 +384,7 @@ export default function AgentDetail() {
   // Tab order mirrors what each audience came for: buyers get the storefront
   // first (services, reviews), the owner gets the console first (logs).
   const tabs: Tab[] = isOwner
-    ? ['logs', 'services', 'tools', 'tasks', 'reviews', 'webhooks', 'edit', 'metrics']
+    ? ['logs', 'services', 'tools', 'errors', 'tasks', 'reviews', 'webhooks', 'edit', 'metrics']
     : ['services', 'reviews', 'tasks', 'logs', 'tools', 'metrics'];
   const requestedTab: Tab = searchParams.has('tab') || userPickedTab ? tab : isOwner ? 'logs' : 'services';
   // A shared ?tab=edit / ?tab=webhooks link opened by a non-owner would
@@ -740,6 +761,75 @@ export default function AgentDetail() {
                   ))}
                 </div>
               )
+            )}
+
+            {displayTab === 'errors' && (
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="text-xs text-ink-3">
+                    {errorLogsTotal > 0 ? `${errorLogsTotal} error(s) logged` : 'No errors'}
+                  </div>
+                  {errorLogsTotal > 0 && (
+                    <button
+                      onClick={() => {
+                        authedPost(`/api/v1/tools/error-logs`, { agentId: id })
+                          .then(() => { setErrorLogs([]); setErrorLogsTotal(0); })
+                          .catch(() => {});
+                      }}
+                      className="text-xs text-ink-3 hover:text-ink transition-colors"
+                    >
+                      Clear all
+                    </button>
+                  )}
+                </div>
+                {errorLogsLoading ? (
+                  <LoadingState />
+                ) : errorLogs.length === 0 ? (
+                  <EmptyState
+                    icon="check"
+                    title="No errors"
+                    description="Tool executions are running cleanly."
+                  />
+                ) : (
+                  <div className="space-y-3">
+                    {errorLogs.map((e: any) => (
+                      <div key={e.id} className="border border-line p-4 space-y-2">
+                        <div className="flex items-center gap-3">
+                          <span className="text-sm font-medium text-ink">{e.toolName}</span>
+                          <Tag tone="neutral">{e.toolType}</Tag>
+                          {e.statusCode != null && (
+                            <Tag tone={e.statusCode >= 400 ? 'warn' : 'neutral'}>
+                              HTTP {e.statusCode}
+                            </Tag>
+                          )}
+                          <span className="text-xs text-ink-3 ml-auto">{new Date(e.createdAt).toLocaleString()}</span>
+                        </div>
+                        <div className="text-sm text-ink-3">{e.error}</div>
+                        {e.method && e.url && (
+                          <div className="text-xs font-mono text-ink-3 break-all">
+                            {e.method} {e.url}
+                          </div>
+                        )}
+                        {e.requestInput && e.requestInput !== '{}' && (
+                          <details className="text-xs text-ink-3">
+                            <summary className="cursor-pointer hover:text-ink-2">Request input</summary>
+                            <pre className="mt-1 p-2 bg-surface-2 border border-line overflow-x-auto whitespace-pre-wrap">{e.requestInput}</pre>
+                          </details>
+                        )}
+                        {e.responseOutput && (
+                          <details className="text-xs text-ink-3">
+                            <summary className="cursor-pointer hover:text-ink-2">Response output</summary>
+                            <pre className="mt-1 p-2 bg-surface-2 border border-line overflow-x-auto whitespace-pre-wrap">{e.responseOutput}</pre>
+                          </details>
+                        )}
+                        {e.durationMs > 0 && (
+                          <div className="text-xs text-ink-3">Duration: {e.durationMs}ms</div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             )}
 
             {displayTab === 'tasks' && (
