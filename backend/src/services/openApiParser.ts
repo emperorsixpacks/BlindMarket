@@ -114,7 +114,9 @@ export async function parseOpenApiSpec(
       const dsl = compileFromOpenApi(opInput);
       applyAuthFromSecurity(dsl, operation.security ?? globalSecurityReq, globalSecurity);
       dsls.push(dsl);
-      tools.push(renderToolDefinition(dsl));
+      const tool = renderToolDefinition(dsl);
+      tool.source = 'openapi';
+      tools.push(tool);
     }
   }
 

@@ -386,6 +386,14 @@ export interface ToolDefinition {
     key_name: string;      // e.g. "api_key", "Authorization"
     secret_ref: string;    // pointer to stored secret, NEVER the literal key
   };
+  /** Where this tool came from — controls how the worker executes it */
+  source?: 'manual' | 'openapi' | 'mcp';
+  /** MCP-specific: server URL (when source='mcp') */
+  mcp_endpoint?: string;
+  /** MCP-specific: tool name on the MCP server (when source='mcp') */
+  mcp_tool_name?: string;
+  /** MCP-specific: auth headers to send with JSON-RPC calls (when source='mcp') */
+  mcp_headers?: Record<string, string>;
   /** Optional parameter groups for runtime validation (from DSL) */
   parameter_groups?: ToolDSLParameterGroup[];
 }

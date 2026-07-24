@@ -109,7 +109,7 @@ export async function mcpListTools(
   const tools = result.tools ?? [];
 
   // Normalize each MCP tool through DSL
-  const normalized = tools.map(mcpTool => normalizeMcpTool(mcpTool, serverUrl));
+  const normalized = tools.map(mcpTool => normalizeMcpTool(mcpTool, serverUrl, headers));
   return {
     tools: normalized.map(n => n.tool),
     dsls: normalized.map(n => n.dsl),
@@ -174,7 +174,7 @@ export async function mcpConnect(
  * MCP tools use JSON-RPC and handle their own transport, so the execution
  * layer routes calls back through mcpCallTool instead of building raw HTTP.
  */
-function normalizeMcpTool(mcpTool: McpTool, serverUrl: string): { tool: ToolDefinition; dsl: ToolDSL } {
+function normalizeMcpTool(mcpTool: McpTool, serverUrl: string, authHeaders: Record<string, string> = {}): { tool: ToolDefinition; dsl: ToolDSL } {
   const dsl = compileFromMcp(mcpTool as McpToolInput, serverUrl);
   // Override execution to use MCP sentinel method
   dsl.execution = {
@@ -182,7 +182,13 @@ function normalizeMcpTool(mcpTool: McpTool, serverUrl: string): { tool: ToolDefi
     url: serverUrl,
     param_mapping: {},
   };
-  return { tool: renderToolDefinition(dsl), dsl };
+  const tool = renderToolDefinition(dsl);
+  // Tag as MCP so the worker routes via JSON-RPC instead of raw HTTP
+  tool.source = 'mcp';
+  tool.mcp_endpoint = serverUrl;
+  tool.mcp_tool_name = mcpTool.name;
+  tool.mcp_headers = authHeaders;
+  return { tool, dsl };
 }
 
 /**
