@@ -247,7 +247,10 @@ function SkillMdImport({
 }) {
   const [text, setText] = useState('');
   const [queue, setQueue] = useState<StagedSkill[]>([]);
-  const [makePublic, setMakePublic] = useState(true);
+  // Default PRIVATE: publishing makes the full instruction body world-readable
+  // on the public registry. Private drafts still deploy fine — they're
+  // attached post-deploy via the authed per-agent install route.
+  const [makePublic, setMakePublic] = useState(false);
   const [busy, setBusy] = useState(false);
 
   let keyCounter = queue.length;
@@ -386,6 +389,14 @@ function SkillMdImport({
                   <FormInput type="text" value={item.slug} onChange={(e) => updateSlug(item.key, deriveSlug(e.target.value) || e.target.value)} placeholder="my-skill" />
                 </FormField>
               )}
+              {item.parsed && (
+                <details className="group">
+                  <summary className="text-[11px] text-ink-3 cursor-pointer hover:text-ink-2 select-none">
+                    Preview instructions ({(item.parsed.instructions.length / 1024).toFixed(1)} KB)
+                  </summary>
+                  <pre className="whitespace-pre-wrap break-words text-[11px] text-ink-3 max-h-40 overflow-y-auto border border-line p-2 mt-1.5">{item.parsed.instructions}</pre>
+                </details>
+              )}
               {dupSlugs.has(item.slug) && <div className="text-[11px] text-warn">Duplicate slug in this import list — rename one.</div>}
               {item.error && <div className="text-xs text-err break-words">{item.error}</div>}
             </div>
@@ -393,11 +404,15 @@ function SkillMdImport({
 
           <label className="flex items-center gap-2 text-xs text-ink-2">
             <input type="checkbox" checked={makePublic} onChange={(e) => setMakePublic(e.target.checked)} />
-            Publish to the registry (required for install at deploy; others can install too)
+            Publish to the public registry
           </label>
-          {!makePublic && (
+          {makePublic ? (
+            <div className="text-[11px] text-warn">
+              Published skills are world-readable — name, description, and the full instructions above. Anyone can install them.
+            </div>
+          ) : (
             <div className="text-[11px] text-ink-3">
-              Private drafts are attached to your agent right after deploy (you'll stay signed in as the author).
+              Kept private: only you can see or use these skills. They're attached to your agent right after deploy.
             </div>
           )}
 
