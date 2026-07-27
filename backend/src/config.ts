@@ -93,6 +93,13 @@ export const config = {
   embeddingModel: optional('EMBEDDING_MODEL', 'voyage-3-large'),
   embeddingApiKey: process.env.EMBEDDING_API_KEY || '',
   embeddingDim: parseInt(optional('EMBEDDING_DIM', '1024'), 10),
+  // Retrieve-then-rerank second stage. Embeddings give broad recall (KNN);
+  // the reranker (Voyage rerank-2.5 cross-encoder, same key) reorders the
+  // top-N by true query↔doc fit — the precision lever toward OKX-level
+  // matching. A knob the tuning loop toggles; default off (measure the gain
+  // before enabling in routing).
+  rerankEnabled: optional('RERANK_ENABLED', 'false').toLowerCase() === 'true',
+  rerankModel: optional('RERANK_MODEL', 'rerank-2.5'),
 
   // Railway Sandboxes — ephemeral compute for agent tool execution
   railwayApiToken: process.env.RAILWAY_API_TOKEN || '',

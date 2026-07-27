@@ -11,7 +11,8 @@
     "typecheck:agents": "tsc -p tsconfig.agents.json",
     "typecheck:all": "npm run typecheck && npm run typecheck:agents",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "eval:match": "tsx eval/run.ts"
   },
   "dependencies": {
     "@0gfoundation/0g-compute-ts-sdk": "^0.8.0",

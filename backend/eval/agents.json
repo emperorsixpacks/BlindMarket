@@ -1,0 +1,105 @@
+[
+  { "name": "SQL Analyst", "capabilities": ["data_processing", "code_execution"],
+    "instructions": "I turn plain-English business questions into correct, efficient SQL. I understand joins, window functions, aggregations, and query optimization across Postgres, MySQL, and BigQuery. Give me a schema and a question and I return the query plus a short explanation.",
+    "skills": [{ "name": "text-to-sql", "instructions": "Convert natural-language questions about tables into validated SQL, ranking and aggregating rows correctly." }] },
+
+  { "name": "NFT Studio", "capabilities": ["content_generation", "image_analysis"],
+    "instructions": "I design and generate digital collectible artwork and mint it on chain. Themed characters, PFP collections, trait systems, and metadata. I handle Eastern and Western art styles and can produce a coherent visual identity for a drop.",
+    "skills": [{ "name": "generative-art", "instructions": "Produce themed digital collectible artwork and the on-chain metadata to mint it." }] },
+
+  { "name": "Skincare Advisor", "capabilities": ["web_research", "content_generation"],
+    "instructions": "I build personalized skincare routines. Tell me your skin type and concerns — dryness, breakouts, flaking, sensitivity — and I recommend a morning and evening routine with specific ingredients and why they help.",
+    "skills": [{ "name": "routine-builder", "instructions": "Design a hydrating, non-irritating skincare routine for a described skin condition." }] },
+
+  { "name": "Code Reviewer", "capabilities": ["code_review", "testing"],
+    "instructions": "I review pull requests and source files for bugs, security vulnerabilities, and best-practice violations. I prioritize correctness and security over style, cite the exact line, and suggest a concrete fix with an example.",
+    "skills": [{ "name": "security-review", "instructions": "Find injection, auth, and logic defects in code and propose fixes." }] },
+
+  { "name": "Polyglot Translator", "capabilities": ["translation", "text_analysis"],
+    "instructions": "I translate text between dozens of languages while preserving tone, idiom, and formatting. Documents, UI strings, marketing copy — I keep the meaning natural in the target language rather than translating word for word.",
+    "skills": [{ "name": "localization", "instructions": "Translate content faithfully across languages, preserving nuance and formatting." }] },
+
+  { "name": "Market Researcher", "capabilities": ["market_research", "competitive_analysis"],
+    "instructions": "I analyze markets and competitors. Sizing, positioning, competitor teardowns, pricing comparisons, and trend synthesis. I produce structured findings with sources so you can make a decision.",
+    "skills": [{ "name": "competitor-teardown", "instructions": "Compare rival products on features, pricing, and positioning with cited evidence." }] },
+
+  { "name": "Brand Designer", "capabilities": ["content_generation", "document_processing"],
+    "instructions": "I create complete brand identities: mission and voice, color systems, typography and font pairings, logo direction, and full brand guidelines. Clean, modern, minimal aesthetics for startups and small studios.",
+    "skills": [{ "name": "brand-guidelines", "instructions": "Produce a cohesive brand kit — palette, type pairings, voice, and usage rules." }] },
+
+  { "name": "Beat Producer", "capabilities": ["content_generation"],
+    "instructions": "I compose original music — Afrobeats, hip-hop, lo-fi, cinematic. Give me a genre, mood, tempo, and length and I deliver a track concept and arrangement. Mid-tempo moody scores are a specialty.",
+    "skills": [{ "name": "music-production", "instructions": "Produce an original song to a genre/mood/tempo brief." }] },
+
+  { "name": "Web Researcher", "capabilities": ["web_research", "summarization"],
+    "instructions": "I do deep, cited research on any topic. I verify claims against multiple independent sources, flag uncertainty, and return a structured summary with links. Good for due diligence and fact-checking.",
+    "skills": [{ "name": "deep-research", "instructions": "Research a question across sources and return a cited, verified summary." }] },
+
+  { "name": "Crypto Financial Analyst", "capabilities": ["math_computation", "market_research"],
+    "instructions": "I analyze tokens and build trading plans. Technical analysis, swing setups, risk management, and on-chain momentum for assets like HYPE, BTC, and ETH. I explain the thesis and the invalidation, not just the entry.",
+    "skills": [{ "name": "swing-plan", "instructions": "Build a risk-managed swing trading plan for a token over a stated horizon." }] },
+
+  { "name": "Technical Writer", "capabilities": ["content_generation", "summarization"],
+    "instructions": "I write clear, researched technical articles and documentation. Explainers, API docs, and deep-dives with correct terminology and citations. I make complex systems understandable without dumbing them down.",
+    "skills": [{ "name": "technical-article", "instructions": "Write a researched, cited explainer on a technical topic." }] },
+
+  { "name": "Data Engineer", "capabilities": ["data_processing", "data_extraction"],
+    "instructions": "I build data pipelines and transforms. ETL between JSON, CSV, and databases, schema validation, deduplication, and cleaning. I move and reshape data reliably and report malformed input rather than guessing.",
+    "skills": [{ "name": "etl", "instructions": "Extract, transform, validate, and load structured data between formats." }] },
+
+  { "name": "Career Coach", "capabilities": ["content_generation", "text_analysis"],
+    "instructions": "I give career advice and help with transitions. Resume and profile rewrites, interview prep, and honest guidance on pivots — for example moving from Web3 into traditional fintech. I focus on the person's real constraints.",
+    "skills": [{ "name": "career-pivot", "instructions": "Advise on a career transition with concrete, personalized next steps." }] },
+
+  { "name": "On-chain Analyst", "capabilities": ["data_extraction", "web_research"],
+    "instructions": "I analyze wallets and on-chain activity. Transaction histories, holdings snapshots, an on-chain 'CV' for an address, counterparty and cluster analysis. Give me an address and I return a readable profile.",
+    "skills": [{ "name": "wallet-snapshot", "instructions": "Generate an on-chain activity snapshot and profile for a wallet address." }] },
+
+  { "name": "Email Copywriter", "capabilities": ["email_drafting", "content_generation"],
+    "instructions": "I draft emails that get replies — cold outreach, newsletters, launch announcements, and lifecycle sequences. Clear subject lines, tight copy, and a single obvious call to action.",
+    "skills": [{ "name": "email-copy", "instructions": "Draft persuasive, on-brand emails with strong subject lines and one CTA." }] },
+
+  { "name": "Game Designer", "capabilities": ["content_generation", "code_execution"],
+    "instructions": "I design and configure game agents and mechanics. Identity setup, core loop, progression, and balancing for on-chain and app game ecosystems. I turn a game concept into a concrete, playable spec.",
+    "skills": [{ "name": "game-agent", "instructions": "Design and configure a game agent's identity and core mechanics." }] },
+
+  { "name": "Nutritionist", "capabilities": ["web_research", "content_generation"],
+    "instructions": "I create diet and meal plans for goals and constraints — weight, energy, allergies, eye or gut health. Balanced, specific, and realistic, with grocery lists and simple recipes.",
+    "skills": [{ "name": "meal-plan", "instructions": "Build a balanced diet plan for a stated goal and dietary constraints." }] },
+
+  { "name": "Social Media Manager", "capabilities": ["social_media", "content_generation"],
+    "instructions": "I plan and write social content and schedules. Platform-native posts, threads, hooks, and a posting calendar. I match the brand voice and optimize for engagement per platform.",
+    "skills": [{ "name": "content-calendar", "instructions": "Produce platform-native social posts and a scheduling calendar." }] },
+
+  { "name": "API Builder", "capabilities": ["api_integration", "code_execution"],
+    "instructions": "I design and build APIs and integrations. REST and MCP endpoints, OpenAPI specs, auth, and model-router/demand-lab style services. I ship practical, documented, open-source-friendly backends.",
+    "skills": [{ "name": "api-design", "instructions": "Design and implement a documented REST/MCP API and its integration." }] },
+
+  { "name": "Legal Assistant", "capabilities": ["document_processing", "summarization"],
+    "instructions": "I review contracts and legal documents and summarize them in plain English. Key terms, obligations, risks, and red flags. I am not a lawyer and flag where professional review is needed.",
+    "skills": [{ "name": "contract-review", "instructions": "Summarize a contract's key terms, obligations, and risks in plain language." }] },
+
+  { "name": "Analytics Engineer", "capabilities": ["data_processing", "report_generation"],
+    "instructions": "I build the metrics layer and dashboards a team queries day to day. I model raw tables into clean, reusable metrics (dbt-style), define semantic layers, and stand up BI dashboards for revenue, retention, and funnels. I own the modeling, not one-off queries or raw ingestion pipelines.",
+    "skills": [{ "name": "metrics-modeling", "instructions": "Model raw data into a reusable metrics/dashboard layer for self-serve analytics." }] },
+
+  { "name": "DeFi Strategist", "capabilities": ["market_research", "math_computation"],
+    "instructions": "I design DeFi yield strategies. Which pools to provide liquidity to, impermanent-loss math, lending vs staking tradeoffs, and protocol risk. I optimize a position across protocols — this is allocation and yield, not chart-based swing trading.",
+    "skills": [{ "name": "yield-strategy", "instructions": "Recommend a liquidity/yield allocation across DeFi protocols weighing impermanent loss and risk." }] },
+
+  { "name": "Content Marketer", "capabilities": ["content_generation", "market_research"],
+    "instructions": "I run content strategy that drives signups: SEO blog series, landing-page copy, and top-of-funnel content plans. I write to rank and convert, not to document a technical spec and not one-off transactional emails.",
+    "skills": [{ "name": "seo-content", "instructions": "Plan and write an SEO blog/content series that drives conversions." }] },
+
+  { "name": "UI UX Designer", "capabilities": ["content_generation", "document_processing"],
+    "instructions": "I design product interfaces: wireframes, user flows, screen layouts, and app design systems. I focus on how a screen works and feels for the user — distinct from brand identity (mission, logo, palette) which is a different job.",
+    "skills": [{ "name": "interface-design", "instructions": "Design wireframes and interface flows for an app screen or feature." }] },
+
+  { "name": "Full-stack Developer", "capabilities": ["code_execution", "api_integration"],
+    "instructions": "I build and ship complete web applications end to end — database, backend, and frontend wired together into a working product. Not just an API contract, and not code review of someone else's PR.",
+    "skills": [{ "name": "ship-app", "instructions": "Build a full working web app: schema, backend, and frontend." }] },
+
+  { "name": "General Assistant", "capabilities": ["content_generation", "scheduling"],
+    "instructions": "I help with a bit of everything — quick tasks, drafting notes, organizing a day, light research, and coordination. A flexible generalist for small miscellaneous jobs that don't need a specialist.",
+    "skills": [{ "name": "general-help", "instructions": "Handle small, varied everyday tasks and coordination." }] }
+]
