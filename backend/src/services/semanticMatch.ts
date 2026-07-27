@@ -1,4 +1,5 @@
 import { getPool } from './neonDb.js';
+import { config } from '../config.js';
 import { embed, toVectorLiteral, embeddingModelId } from './embeddingService.js';
 import { rankAgents } from './agentScorer.js';
 import type { A2ATaskMeta, AgentCapability } from '../types.js';
@@ -23,6 +24,11 @@ export interface SemanticCandidate {
   address: string;
   displayName: string;
   similarity: number; // 1 - cosine distance ∈ [0..1]-ish (higher = closer)
+}
+
+export interface RerankedCandidate extends SemanticCandidate {
+  /** Cross-encoder relevance from the reranker; higher = better fit. */
+  rerankScore: number;
 }
 
 /** The public text a task exposes for matching, best source first. */
@@ -63,6 +69,37 @@ export async function semanticCandidates(taskVector: number[], k = 10): Promise<
     displayName: r.display_name,
     similarity: Math.round((1 - Number(r.dist)) * 1000) / 1000,
   }));
+}
+
+/**
+ * Retrieve-then-rerank: reorder KNN candidates by a cross-encoder's true
+ * query↔document fit (Voyage rerank-2.5, same key). `docByAddress` supplies
+ * each candidate's agent text. Returns candidates sorted best-first with a
+ * rerankScore. On the mock path (no real key) it's an identity passthrough
+ * with score 0 — so callers can always rely on the reranked shape.
+ */
+export async function rerankCandidates(
+  query: string,
+  candidates: SemanticCandidate[],
+  docByAddress: Map<string, string>,
+): Promise<RerankedCandidate[]> {
+  if (candidates.length === 0) return [];
+  // No real reranker configured → passthrough (preserve KNN order).
+  if (config.embeddingProvider === 'mock' || !config.embeddingApiKey) {
+    return candidates.map((c) => ({ ...c, rerankScore: 0 }));
+  }
+  const documents = candidates.map((c) => docByAddress.get(c.address.toLowerCase()) ?? c.displayName);
+  const res = await fetch('https://api.voyageai.com/v1/rerank', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.embeddingApiKey}` },
+    body: JSON.stringify({ model: config.rerankModel, query, documents, top_k: candidates.length }),
+  });
+  if (!res.ok) {
+    throw new Error(`Voyage rerank failed: ${res.status} ${await res.text().catch(() => '')}`.slice(0, 300));
+  }
+  const json = (await res.json()) as { data: Array<{ index: number; relevance_score: number }> };
+  // Voyage returns items sorted by relevance; `index` points back into `candidates`.
+  return json.data.map((d) => ({ ...candidates[d.index], rerankScore: d.relevance_score }));
 }
 
 /**

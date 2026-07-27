@@ -1,5 +1,14 @@
 import { describe, it, expect, vi } from 'vitest';
 
+// Hermetic: pin the mock provider BEFORE config loads so rerankCandidates
+// takes its passthrough path and never calls the live Voyage API — a
+// developer's real EMBEDDING_API_KEY must not turn a unit test into a network
+// call. dotenv never overrides pre-set process.env, so this wins.
+vi.hoisted(() => {
+  process.env.EMBEDDING_PROVIDER = 'mock';
+  process.env.EMBEDDING_API_KEY = '';
+});
+
 // semanticMatch imports neonDb/agentScorer at module load; the functions under
 // test here are pure, so leaf stubs are enough (same pattern as the
 // projection tests).
@@ -11,7 +20,7 @@ vi.mock('./embeddingService.js', () => ({
   embeddingModelId: () => 'mock-v1',
 }));
 
-import { buildTaskRoutingText, computeShadowMetrics, type ShadowRow } from './semanticMatch.js';
+import { buildTaskRoutingText, computeShadowMetrics, rerankCandidates, type ShadowRow } from './semanticMatch.js';
 
 describe('buildTaskRoutingText (source precedence)', () => {
   it('prefers publicBrief over everything', () => {
@@ -36,6 +45,22 @@ describe('buildTaskRoutingText (source precedence)', () => {
 
   it('returns empty when there is no public signal at all (no shadow row)', () => {
     expect(buildTaskRoutingText({ requiredCapabilities: [] as never })).toBe('');
+  });
+});
+
+describe('rerankCandidates (mock passthrough)', () => {
+  const cands = [
+    { address: '0xa', displayName: 'A', similarity: 0.7 },
+    { address: '0xb', displayName: 'B', similarity: 0.69 },
+  ];
+  it('preserves KNN order and shape when no real reranker is configured', async () => {
+    // embeddingService is mocked here → mock path → identity passthrough.
+    const out = await rerankCandidates('q', cands, new Map([['0xa', 'docA'], ['0xb', 'docB']]));
+    expect(out.map((c) => c.address)).toEqual(['0xa', '0xb']);
+    expect(out.every((c) => typeof c.rerankScore === 'number')).toBe(true);
+  });
+  it('returns [] for no candidates', async () => {
+    expect(await rerankCandidates('q', [], new Map())).toEqual([]);
   });
 });
 
