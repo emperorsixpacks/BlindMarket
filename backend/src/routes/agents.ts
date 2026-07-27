@@ -15,6 +15,7 @@ import * as agentStore from '../services/agentStore.js';
 import * as serviceStore from '../services/serviceStore.js';
 import { isAgentOwner, stripAgentSecrets } from '../services/agentOwnership.js';
 import * as skillStore from '../services/skillStore.js';
+import * as agentEmbedding from '../services/agentEmbedding.js';
 import { buildInstalledSkill, assertComposedSizeOk } from '../services/skillComposer.js';
 import type { InstalledSkill, AgentCapability } from '../types.js';
 import { redis } from '../services/redis.js';
@@ -586,6 +587,8 @@ agentsRouter.patch('/:id', requireAuth, async (req: AuthRequest, res) => {
     instructions?: string; model?: string; tools?: object[]; capabilities?: string[]; minReward?: string;
   };
   const updated = await updateAgent(req.params.id, { instructions, model, tools: tools as any, capabilities: capabilities as any, minReward });
+  // Semantic matching (Phase 0): instructions/capabilities changed — re-embed.
+  if (updated) agentEmbedding.recomputeForWalletBestEffort(updated.walletAddress);
   res.json({ success: true, data: strip(updated) });
 });
 
@@ -718,6 +721,8 @@ agentsRouter.post('/:id/skills', requireAuth, async (req: AuthRequest, res, next
     const capabilities = [...new Set([...(agent.capabilities ?? []), ...snapshot.capabilities])] as AgentCapability[];
     const updated = await updateAgent(agent.id, { skills, capabilities });
     void skillStore.incrementInstallCount(row.id).catch(() => {});
+    // Semantic matching (Phase 0): the agent's doc changed — re-embed.
+    agentEmbedding.recomputeForWalletBestEffort(agent.walletAddress);
     res.json({
       success: true,
       data: {
@@ -744,6 +749,8 @@ agentsRouter.delete('/:id/skills/:slug', requireAuth, async (req: AuthRequest, r
       return;
     }
     const updated = await updateAgent(agent.id, { skills });
+    // Semantic matching (Phase 0): removing a skill changes the agent's doc.
+    agentEmbedding.recomputeForWalletBestEffort(agent.walletAddress);
     res.json({
       success: true,
       data: { agent: strip(updated), requiresRestart: agent.status === 'running' },

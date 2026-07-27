@@ -84,6 +84,16 @@ export const config = {
   // deployments to skip the 12s exclusive-offer window.
   cascadeEnabled: optional('CASCADE_ENABLED', 'true').toLowerCase() === 'true',
 
+  // Semantic matching (embeddings). Provider-abstracted; defaults to the 'mock'
+  // provider (deterministic hash vectors) so the whole pipeline builds and
+  // tests without a key. Set EMBEDDING_PROVIDER=voyage|openai + EMBEDDING_API_KEY
+  // to switch on real embeddings. EMBEDDING_DIM must match the pgvector column
+  // dimension (migration 17); changing it requires a re-embed migration.
+  embeddingProvider: optional('EMBEDDING_PROVIDER', 'mock').toLowerCase(), // mock | voyage | openai
+  embeddingModel: optional('EMBEDDING_MODEL', 'voyage-3-large'),
+  embeddingApiKey: process.env.EMBEDDING_API_KEY || '',
+  embeddingDim: parseInt(optional('EMBEDDING_DIM', '1024'), 10),
+
   // Railway Sandboxes — ephemeral compute for agent tool execution
   railwayApiToken: process.env.RAILWAY_API_TOKEN || '',
   railwayEnvironmentId: process.env.RAILWAY_ENVIRONMENT_ID || '',

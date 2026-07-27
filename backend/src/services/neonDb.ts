@@ -365,6 +365,35 @@ const migrations: Array<{ id: number; name: string; sql: string }> = [
         WHERE provider = 'anthropic' AND model = 'claude-sonnet-4-7';
     `,
   },
+  {
+    // Semantic matching (Phase 0): pgvector for embedding-based routing.
+    // vector(1024) matches EMBEDDING_DIM default (Voyage voyage-3-large native).
+    // Populated by services/agentEmbedding.ts (agents) and, in Phase 1, at
+    // /tasks/index (task_embeddings). Non-breaking: columns are nullable and
+    // nothing reads them yet.
+    id: 17,
+    name: 'pgvector_embeddings',
+    sql: `
+      CREATE EXTENSION IF NOT EXISTS vector;
+
+      ALTER TABLE agent_executors ADD COLUMN IF NOT EXISTS embedding vector(1024);
+      ALTER TABLE agent_executors ADD COLUMN IF NOT EXISTS embedding_model TEXT;
+      ALTER TABLE agent_executors ADD COLUMN IF NOT EXISTS embedding_updated_at TIMESTAMPTZ;
+
+      CREATE TABLE IF NOT EXISTS task_embeddings (
+        task_hash TEXT PRIMARY KEY,
+        embedding vector(1024) NOT NULL,
+        model TEXT NOT NULL,
+        source_text_hash TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_executors_embedding
+        ON agent_executors USING hnsw (embedding vector_cosine_ops);
+      CREATE INDEX IF NOT EXISTS idx_task_embeddings_vec
+        ON task_embeddings USING hnsw (embedding vector_cosine_ops);
+    `,
+  },
 ];
 
 async function runMigrations(p: pg.Pool): Promise<void> {
