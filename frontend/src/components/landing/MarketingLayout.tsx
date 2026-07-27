@@ -14,10 +14,9 @@ import { useAnalytics } from '../../hooks/useAnalytics';
  * starts at the "Launch app" boundary, deliberately.
  *
  * The chrome is a FIXED dark composition (independent of the app theme), in
- * the marketing surface's editorial style: a floating pill nav whose glass
- * chrome fades in on scroll, and a black footer. On the landing the pill
- * starts transparent over the full-bleed hero; on every other route it's
- * solid from the start (those pages can be light).
+ * the marketing surface's editorial style: a compact always-visible
+ * dark-glass "notch" nav (w-fit island, springs a bit bigger on hover) and
+ * a black footer.
  *
  * One conversion story: the single primary CTA everywhere in this chrome is
  * "Launch app" (chain selector → /a2a). Everything else is a text link.

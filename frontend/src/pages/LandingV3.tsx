@@ -16,9 +16,10 @@ const AgentMesh = lazy(() => import('../components/landing/AgentMesh').then((m) 
 
 /**
  * LandingV3 — the public face, in the marketing surface's editorial style:
- * Instrument Sans display with Instrument Serif italic accent words, a fixed
- * black↔paper block composition, pill chrome, film grain, and the WebGL
- * agent-network globe as the full-bleed hero visual.
+ * ONE display family (Instrument Sans, dimmed same-family spans for
+ * emphasis — no serif accents), a fixed black↔paper block composition, pill
+ * chrome, film grain, and the living WebGL agent-network globe as the
+ * full-bleed hero visual.
  *
  * Discipline rules carried over from V2 (deliberate, keep them):
  * - ONE primary CTA everywhere: "Launch app" (chain selector → /a2a).
@@ -26,8 +27,9 @@ const AgentMesh = lazy(() => import('../components/landing/AgentMesh').then((m) 
  * - ONE lifecycle vocabulary: Post → Accept → Verify → Settle.
  * - Claims must be true of the shipped system (see the /how-it-works FAQ).
  *
- * Signature: the ticker band interleaves serif-italic market phrases with
- * LIVE network numbers from /api/v1/stats — real protocol state as texture.
+ * Signature: the slim mono ticker band interleaves LABEL/description/STATUS
+ * rows with LIVE network numbers from /api/v1/stats — real protocol state
+ * as texture.
  */
 
 interface Stats {
