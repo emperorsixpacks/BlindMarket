@@ -57,6 +57,15 @@ vi.mock('../services/a2aStore.js', () => ({
   listOpenTasks: vi.fn(() => Promise.resolve([])),
   cacheDeadline: vi.fn(() => Promise.resolve()),
   getCachedDeadline: vi.fn(() => Promise.resolve(null)),
+  // Accept lock + attempt logging (Part 1)
+  acquireAcceptLock: vi.fn(() => Promise.resolve(true)),
+  releaseAcceptLock: vi.fn(() => Promise.resolve()),
+  logAcceptAttempt: vi.fn(() => Promise.resolve()),
+  getAcceptAttempts: vi.fn(() => Promise.resolve([])),
+  // Gas-liveness (Part 3)
+  startSettlementDeadline: vi.fn(() => Promise.resolve()),
+  clearSettlementDeadline: vi.fn(() => Promise.resolve()),
+  getSettlementDeadlineTTL: vi.fn(() => Promise.resolve(-2)),
 }));
 
 vi.mock('../services/agentStore.js', () => ({ getAgent: vi.fn() }));
