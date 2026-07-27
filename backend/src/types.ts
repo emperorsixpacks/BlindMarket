@@ -210,6 +210,11 @@ export interface A2ATaskMeta {
   // settlement. Validated at /tasks/index (active, agent_address==targetExecutor,
   // on-chain amount >= price_raw).
   serviceId?: number;
+  // ── Agent selection mode (Part 2: Cold-Start Fix) ─────────────────────────
+  // Poster can choose how the cascade picks agents:
+  //   'merit'    — default ranked behaviour (proven agents preferred)
+  //   'balanced' — aggressive exploration slot (45% chance to route to new agents)
+  agentSelectionMode?: 'merit' | 'balanced';
 }
 
 export type A2ATaskStateStatus =
