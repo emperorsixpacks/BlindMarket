@@ -11,7 +11,17 @@ import * as accountingService from './accountingService.js';
 import * as reputationDecay from './reputationDecay.js';
 import * as escrowService from './escrow.js';
 import * as serviceStore from './serviceStore.js';
+import * as skillStatsStore from './skillStatsStore.js';
+import * as badgeStore from './badgeStore.js';
+import * as a2aStore from './a2aStore.js';
 import { redis } from './redis.js';
+
+// Earned-badge threshold: N settled completions per (agent, capability) with a
+// failure ratio under the cap. 5 real paid escrow settlements can't be faked
+// by one lucky task but stays reachable during bootstrap; the ratio guard
+// blocks dispute-heavy grinders.
+const EARNED_BADGE_MIN_COMPLETED = 5;
+const EARNED_BADGE_MAX_FAILURE_RATIO = 0.2;
 
 // Cache the on-chain feeBps for the duration of the process. Fee changes are
 // admin-gated and rare; one stale read per restart is fine. Falls back to 1000
@@ -56,7 +66,17 @@ export async function recordWorkerPayout(
   executorAddr: string,
   onChainId: string,
   grossAmount: bigint,
-  opts: { rethrow?: boolean; serviceId?: number; computeCostMicroUnits?: number } = {},
+  opts: {
+    rethrow?: boolean;
+    serviceId?: number;
+    computeCostMicroUnits?: number;
+    /** The task's declared capability tags — feeds the per-skill proof layer.
+     *  Deviation from the "caller resolves" contract above: the a2a routes
+     *  pass meta.requiredCapabilities; the DisputeResolved listener omits it
+     *  and this function falls back to a2aStore.getMeta (safe import
+     *  direction — a2aStore only imports redis). */
+    requiredCapabilities?: string[];
+  } = {},
 ): Promise<void> {
   const creditedKey = `a2a:credited:${taskHash.toLowerCase()}`;
   try {
@@ -139,6 +159,31 @@ export async function recordWorkerPayout(
       console.warn(`[a2a] recordWorkerPayout: reputationDecay.recordTaskCompletion failed for ${taskHash.slice(0, 10)}…:`, (decayErr as Error).message);
     }
 
+    // Per-skill proof: credit the task's declared capability tags and auto-
+    // grant an 'earned' badge at the threshold. Inside the at-most-once block
+    // (so a finalize retry can't double-credit) but in its own try/catch — a
+    // stats failure must never release the NX marker or block the payout.
+    try {
+      const caps = opts.requiredCapabilities
+        ?? (await a2aStore.getMeta(taskHash))?.requiredCapabilities
+        ?? [];
+      if (caps.length > 0) {
+        const stats = await skillStatsStore.recordCompletion(executorAddr, caps);
+        for (const s of stats) {
+          const attempts = s.tasks_completed + s.tasks_failed;
+          const failureRatio = attempts > 0 ? s.tasks_failed / attempts : 0;
+          if (s.tasks_completed >= EARNED_BADGE_MIN_COMPLETED && failureRatio < EARNED_BADGE_MAX_FAILURE_RATIO) {
+            const granted = await badgeStore.grantEarnedBadge(executorAddr, s.capability);
+            if (granted) {
+              console.log(`[a2a] earned badge granted: ${executorAddr.slice(0, 10)}… × ${s.capability} (${s.tasks_completed} settled completions)`);
+            }
+          }
+        }
+      }
+    } catch (statsErr) {
+      console.warn(`[a2a] skill-stats credit failed for ${taskHash.slice(0, 10)}…:`, (statsErr as Error).message);
+    }
+
     // On-chain reputation is updated by BlindEscrow internally when
     // completeVerification → BlindReputation.rate() fires.
   } catch (err) {
@@ -171,6 +216,15 @@ export async function recordWorkerDispute(taskHash: string, executorAddr: string
       await agentStore.registerAgent(agent);
     }
     await reputationDecay.recordDispute(executorAddr, taskHash);
+    // Per-skill proof: a dispute counts against the task's capability tags
+    // (feeds the earned-badge failure-ratio guard). Own try/catch — never
+    // blocks the dispute record itself.
+    try {
+      const caps = (await a2aStore.getMeta(taskHash))?.requiredCapabilities ?? [];
+      await skillStatsStore.recordFailure(executorAddr, caps);
+    } catch (statsErr) {
+      console.warn(`[a2a] skill-stats failure record failed for ${taskHash.slice(0, 10)}…:`, (statsErr as Error).message);
+    }
   } catch (err) {
     console.warn(
       `[a2a] recordWorkerDispute failed for ${taskHash.slice(0, 10)}… executor=${executorAddr}:`,

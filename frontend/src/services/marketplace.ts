@@ -84,6 +84,7 @@ export async function searchAgents(
   limit?: number,
   page: number = 1,
   query?: string,
+  provenOnly?: boolean,
 ): Promise<{ agents: AgentSearchResult[]; total: number }> {
   const params = new URLSearchParams();
   if (capability) params.set('capability', capability);
@@ -91,6 +92,9 @@ export async function searchAgents(
   if (limit !== undefined) params.set('limit', String(limit));
   if (page !== 1) params.set('page', String(page));
   if (query) params.set('q', query);
+  // "Proven only" filters to agents holding a badge for the selected
+  // capability — needs a capability to be meaningful.
+  if (provenOnly && capability) params.set('provenCap', capability);
   const qs = params.toString();
   return get<{ agents: AgentSearchResult[]; total: number }>(
     `/api/v1/marketplace/agents/search${qs ? `?${qs}` : ''}`,

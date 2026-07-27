@@ -22,7 +22,7 @@ import {
   AgentAvatar,
 } from '../components/bb';
 import { truncateAddress } from '../lib/utils';
-import { get, authedGet, authedPatch, authedPost } from '../lib/api';
+import { get, authedGet, authedPatch, authedPost, authedDelete } from '../lib/api';
 import { API_BASE_URL, OG_CHAIN_CONFIG } from '../config/constants';
 import { AGENT_CAPABILITIES } from '../config/capabilities';
 import { useChainAddress } from '../hooks/useChainWallet';
@@ -66,6 +66,7 @@ interface AgentDetails {
   walletAddress?: string; publicKey?: string; inftTokenId?: number;
   tasksCompleted?: number; totalEarned?: string; tools?: AgentTool[];
   capabilities?: string[];
+  skills?: InstalledSkillMeta[];
   minReward?: string;
   reputation?: { score: number; avgScore: number; tasksCompleted: number; disputes: number };
   decayedReputation?: { rawScore: number; decayedScore: number; tasksCompleted: number; disputes: number };
@@ -138,6 +139,11 @@ export default function AgentDetail() {
 
   // Badges state
   const [badges, setBadges] = useState<AgentBadge[]>([]);
+  // Per-skill track record (settled completions/failures per capability tag) —
+  // the proof layer buyers hire on.
+  const [skillStats, setSkillStats] = useState<Array<{ capability: string; tasks_completed: number; tasks_failed: number }>>([]);
+  // Installed-skill snapshots (owner management in the Edit tab).
+  const [installedSkills, setInstalledSkills] = useState<InstalledSkillMeta[]>([]);
 
   // Gas-management UI state — separate from the agent's start/pause/stop
   // actions so the buttons can show their own progress without interfering.
@@ -179,6 +185,7 @@ export default function AgentDetail() {
         setEditInstructions(data.instructions ?? '');
         setEditModel(data.model ?? '');
         setEditCapabilities(data.capabilities ?? []);
+        setInstalledSkills(data.skills ?? []);
         setEditMinReward(
           // Decimal-preserving: integer BigInt division floored a fractional
           // minReward (0.5 0G -> '0'), which Save then persisted as 0, silently
@@ -199,6 +206,9 @@ export default function AgentDetail() {
     if (!agent?.walletAddress) return;
     let cancelled = false;
     getAgentBadges(agent.walletAddress).then(b => { if (!cancelled) setBadges(b); }).catch(() => {});
+    authedGet<{ stats: Array<{ capability: string; tasks_completed: number; tasks_failed: number }> }>(
+      `/api/v1/marketplace/skill-stats/${agent.walletAddress}`,
+    ).then(r => { if (!cancelled) setSkillStats(r.stats ?? []); }).catch(() => {});
     return () => { cancelled = true; };
   }, [agent?.walletAddress]);
 
@@ -659,12 +669,32 @@ export default function AgentDetail() {
             </div>
             {badges.length > 0 && (
               <div>
-                <div className="text-[13px] font-medium text-ink-2 mb-1">Badges</div>
+                <div className="text-[13px] font-medium text-ink-2 mb-1">Proven skills</div>
                 <div className="flex flex-wrap gap-1.5">
                   {badges.map((b) => (
-                    <Tag key={b.capability} tone="ok">{b.capability.replace(/_/g, ' ')}</Tag>
+                    <Tag key={b.capability} tone="ok">
+                      {b.capability.replace(/_/g, ' ')}
+                      <span className="ml-1 opacity-70">{b.badge_type === 'earned' ? 'earned' : b.badge_type === 'certified' ? 'certified' : 'verified'}</span>
+                    </Tag>
                   ))}
                 </div>
+              </div>
+            )}
+            {skillStats.length > 0 && (
+              <div>
+                <div className="text-[13px] font-medium text-ink-2 mb-1">Track record</div>
+                <div className="space-y-1">
+                  {skillStats.map((s) => (
+                    <div key={s.capability} className="flex items-center justify-between text-xs">
+                      <span className="text-ink-2">{s.capability.replace(/_/g, ' ')}</span>
+                      <span className="font-mono text-ink-3">
+                        <span className="text-ok">{s.tasks_completed}✓</span>
+                        {s.tasks_failed > 0 && <span className="text-err"> {s.tasks_failed}✗</span>}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-1 text-[10px] text-ink-3">Settled, verified tasks per skill — on-chain proof, not self-declared.</div>
               </div>
             )}
             {agent.publicKey && (
@@ -1032,6 +1062,13 @@ export default function AgentDetail() {
                   />
                   {save.isError && <span className="text-xs text-err">Save failed</span>}
                 </div>
+
+                {/* Skills — installed as frozen snapshots; managed via the
+                    dedicated install/remove routes (not the Save above, which
+                    must never wipe skills). Takes effect on the next restart. */}
+                <div className="pt-5 border-t border-line">
+                  <SkillsManager agentId={id!} installed={installedSkills} agentRunning={agent.status === 'running'} onChange={setInstalledSkills} />
+                </div>
               </div>
             )}
 
@@ -1062,6 +1099,89 @@ export default function AgentDetail() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+interface InstalledSkillMeta {
+  slug: string;
+  name: string;
+  version: string;
+  capabilities?: string[];
+}
+
+/** Owner-only skill install/remove for an existing agent. Uses the dedicated
+ *  /agents/:id/skills routes (NOT the generic Save, which never touches
+ *  skills). New skills take effect on the next restart. */
+function SkillsManager({
+  agentId,
+  installed,
+  agentRunning,
+  onChange,
+}: {
+  agentId: string;
+  installed: InstalledSkillMeta[];
+  agentRunning: boolean;
+  onChange: (skills: InstalledSkillMeta[]) => void;
+}) {
+  const [slug, setSlug] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  // Only a running worker keeps its spawn-time composition; a stopped agent
+  // picks up the change on next start, so no nudge is needed there.
+  const [needsRestart, setNeedsRestart] = useState(false);
+  const showRestart = needsRestart && agentRunning;
+
+  const install = async () => {
+    if (!slug.trim()) return;
+    setBusy(true); setError('');
+    try {
+      const res = await authedPost<{ agent: { skills?: InstalledSkillMeta[] }; requiresRestart: boolean }>(
+        `/api/v1/agents/${agentId}/skills`, { slug: slug.trim() },
+      );
+      onChange(res.agent.skills ?? []);
+      setNeedsRestart(res.requiresRestart);
+      setSlug('');
+    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+  };
+
+  const remove = async (s: string) => {
+    setBusy(true); setError('');
+    try {
+      const res = await authedDelete<{ agent: { skills?: InstalledSkillMeta[] }; requiresRestart: boolean }>(
+        `/api/v1/agents/${agentId}/skills/${s}`,
+      );
+      onChange(res.agent.skills ?? []);
+      setNeedsRestart(res.requiresRestart);
+    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="text-[13px] font-medium text-ink-2">Skills</div>
+      <div className="text-xs text-ink-3 -mt-1">Installed skills shape the agent's prompt and tools. Browse the registry to find slugs.</div>
+      {installed.length > 0 ? (
+        <div className="flex flex-wrap gap-1.5">
+          {installed.map((s) => (
+            <span key={s.slug} className="inline-flex items-center gap-1.5 px-2 py-0.5 text-xs border border-cream/40 bg-cream/5 text-cream">
+              {s.name} <span className="opacity-60">v{s.version}</span>
+              <button type="button" onClick={() => remove(s.slug)} disabled={busy} aria-label={`Remove ${s.name}`}>
+                <Icon name="x" size={11} />
+              </button>
+            </span>
+          ))}
+        </div>
+      ) : (
+        <div className="text-xs text-ink-3">No skills installed.</div>
+      )}
+      <div className="flex gap-2">
+        <FormInput className="font-mono" placeholder="skill-slug" value={slug} onChange={(e) => setSlug(e.target.value)} />
+        <Button variant="outline" size="sm" label={busy ? '…' : 'Install'} onClick={install} disabled={busy || !slug.trim()} />
+      </div>
+      {showRestart && (
+        <div className="text-[11px] text-warn border-l-2 border-warn pl-2 py-0.5">Restart the agent (stop then start) for skill changes to take effect.</div>
+      )}
+      {error && <div className="text-xs text-err">{error}</div>}
     </div>
   );
 }

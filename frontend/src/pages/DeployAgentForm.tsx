@@ -13,6 +13,7 @@ import {
   FormSelect,
 } from '../components/bb';
 import { ToolManager, type AnyTool } from '../components/bb/ToolManager';
+import SkillPicker from '../components/bb/SkillPicker';
 import { get, post } from '../lib/api';
 import { AGENT_CAPABILITIES } from '../config/capabilities';
 import { useChainAddress } from '../hooks/useChainWallet';
@@ -113,7 +114,9 @@ export default function DeployAgentForm() {
 
   const [providers, setProviders] = useState<ProviderModels>({
     openai: ['gpt-4o', 'gpt-4o-mini'],
-    anthropic: ['claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022', 'claude-3-haiku-20240307'],
+    // Fallback only — the live list comes from GET /agents/providers.
+    // All three previous entries were RETIRED Anthropic models (404 on use).
+    anthropic: ['claude-opus-4-8', 'claude-sonnet-5', 'claude-haiku-4-5'],
     groq: ['llama-3.3-70b-versatile', 'llama3-8b-8192'],
     gemini: ['gemini-2.0-flash', 'gemini-1.5-pro'],
     '0g-compute': ['deepseek-ai/DeepSeek-V3.1', 'google/gemma-3-27b-it', 'qwen/qwen-2.5-7b-instruct'],
@@ -142,6 +145,9 @@ export default function DeployAgentForm() {
   const [tools, setTools] = useState<AnyTool[]>([]);
   const [toolSecrets, setToolSecrets] = useState<Record<string, string>>({});
   const [capabilities, setCapabilities] = useState<string[]>([]);
+  // Installed skills (slugs). Selecting a skill auto-checks its capability tags
+  // in section 03 so the agent's declared caps reflect what it can do.
+  const [skillSlugs, setSkillSlugs] = useState<string[]>([]);
 
   const [status, setStatus] = useState<'idle' | 'deploying' | 'funding' | 'done' | 'error'>('idle');
   const submittingRef = useRef(false);
@@ -232,6 +238,7 @@ export default function DeployAgentForm() {
         ownerAddress: address,
         ownerPublicKey,
         capabilities,
+        skillSlugs,
         toolSecrets,
         tools: tools.map(t => {
           // Normalized ToolDefinition — pass through as-is
@@ -475,9 +482,29 @@ export default function DeployAgentForm() {
           </FormField>
         </div>
 
-        {/* 04 — Tools & MCP servers */}
+        {/* 04 — Skills */}
         <div className="p-6 border-b border-line">
-          <SectionRule num="04" title="Tools & MCP servers" side="Optional" />
+          <SectionRule num="04" title="Skills" side="Optional" />
+          <FormField
+            label="Install skills"
+            hint="Reusable bundles of instructions + tools. Import from the open SKILL.md ecosystem or the registry — they shape how this agent actually works."
+          >
+            <SkillPicker
+              selectedSlugs={skillSlugs}
+              onChange={(slugs, caps) => {
+                setSkillSlugs(slugs);
+                // Auto-check the skills' capability tags in section 03.
+                if (caps) setCapabilities((cs) => [...new Set([...cs, ...caps])]);
+              }}
+              secrets={toolSecrets}
+              onSecretsChange={setToolSecrets}
+            />
+          </FormField>
+        </div>
+
+        {/* 05 — Tools & MCP servers */}
+        <div className="p-6 border-b border-line">
+          <SectionRule num="05" title="Tools & MCP servers" side="Optional" />
           <ToolManager tools={tools} onChange={setTools} secrets={toolSecrets} onSecretsChange={setToolSecrets} />
         </div>
 

@@ -1,5 +1,5 @@
 import { getPool } from './neonDb.js';
-import type { DeployedAgent, AgentCapability, AgentTool, LLMProvider, AgentStatus } from '../types.js';
+import type { DeployedAgent, AgentCapability, AgentTool, LLMProvider, AgentStatus, InstalledSkill } from '../types.js';
 
 function rowToAgent(row: Record<string, unknown>): DeployedAgent {
   return {
@@ -25,6 +25,7 @@ function rowToAgent(row: Record<string, unknown>): DeployedAgent {
     rawPrivateKey: (row.raw_private_key as string) ?? undefined,
     inftTokenId: (row.inft_token_id as number) ?? undefined,
     minReward: (row.min_reward as string) ?? undefined,
+    skills: (row.skills as InstalledSkill[])?.length ? (row.skills as InstalledSkill[]) : undefined,
   };
 }
 
@@ -36,9 +37,9 @@ export async function saveAgent(agent: DeployedAgent): Promise<void> {
         provider, model, api_key, encrypted_api_key, capabilities,
         tools, status, deployed_at, last_active_at, storage_ref,
         platform_token, wallet_address, public_key, encrypted_private_key,
-        raw_private_key, inft_token_id, min_reward, updated_at)
+        raw_private_key, inft_token_id, min_reward, skills, updated_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-       $16, $17, $18, $19, $20, $21, $22, NOW())
+       $16, $17, $18, $19, $20, $21, $22, $23, NOW())
      ON CONFLICT (id) DO UPDATE SET
        owner_address = EXCLUDED.owner_address,
        authorized_owners = EXCLUDED.authorized_owners,
@@ -60,6 +61,7 @@ export async function saveAgent(agent: DeployedAgent): Promise<void> {
        raw_private_key = EXCLUDED.raw_private_key,
        inft_token_id = EXCLUDED.inft_token_id,
        min_reward = EXCLUDED.min_reward,
+       skills = EXCLUDED.skills,
        updated_at = NOW()`,
     [
       agent.id, agent.ownerAddress, agent.authorizedOwners ?? [],
@@ -70,6 +72,7 @@ export async function saveAgent(agent: DeployedAgent): Promise<void> {
       agent.platformToken ?? null, agent.walletAddress, agent.publicKey,
       agent.encryptedPrivateKey, agent.rawPrivateKey ?? null,
       agent.inftTokenId ?? null, agent.minReward ?? null,
+      JSON.stringify(agent.skills ?? []),
     ],
   );
 }

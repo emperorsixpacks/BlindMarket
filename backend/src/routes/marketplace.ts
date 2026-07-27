@@ -8,6 +8,7 @@ import * as templateStore from '../services/templateStore.js';
 import * as webhookStore from '../services/webhookStore.js';
 import * as badgeStore from '../services/badgeStore.js';
 import * as serviceStore from '../services/serviceStore.js';
+import * as skillStatsStore from '../services/skillStatsStore.js';
 import type { ApiResponse } from '../types.js';
 
 export const marketplaceRouter = Router();
@@ -178,11 +179,42 @@ marketplaceRouter.delete('/badges/:agentAddress/:capability', requireAuth, requi
   } catch (err) { next(err); }
 });
 
+// ── Skill proof (Phase 2) ──────────────────────────────────────────────────
+
+// Per-capability totals for the PostTask picker: declared agents + proven
+// (badged) agents per tag. Public.
+marketplaceRouter.get('/capabilities/stats', async (_req, res, next) => {
+  try {
+    const counts = await skillStatsStore.getCapabilityCounts();
+    res.json({ success: true, data: { capabilities: counts } } as ApiResponse);
+  } catch (err) { next(err); }
+});
+
+// An agent's per-skill track record (settled completions/failures per
+// capability tag). Public — it's the proof surface buyers hire on.
+marketplaceRouter.get('/skill-stats/:agentAddress', async (req, res, next) => {
+  try {
+    const addr = req.params.agentAddress;
+    if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) {
+      res.status(400).json({ success: false, error: { code: 'BAD_ADDRESS', message: 'Invalid agent address' } });
+      return;
+    }
+    const [stats, badges] = await Promise.all([
+      skillStatsStore.getStats(addr),
+      badgeStore.getAgentBadges(addr),
+    ]);
+    res.json({ success: true, data: { stats, badges: badges.map((b) => ({ capability: b.capability, type: b.badge_type })) } } as ApiResponse);
+  } catch (err) { next(err); }
+});
+
 // ── Agent search ───────────────────────────────────────────────────────────
 
 marketplaceRouter.get('/agents/search', async (req, res, next) => {
   try {
     const capability = req.query.capability as string | undefined;
+    // Filter to agents holding an active badge (earned/verified/certified)
+    // for this capability — the "proven only" toggle.
+    const provenCap = req.query.provenCap as string | undefined;
     const minRating = parseFloat(req.query.minRating as string) || 0;
     const limit = Math.min(50, parseInt(req.query.limit as string) || 20);
     const page = Math.max(1, parseInt(req.query.page as string) || 1);
@@ -222,7 +254,10 @@ marketplaceRouter.get('/agents/search', async (req, res, next) => {
       }),
     );
 
-    const filtered = minRating > 0 ? enriched.filter(a => a.avgRating >= minRating) : enriched;
+    let filtered = minRating > 0 ? enriched.filter(a => a.avgRating >= minRating) : enriched;
+    if (provenCap) {
+      filtered = filtered.filter(a => a.badges.some(b => b.capability === provenCap));
+    }
     const total = filtered.length;
     const offset = (page - 1) * limit;
     const paged = filtered.slice(offset, offset + limit);

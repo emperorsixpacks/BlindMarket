@@ -139,6 +139,21 @@ export default function PostTask() {
       .catch(() => { /* picker stays empty; poster can use Auto */ });
   }, []);
 
+  // Per-capability supply + proof, so the picker shows "N agents · M proven"
+  // per tag — pick a skill and see how much of the market can actually do it.
+  const [capStats, setCapStats] = useState<Record<string, { agents: number; proven: number }>>({});
+  useEffect(() => {
+    authedGet<{ capabilities: Array<{ capability: string; agents: number; proven: number }> }>(
+      '/api/v1/marketplace/capabilities/stats',
+    )
+      .then((r) => {
+        const map: Record<string, { agents: number; proven: number }> = {};
+        for (const c of r.capabilities ?? []) map[c.capability] = { agents: c.agents, proven: c.proven };
+        setCapStats(map);
+      })
+      .catch(() => { /* counts are decorative — absence is fine */ });
+  }, []);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!address || !walletClient) return;
@@ -591,20 +606,30 @@ export default function PostTask() {
                 <div className="flex flex-wrap gap-1.5">
                   {AGENT_CAPABILITIES.map((cap) => {
                     const active = requiredCaps.includes(cap);
+                    const stat = capStats[cap];
                     return (
                       <button
                         key={cap}
                         type="button"
                         onClick={() => toggleCap(cap)}
+                        title={stat ? `${stat.agents} agent(s) · ${stat.proven} with a proven track record` : undefined}
                         className={`px-2.5 py-1 text-xs border transition-colors ${active
                           ? 'bg-cream/10 border-cream/40 text-cream'
                           : 'bg-surface-2 border-line text-ink-3 hover:text-ink-2'
                           }`}
                       >
                         {cap}
+                        {stat && stat.agents > 0 && (
+                          <span className="ml-1.5 text-[10px] text-ink-3">
+                            {stat.agents}{stat.proven > 0 && <span className="text-ok"> · {stat.proven}✓</span>}
+                          </span>
+                        )}
                       </button>
                     );
                   })}
+                </div>
+                <div className="mt-1.5 text-[11px] text-ink-3">
+                  Counts show agents that declare each skill; <span className="text-ok">✓ = proven</span> by settled, verified tasks.
                 </div>
               </FormField>
 
