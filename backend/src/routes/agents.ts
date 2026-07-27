@@ -238,7 +238,9 @@ agentsRouter.post('/deploy', async (req, res, next) => {
     // private drafts install via the authed POST /:id/skills after deploy.
     const { skillSlugs, ...deployParams } = parsed.data;
     const skills: InstalledSkill[] = [];
-    for (const slug of skillSlugs) {
+    // Dedupe: a crafted request could repeat a slug and duplicate its
+    // [SKILL:] section in the composed prompt (the UI prevents this).
+    for (const slug of [...new Set(skillSlugs)]) {
       const row = await skillStore.getSkillBySlug(slug);
       if (!row || !row.is_public) {
         res.status(404).json({ success: false, error: { code: 'SKILL_NOT_FOUND', message: `No public skill "${slug}"` } });
@@ -247,7 +249,7 @@ agentsRouter.post('/deploy', async (req, res, next) => {
       skills.push(buildInstalledSkill(row));
     }
     if (skills.length > 0) {
-      assertComposedSizeOk(parsed.data.instructions, skills);
+      assertComposedSizeOk(parsed.data.instructions, skills, parsed.data.tools as never);
     }
     // Union the skills' routing tags into the declared capabilities; the
     // agent must end up with at least one (see DeploySchema comment).
@@ -716,8 +718,23 @@ agentsRouter.post('/:id/skills', requireAuth, async (req: AuthRequest, res, next
       return;
     }
     const snapshot = buildInstalledSkill(row);
+    // Post-deploy install has no channel to collect this skill's secrets (only
+    // the deploy form's SkillPicker does). Installing a secret-bearing skill
+    // here would ship tools whose auth resolves to nothing — silent upstream
+    // 401s with no fix but redeploy. Refuse loudly until a secrets endpoint
+    // lands (tracked follow-up); such skills can still be added at deploy time.
+    if (snapshot.secretRefs.length > 0) {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: 'SKILL_NEEDS_SECRETS',
+          message: `"${row.slug}" needs secrets (${snapshot.secretRefs.join(', ')}) that can only be provided when deploying an agent. Install it via the deploy form, or redeploy with it selected.`,
+        },
+      });
+      return;
+    }
     const skills: InstalledSkill[] = [...(agent.skills ?? []), snapshot];
-    assertComposedSizeOk(agent.instructions, skills);
+    assertComposedSizeOk(agent.instructions, skills, agent.tools);
     const capabilities = [...new Set([...(agent.capabilities ?? []), ...snapshot.capabilities])] as AgentCapability[];
     const updated = await updateAgent(agent.id, { skills, capabilities });
     void skillStore.incrementInstallCount(row.id).catch(() => {});

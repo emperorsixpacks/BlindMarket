@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { parseSkillMd } from './skillMd.js';
 import { composeAgentRuntime, buildInstalledSkill, assertComposedSizeOk, MAX_SKILLS_PER_AGENT } from './skillComposer.js';
+import { stripAgentSecrets } from './agentOwnership.js';
 import type { DeployedAgent, InstalledSkill, ToolDefinition } from '../types.js';
 
 /**
@@ -120,6 +121,44 @@ describe('composeAgentRuntime', () => {
       instructions: 'x', tools: [], skills: [mkSkill({ tools: [TOOL] })],
     } as unknown as DeployedAgent);
     expect(c.tools[0].name).toBe('fetch_page');
+  });
+});
+
+describe('stripAgentSecrets projects installed skills (no leak on public agent egress)', () => {
+  const agent = {
+    id: 'a1', ownerAddress: '0xowner', name: 'A', instructions: 'x', provider: 'openai', model: 'm',
+    apiKey: 'SECRET_LLM', encryptedApiKey: 'SECRET_ENC', capabilities: ['testing'], tools: [],
+    status: 'stopped', deployedAt: 't', walletAddress: '0xw', publicKey: '04', encryptedPrivateKey: 'SECRET_PRIV',
+    rawPrivateKey: 'SECRET_RAW', platformToken: 'SECRET_JWT',
+    skills: [{
+      skillId: 1, slug: 's', version: '1.0.0', name: 'S',
+      instructions: 'SECRET_SKILL_PROMPT',
+      tools: [{ name: 't', description: '', input_schema: { type: 'object', properties: {} },
+        execution: { method: 'GET', url: 'https://x', param_mapping: {} },
+        auth: { type: 'none', key_name: '', secret_ref: '' },
+        mcp_headers: { Authorization: 'Bearer SECRET_MCP_TOKEN' } }],
+      secretRefs: ['api:secret_slot'], capabilities: ['testing'], source: 'local', installedAt: 't',
+    }],
+  } as unknown as DeployedAgent;
+
+  it('keeps only public skill identity — drops instructions, tools, secretRefs', () => {
+    const out = stripAgentSecrets(agent)!;
+    const s = out.skills![0] as unknown as Record<string, unknown>;
+    expect(s.slug).toBe('s');
+    expect(s.name).toBe('S');
+    expect(s.version).toBe('1.0.0');
+    expect(s.capabilities).toEqual(['testing']);
+    expect('instructions' in s).toBe(false);
+    expect('tools' in s).toBe(false);
+    expect('secretRefs' in s).toBe(false);
+  });
+
+  it('leaks no secret string anywhere in the serialized output', () => {
+    const text = JSON.stringify(stripAgentSecrets(agent));
+    for (const secret of ['SECRET_LLM', 'SECRET_ENC', 'SECRET_PRIV', 'SECRET_RAW', 'SECRET_JWT',
+      'SECRET_SKILL_PROMPT', 'SECRET_MCP_TOKEN', 'api:secret_slot']) {
+      expect(text).not.toContain(secret);
+    }
   });
 });
 
