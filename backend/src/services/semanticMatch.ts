@@ -1,7 +1,7 @@
 import { getPool } from './neonDb.js';
 import { config } from '../config.js';
-import { embed, toVectorLiteral, embeddingModelId } from './embeddingService.js';
-import { rankAgents } from './agentScorer.js';
+import { embed, toVectorLiteral, embeddingModelId, EMBED_FETCH_TIMEOUT_MS } from './embeddingService.js';
+import { rankAgents, meetsRewardFloor, dominanceMultiplier } from './agentScorer.js';
 import { buildAgentDoc } from './agentEmbedding.js';
 import * as agentStore from './agentStore.js';
 import type { CascadeEntry } from './a2aStore.js';
@@ -96,6 +96,9 @@ export async function rerankCandidates(
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.embeddingApiKey}` },
     body: JSON.stringify({ model: config.rerankModel, query, documents, top_k: candidates.length }),
+    // Rerank sits on the dispatch critical path when routing is flipped —
+    // same hard cap as embed so a blackholed connection can't stall offers.
+    signal: AbortSignal.timeout(EMBED_FETCH_TIMEOUT_MS),
   });
   if (!res.ok) {
     throw new Error(`Voyage rerank failed: ${res.status} ${await res.text().catch(() => '')}`.slice(0, 300));
@@ -145,10 +148,15 @@ export async function semanticRankedAgents(
 /** How many semantic candidates seed the cascade before broadcast fallback. */
 export const SEMANTIC_CASCADE_K = 10;
 
-/** The meta slice the routing decision needs. */
+/** The meta slice the routing decision needs. The accept-gate fields let the
+ *  ranking pre-filter agents whose /accept is guaranteed to 403 (poster,
+ *  designated verifier, missing wrapped slice) instead of burning a 12s
+ *  exclusive offer window on them. */
 export type RoutingMeta = Pick<
   A2ATaskMeta,
-  'publicBrief' | 'routingSummary' | 'requiredCapabilities' | 'targetExecutor'
+  | 'publicBrief' | 'routingSummary' | 'requiredCapabilities' | 'targetExecutor'
+  | 'posterAddress' | 'verifierAddress' | 'wrappedKeys' | 'privacy' | 'rootHash'
+  | 'skipKeyWrap' | 'keyCustodyBlob'
 >;
 
 /**
@@ -180,12 +188,22 @@ function toCascadeScore(c: SemanticCandidate | RerankedCandidate): number {
  * a task can never be stranded by the flip.
  *
  * Hard accept-gates are respected so an offer window is never burned on an
- * agent who is FORBIDDEN from taking the task: candidates missing any of the
- * task's requiredCapabilities are dropped (/accept 403s CAPABILITY_MISMATCH —
+ * agent who is FORBIDDEN from taking the task: dropped are candidates missing
+ * any of the task's requiredCapabilities (/accept 403s CAPABILITY_MISMATCH —
  * during the transition, tags posted on a task remain a hard constraint even
- * though ranking is semantic; the tag retirement phase removes this), as are
- * agents whose declared minReward floor exceeds the task's reward and
- * candidates whose registration row has vanished since embedding.
+ * though ranking is semantic; the tag retirement phase removes this), the
+ * poster themselves (SELF_ACCEPT), the designated verifier (IS_VERIFIER),
+ * candidates with no wrapped brief slice on a sealed task with no custody
+ * blob (NEEDS_WRAP with no self-heal path; when a custody blob exists we
+ * optimistically keep them — accept re-wraps server-side unless the custody
+ * key rotated), agents whose declared minReward floor exceeds the task's
+ * reward, and candidates whose registration row has vanished since embedding.
+ *
+ * The tag era's dominance cap also applies: an agent past the rolling
+ * assignment cap gets the same soft score taper, so topping the similarity
+ * ranking on every task can't turn into unbounded capture. (Reputation /
+ * dispute blending into the semantic score is deliberately NOT here — that is
+ * the tuning phase after the flip; the shadow report watches outcomes.)
  */
 export async function semanticCascadeRanking(
   meta: RoutingMeta,
@@ -203,25 +221,45 @@ export async function semanticCascadeRanking(
       ranked.map((c) => agentStore.getAgent(c.address).catch(() => undefined)),
     );
     const requiredCaps = (meta.requiredCapabilities ?? []) as AgentCapability[];
+    const posterLc = meta.posterAddress?.toLowerCase();
+    const verifierLc = meta.verifierAddress?.toLowerCase();
+    // A sealed task with no custody blob can only be accepted by agents that
+    // already hold a wrapped slice — everyone else 403s NEEDS_WRAP (they can
+    // still /bid via broadcast, exactly as before the flip).
+    const needsSlice =
+      meta.privacy !== 'public' && !!meta.rootHash && !meta.skipKeyWrap && !meta.keyCustodyBlob;
     let taskReward: bigint | null = null;
     try { taskReward = taskRewardWei ? BigInt(taskRewardWei) : null; } catch { taskReward = null; }
     const entries: CascadeEntry[] = [];
     for (let i = 0; i < ranked.length; i++) {
       const agent = agents[i];
       if (!agent) continue;
+      const addrLc = ranked[i].address.toLowerCase();
+      if (posterLc && addrLc === posterLc) continue;   // SELF_ACCEPT
+      if (verifierLc && addrLc === verifierLc) continue; // IS_VERIFIER
+      if (needsSlice && !meta.wrappedKeys?.[addrLc]) continue; // NEEDS_WRAP
       // Mirror of the /accept CAPABILITY_MISMATCH gate (full capability set,
       // not preferredCapabilities — accept checks the full set).
       if (requiredCaps.length > 0 && !requiredCaps.every((c) => agent.capabilities.includes(c))) continue;
-      if (taskReward !== null && agent.minReward) {
-        try { if (BigInt(agent.minReward) > taskReward) continue; } catch { /* malformed floor → keep */ }
-      }
+      if (!meetsRewardFloor(agent, taskReward)) continue;
       entries.push({
         address: ranked[i].address,
         displayName: ranked[i].displayName,
         score: toCascadeScore(ranked[i]),
       });
     }
-    return entries.length > 0 ? entries : null;
+    if (entries.length === 0) return null;
+
+    // Dominance cap (same taper as the tag ranker): demote agents past the
+    // rolling assignment cap so the similarity queue can't be captured.
+    await Promise.all(
+      entries.map(async (e) => {
+        const mult = await dominanceMultiplier(e.address).catch(() => 1);
+        if (mult < 1) e.score = Math.round(e.score * mult * 100) / 100;
+      }),
+    );
+    entries.sort((a, b) => b.score - a.score);
+    return entries;
   } catch (err) {
     console.warn('[semanticMatch] semantic cascade ranking failed, falling back to tags:', (err as Error).message);
     return null;
@@ -348,7 +386,12 @@ export interface ShadowRow {
 
 export interface RankMetric { hit1: number; hit3: number; mrr: number }
 export interface ShadowMetrics {
-  tasks: number;            // rows with a known acceptor
+  tasks: number;            // rows with a known acceptor AND ranking data (scorable)
+  // Rows with a known acceptor but NO ranking data — e.g. a routed_by
+  // placeholder whose recordMatchShadow write failed during a provider
+  // outage. Surfaced so the operator can see how much of the accepted sample
+  // the hit/MRR/settled numbers exclude, instead of it vanishing silently.
+  unscoredTasks: number;
   settledTasks: number;
   semantic: RankMetric;
   semanticRerank: RankMetric;
@@ -366,18 +409,20 @@ function rankOf(list: Array<{ address?: string }>, addr: string): number {
 /**
  * How well did each ranking predict the agent that ACTUALLY took (and ideally
  * settled) the task? hit@1 / hit@3 / mean-reciprocal-rank, computed over rows
- * with a known acceptor. This is the loop's comparison metric: "flip-ready"
- * = semantic ≥ tag on MRR (primary) without a lower settled rate.
+ * with a known acceptor and at least one recorded ranking (rows excluded for
+ * having no ranking data are reported as unscoredTasks). This is the loop's
+ * comparison metric: "flip-ready" = semantic ≥ tag on MRR (primary) without a
+ * lower settled rate.
  */
 export function computeShadowMetrics(rows: ShadowRow[]): ShadowMetrics {
   // A row must have a known acceptor AND at least one recorded ranking to be
   // scorable. Rows with no ranking data (e.g. a routed_by placeholder whose
   // recordMatchShadow write failed on a provider outage) would count as a
-  // miss for every ranking and silently deflate the flip's success gate.
-  const scored = rows.filter(
-    (r) =>
-      !!r.accepted_by &&
-      (r.semantic_topk.length > 0 || (r.semantic_rerank_topk?.length ?? 0) > 0 || r.tag_topk.length > 0),
+  // miss for every ranking and silently deflate the flip's success gate —
+  // they are counted separately (unscoredTasks) so the exclusion is visible.
+  const accepted = rows.filter((r) => !!r.accepted_by);
+  const scored = accepted.filter(
+    (r) => r.semantic_topk.length > 0 || (r.semantic_rerank_topk?.length ?? 0) > 0 || r.tag_topk.length > 0,
   );
   const agg = (pick: (r: ShadowRow) => Array<{ address: string }>) => {
     let hit1 = 0, hit3 = 0, rr = 0;
@@ -396,6 +441,7 @@ export function computeShadowMetrics(rows: ShadowRow[]): ShadowMetrics {
   };
   return {
     tasks: scored.length,
+    unscoredTasks: accepted.length - scored.length,
     settledTasks: scored.filter((r) => r.settled === true).length,
     semantic: agg((r) => r.semantic_topk),
     // Falls back to the semantic order for rows recorded before rerank capture

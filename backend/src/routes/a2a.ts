@@ -896,6 +896,12 @@ a2aRouter.get('/key-custody/pubkey', async (_req, res, next) => {
   }
 });
 
+/** task:available meta — caps included only when the task actually has them,
+ *  so every broadcast path emits the same shape. */
+function broadcastMeta(requiredCaps: string[]): Record<string, unknown> {
+  return requiredCaps.length > 0 ? { requiredCapabilities: requiredCaps } : {};
+}
+
 /**
  * Advance the cascade to the next ranked agent after the per-position offer
  * window expires. If the task has already been accepted (status !== open) or
@@ -914,7 +920,7 @@ function scheduleCascadeAdvance(
 
       const next = await a2aStore.advanceCascade(taskHash);
       if (!next) {
-        emitTaskAvailable(taskHash, { requiredCapabilities: requiredCaps });
+        emitTaskAvailable(taskHash, broadcastMeta(requiredCaps));
         return;
       }
 
@@ -955,16 +961,29 @@ async function startRankedCascade(
   taskRewardWei: string,
 ): Promise<void> {
   const semantic = await semanticMatch.semanticCascadeRanking(routingMeta, taskRewardWei);
-  const entries = semantic
-    ?? (requiredCaps.length > 0
-      ? (await rankAgents(requiredCaps, taskRewardWei)).map((r) => ({
-          address: r.address,
-          score: r.score,
-          displayName: r.displayName,
-        }))
-      : []);
+  const tagEntries = async () =>
+    (await rankAgents(requiredCaps, taskRewardWei)).map((r) => ({
+      address: r.address,
+      score: r.score,
+      displayName: r.displayName,
+    }));
+  let entries = semantic ?? (requiredCaps.length > 0 ? await tagEntries() : []);
+  if (semantic && requiredCaps.length > 0) {
+    // Coverage guarantee carried over from the tag era: every registered
+    // agent holding the required caps still gets a cascade position. Semantic
+    // decides the FRONT of the queue; the tag ranking appends anyone the
+    // top-K KNN missed (e.g. an agent whose embedding write failed or whose
+    // vector is on a stale model). Best-effort — an append failure keeps the
+    // semantic queue rather than aborting to broadcast.
+    try {
+      const seen = new Set(entries.map((e) => e.address.toLowerCase()));
+      entries = entries.concat((await tagEntries()).filter((e) => !seen.has(e.address.toLowerCase())));
+    } catch (err) {
+      console.warn(`[a2a] tag-remainder append failed for ${taskHash.slice(0, 10)}…:`, (err as Error).message);
+    }
+  }
   if (entries.length === 0) {
-    emitTaskAvailable(taskHash, requiredCaps.length > 0 ? { requiredCapabilities: requiredCaps } : {});
+    emitTaskAvailable(taskHash, broadcastMeta(requiredCaps));
     return;
   }
 
@@ -1268,15 +1287,25 @@ a2aRouter.post('/tasks/index', requireAuth, async (req: AuthRequest, res, next) 
       publicBrief: isPublic ? data.publicBrief : undefined,
       routingSummary: data.routingSummary,
       targetExecutor,
+      // Accept-gate mirror inputs: lets the semantic ranking skip agents whose
+      // /accept is guaranteed to 403 (poster, verifier, missing wrapped slice
+      // on a sealed no-custody task) instead of burning offer windows on them.
+      posterAddress: address,
+      verifierAddress: data.verifierAddress?.toLowerCase(),
+      wrappedKeys: mergedWrappedKeys,
+      privacy: isPublic ? 'public' : undefined,
+      rootHash: data.rootHash,
+      skipKeyWrap: existingMeta?.skipKeyWrap,
+      keyCustodyBlob: data.keyCustodyBlob,
     };
     const semanticEligible = semanticMatch.semanticRoutingEligible(routingMeta);
     if (!config.cascadeEnabled || targetExecutor || (requiredCaps.length === 0 && !semanticEligible)) {
-      emitTaskAvailable(taskHash, requiredCaps.length > 0 ? { requiredCapabilities: requiredCaps } : {});
+      emitTaskAvailable(taskHash, broadcastMeta(requiredCaps));
     } else {
       const taskRewardWei = onChainAmount;
       const broadcastAfter = (err: Error, stage: string) => {
         console.error(`[a2a] ${stage} failed for ${taskHash.slice(0, 10)}…:`, err.message);
-        emitTaskAvailable(taskHash, requiredCaps.length > 0 ? { requiredCapabilities: requiredCaps } : {});
+        emitTaskAvailable(taskHash, broadcastMeta(requiredCaps));
       };
 
       if (requiredCaps.length === 0) {

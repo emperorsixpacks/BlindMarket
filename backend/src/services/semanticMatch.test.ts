@@ -18,7 +18,15 @@ vi.hoisted(() => {
 // test here are pure, so leaf stubs are enough (same pattern as the
 // projection tests).
 vi.mock('./neonDb.js', () => ({ getPool: vi.fn() }));
-vi.mock('./agentScorer.js', () => ({ rankAgents: vi.fn() }));
+vi.mock('./agentScorer.js', () => ({
+  rankAgents: vi.fn(),
+  dominanceMultiplier: vi.fn(async () => 1),
+  // Real logic mirrored (importActual would drag in redis via a2aStore).
+  meetsRewardFloor: (a: { minReward?: string }, t: bigint | null) => {
+    if (t === null || !a.minReward) return true;
+    try { return BigInt(a.minReward) <= t; } catch { return true; }
+  },
+}));
 vi.mock('./agentStore.js', () => ({ getAgent: vi.fn() }));
 vi.mock('./agentEmbedding.js', () => ({ buildAgentDoc: vi.fn() }));
 vi.mock('./embeddingService.js', () => ({
@@ -131,7 +139,8 @@ describe('computeShadowMetrics (the loop success gate)', () => {
   it('skips rows with no ranking data (a routed_by placeholder whose shadow write failed)', () => {
     const placeholder: ShadowRow = { semantic_topk: [], tag_topk: [], accepted_by: '0xwinner', settled: true };
     const m = computeShadowMetrics([placeholder, row(1, 1, true)]);
-    expect(m.tasks).toBe(1);       // placeholder is not scorable…
+    expect(m.tasks).toBe(1);         // placeholder is not scorable…
+    expect(m.unscoredTasks).toBe(1); // …but its exclusion is visible…
     expect(m.semantic.hit1).toBe(1); // …and doesn't deflate the real row's metrics
   });
 
@@ -217,6 +226,26 @@ describe('semanticCascadeRanking (Phase 2 flip — cascade offer queue)', () => 
     vi.mocked(getAgent).mockImplementation(async (addr: string) =>
       agentRow(addr, addr === '0xaaa' ? '2000' : undefined));
     const out = await semanticCascadeRanking(meta, '1000');
+    expect(out?.map((e) => e.address)).toEqual(['0xbbb']);
+  });
+
+  it('drops the poster and the designated verifier (their /accept would 403)', async () => {
+    arm();
+    const out = await semanticCascadeRanking({
+      ...meta,
+      posterAddress: '0xAAA',      // case-insensitive vs candidate 0xaaa
+      verifierAddress: '0xbbb',
+    });
+    expect(out).toBeNull(); // both candidates gate-blocked → no usable queue
+  });
+
+  it('drops slice-less candidates on a sealed task with no custody blob (NEEDS_WRAP)', async () => {
+    arm();
+    const out = await semanticCascadeRanking({
+      ...meta,
+      rootHash: '0xroot',
+      wrappedKeys: { '0xbbb': 'eciesblob' },
+    });
     expect(out?.map((e) => e.address)).toEqual(['0xbbb']);
   });
 

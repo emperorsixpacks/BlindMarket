@@ -3,6 +3,7 @@ import { createServer } from 'http';
 import cors from 'cors';
 import helmet from 'helmet';
 import { config, assertBootConfig } from './config.js';
+import { embeddingsConfigured } from './services/embeddingService.js';
 import { globalErrorHandler } from './middleware/errorHandler.js';
 import { createRateLimiter } from './middleware/rateLimit.js';
 import { requestLogger } from './middleware/requestLogger.js';
@@ -124,7 +125,7 @@ httpServer.listen(config.port, () => {
   // deterministic hash vectors, not meaning (mechanically safe — tag/broadcast
   // fallbacks still apply — but a nonsense canary).
   if (config.semanticRoutingEnabled) {
-    if (config.embeddingProvider === 'mock' || !config.embeddingApiKey) {
+    if (!embeddingsConfigured()) {
       console.warn('[semantic] SEMANTIC_ROUTING_ENABLED=true but embeddings are mock/keyless — offers would be ranked by hash vectors, NOT meaning. Set EMBEDDING_PROVIDER + EMBEDDING_API_KEY or turn the flag off.');
     } else {
       console.log(`[semantic] routing FLIPPED ON — cascade offers ranked by meaning (rerank=${config.rerankEnabled ? 'on' : 'off'}); capability tags are fallback-only`);
