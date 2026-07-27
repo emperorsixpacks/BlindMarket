@@ -13,6 +13,10 @@ import * as reputationService from '../services/reputation.js';
 import * as reputationDecay from '../services/reputationDecay.js';
 import * as agentStore from '../services/agentStore.js';
 import * as serviceStore from '../services/serviceStore.js';
+import { isAgentOwner, stripAgentSecrets } from '../services/agentOwnership.js';
+import * as skillStore from '../services/skillStore.js';
+import { buildInstalledSkill, assertComposedSizeOk } from '../services/skillComposer.js';
+import type { InstalledSkill, AgentCapability } from '../types.js';
 import { redis } from '../services/redis.js';
 import { ethers } from 'ethers';
 import { provider } from '../services/chain.js';
@@ -40,16 +44,12 @@ async function authorizeOwner(req: AuthRequest, res: import('express').Response,
 
   // Check ALL linked wallets, not just the primary one — users often have
   // multiple wallets in the same Privy account (e.g. embedded + external).
-  const allAddresses = [authed, ...(req.user?.addresses ?? [])];
   // Owner set = the original wagmi deploy wallet plus any signature-linked
   // wallets (authorizedOwners). The latter unlocks the common case where the
   // wallet captured at deploy isn't the Privy identity the JWT surfaces — the
   // user proves control of the owner wallet once via POST /:id/link-owner and
   // their Privy identity is added here.
-  const ownerSet = new Set(
-    [agent.ownerAddress, ...(agent.authorizedOwners ?? [])].map(a => a.toLowerCase()),
-  );
-  const isOwner = allAddresses.some(a => ownerSet.has(a.toLowerCase()));
+  const isOwner = isAgentOwner(agent, [authed, ...(req.user?.addresses ?? [])]);
 
   if (!isOwner) {
     // JWT's first wallet entry isn't guaranteed to be the one used at deploy.
@@ -204,17 +204,20 @@ const DeploySchema = z.object({
   // An agent with no capabilities can never accept a task that declares
   // requiredCapabilities — the /a2a/accept handler 403s with CAPABILITY_MISMATCH.
   // Deploying with caps=[] produces an agent that looks "running" but is a no-op,
-  // which is the worst UX. Require at least one declared capability up front.
-  capabilities: z.array(z.enum(AGENT_CAPABILITIES as unknown as [string, ...string[]])).min(1, 'Agent must declare at least one capability'),
+  // which is the worst UX. At least one capability is required AFTER unioning
+  // in the installed skills' tags (checked in the handler), so an agent can be
+  // deployed from skills alone.
+  capabilities: z.array(z.enum(AGENT_CAPABILITIES as unknown as [string, ...string[]])).default([]),
   tools: z.array(ToolSchema).default([]),
   toolSecrets: z.record(z.string()).default({}),
   storageRef: z.string().optional(),
+  // Skills to install at deploy — resolved to frozen snapshots SERVER-SIDE
+  // (clients send slugs, never snapshots).
+  skillSlugs: z.array(z.string().regex(/^[a-z0-9][a-z0-9-]{1,62}$/)).max(10).default([]),
 });
 
 function strip(agent: Awaited<ReturnType<typeof getAgent>>) {
-  if (!agent) return null;
-  const { encryptedPrivateKey: _a, encryptedApiKey: _b, apiKey: _c, rawPrivateKey: _d, platformToken: _e, ...safe } = agent;
-  return safe;
+  return stripAgentSecrets(agent);
 }
 
 // GET /api/v1/agents/providers
@@ -228,7 +231,43 @@ agentsRouter.post('/deploy', async (req, res, next) => {
     const parsed = DeploySchema.safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ success: false, error: parsed.error.flatten() }); return; }
     console.log(`[deploy] ownerPublicKey length=${parsed.data.ownerPublicKey.length / 2} bytes, hex=${parsed.data.ownerPublicKey.slice(0, 8)}...`);
-    const agent = await deployAgent(parsed.data as Parameters<typeof deployAgent>[0]);
+
+    // Resolve skill slugs → frozen snapshots (server-side only). Deploy is an
+    // unauthenticated route, so only PUBLIC skills are installable here —
+    // private drafts install via the authed POST /:id/skills after deploy.
+    const { skillSlugs, ...deployParams } = parsed.data;
+    const skills: InstalledSkill[] = [];
+    for (const slug of skillSlugs) {
+      const row = await skillStore.getSkillBySlug(slug);
+      if (!row || !row.is_public) {
+        res.status(404).json({ success: false, error: { code: 'SKILL_NOT_FOUND', message: `No public skill "${slug}"` } });
+        return;
+      }
+      skills.push(buildInstalledSkill(row));
+    }
+    if (skills.length > 0) {
+      assertComposedSizeOk(parsed.data.instructions, skills);
+    }
+    // Union the skills' routing tags into the declared capabilities; the
+    // agent must end up with at least one (see DeploySchema comment).
+    const capabilities = [...new Set([
+      ...parsed.data.capabilities,
+      ...skills.flatMap((s) => s.capabilities),
+    ])] as (typeof parsed.data.capabilities);
+    if (capabilities.length === 0) {
+      res.status(400).json({ success: false, error: { code: 'NO_CAPABILITIES', message: 'Declare at least one capability or install a skill that provides one' } });
+      return;
+    }
+
+    const agent = await deployAgent({
+      ...deployParams,
+      capabilities,
+      skills: skills.length ? skills : undefined,
+    } as Parameters<typeof deployAgent>[0]);
+
+    // Popularity counters — best-effort, never blocks the deploy.
+    for (const s of skills) void skillStore.incrementInstallCount(s.skillId).catch(() => {});
+
     res.status(201).json({ success: true, data: strip(agent) });
   } catch (err) {
     // deployAgent can now throw (e.g. a bad ownerPublicKey that fails ECIES wrap);
@@ -646,6 +685,69 @@ agentsRouter.delete('/:id/services/:serviceId', requireAuth, async (req: AuthReq
       return;
     }
     res.json({ success: true, data: { deleted: true } });
+  } catch (err) { next(err); }
+});
+
+// ── Skills (install/remove — Phase 1 of the skills system) ──────────────────
+// Deliberately NOT part of the generic PATCH: a stale client resending the
+// whole form could silently wipe skills (the documented PATCH hazard in
+// agentRunner.updateAgent). Dedicated verbs keep installs additive/auditable.
+
+// POST /api/v1/agents/:id/skills  { slug } — install one skill (snapshot).
+agentsRouter.post('/:id/skills', requireAuth, async (req: AuthRequest, res, next) => {
+  try {
+    const agent = await authorizeOwner(req, res, req.params.id);
+    if (!agent) return;
+    const { slug } = z.object({ slug: z.string().regex(/^[a-z0-9][a-z0-9-]{1,62}$/) }).parse(req.body);
+    const row = await skillStore.getSkillBySlug(slug);
+    // Private drafts are installable by their author only; 404 (not 403) so
+    // draft existence isn't probeable.
+    const callerAddrs = [req.user?.address, ...(req.user?.addresses ?? [])]
+      .filter((a): a is string => typeof a === 'string').map((a) => a.toLowerCase());
+    if (!row || (!row.is_public && !callerAddrs.includes(row.author_address))) {
+      res.status(404).json({ success: false, error: { code: 'SKILL_NOT_FOUND', message: `No installable skill "${slug}"` } });
+      return;
+    }
+    if (agent.skills?.some((s) => s.slug === row.slug)) {
+      res.status(409).json({ success: false, error: { code: 'ALREADY_INSTALLED', message: 'This skill is already installed — remove it first to update to a newer version' } });
+      return;
+    }
+    const snapshot = buildInstalledSkill(row);
+    const skills: InstalledSkill[] = [...(agent.skills ?? []), snapshot];
+    assertComposedSizeOk(agent.instructions, skills);
+    const capabilities = [...new Set([...(agent.capabilities ?? []), ...snapshot.capabilities])] as AgentCapability[];
+    const updated = await updateAgent(agent.id, { skills, capabilities });
+    void skillStore.incrementInstallCount(row.id).catch(() => {});
+    res.json({
+      success: true,
+      data: {
+        agent: strip(updated),
+        // A running worker keeps its spawn-time composition — the new skill
+        // takes effect on the next (re)start.
+        requiresRestart: agent.status === 'running',
+      },
+    });
+  } catch (err) { next(err); }
+});
+
+// DELETE /api/v1/agents/:id/skills/:slug — remove an installed skill.
+// Capabilities are NOT auto-shrunk: they may have been declared manually and
+// removing routing tags behind the owner's back could strand matching.
+agentsRouter.delete('/:id/skills/:slug', requireAuth, async (req: AuthRequest, res, next) => {
+  try {
+    const agent = await authorizeOwner(req, res, req.params.id);
+    if (!agent) return;
+    const before = agent.skills ?? [];
+    const skills = before.filter((s) => s.slug !== req.params.slug);
+    if (skills.length === before.length) {
+      res.status(404).json({ success: false, error: { code: 'NOT_INSTALLED', message: 'This skill is not installed on the agent' } });
+      return;
+    }
+    const updated = await updateAgent(agent.id, { skills });
+    res.json({
+      success: true,
+      data: { agent: strip(updated), requiresRestart: agent.status === 'running' },
+    });
   } catch (err) { next(err); }
 });
 

@@ -21,9 +21,14 @@ export async function getPool(): Promise<pg.Pool> {
     // without an explicitly configured CA — forcing sslmode=verify-full made
     // every query fail. Connect over TLS without CA verification (the semantics
     // of sslmode=require), which is the standard Neon + node-postgres setup.
+    //
+    // A local Postgres (dev/CI) usually has no SSL — honor an explicit
+    // `sslmode=disable` in the connection string so `DATABASE_URL=…?sslmode=disable`
+    // connects plaintext. Neon URLs never carry that, so prod is unaffected.
+    const sslDisabled = /[?&]sslmode=disable\b/.test(config.databaseUrl);
     pool = new Pool({
       connectionString: config.databaseUrl,
-      ssl: { rejectUnauthorized: false },
+      ssl: sslDisabled ? false : { rejectUnauthorized: false },
     });
   }
 
@@ -294,6 +299,70 @@ const migrations: Array<{ id: number; name: string; sql: string }> = [
       CREATE INDEX IF NOT EXISTS idx_services_agent ON agent_services(agent_address);
       CREATE INDEX IF NOT EXISTS idx_services_owner ON agent_services(owner_address);
       CREATE INDEX IF NOT EXISTS idx_services_active ON agent_services(active) WHERE active = true;
+    `,
+  },
+  {
+    id: 13,
+    name: 'agent_skills',
+    sql: `
+      CREATE TABLE IF NOT EXISTS agent_skills (
+        id SERIAL PRIMARY KEY,
+        slug TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL CHECK (char_length(name) BETWEEN 3 AND 80),
+        description TEXT NOT NULL DEFAULT '',
+        version TEXT NOT NULL DEFAULT '1.0.0',
+        author_address TEXT NOT NULL,
+        instructions TEXT NOT NULL,
+        tools JSONB NOT NULL DEFAULT '[]',
+        secret_refs JSONB NOT NULL DEFAULT '[]',
+        capabilities TEXT[] NOT NULL DEFAULT '{}',
+        source TEXT NOT NULL DEFAULT 'local' CHECK (source IN ('local','skillmd','mcp','openapi')),
+        is_public BOOLEAN NOT NULL DEFAULT false,
+        install_count INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_skills_author ON agent_skills(author_address);
+      CREATE INDEX IF NOT EXISTS idx_skills_public ON agent_skills(is_public) WHERE is_public = true;
+      CREATE INDEX IF NOT EXISTS idx_skills_caps ON agent_skills USING GIN (capabilities);
+    `,
+  },
+  {
+    id: 14,
+    name: 'deployed_agents_skills',
+    sql: `
+      ALTER TABLE deployed_agents ADD COLUMN IF NOT EXISTS skills JSONB NOT NULL DEFAULT '[]';
+    `,
+  },
+  {
+    id: 15,
+    name: 'skill_stats',
+    sql: `
+      CREATE TABLE IF NOT EXISTS skill_stats (
+        agent_address TEXT NOT NULL,
+        capability TEXT NOT NULL,
+        tasks_completed INTEGER NOT NULL DEFAULT 0,
+        tasks_failed INTEGER NOT NULL DEFAULT 0,
+        last_task_at TIMESTAMPTZ,
+        PRIMARY KEY (agent_address, capability)
+      );
+    `,
+  },
+  {
+    id: 16,
+    name: 'repair_retired_agent_models',
+    sql: `
+      -- claude-3-haiku-20240307 was retired by Anthropic on 2026-04-19; every
+      -- call 404s. claude-haiku-4-5 is the documented drop-in replacement.
+      UPDATE deployed_agents
+        SET model = 'claude-haiku-4-5', updated_at = NOW()
+        WHERE provider = 'anthropic' AND model = 'claude-3-haiku-20240307';
+      -- 'claude-sonnet-4-7' never existed (hand-typed at deploy; model was only
+      -- validated as a non-empty string). Map to the current Sonnet.
+      UPDATE deployed_agents
+        SET model = 'claude-sonnet-5', updated_at = NOW()
+        WHERE provider = 'anthropic' AND model = 'claude-sonnet-4-7';
     `,
   },
 ];

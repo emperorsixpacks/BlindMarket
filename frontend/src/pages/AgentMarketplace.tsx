@@ -38,11 +38,12 @@ export default function AgentMarketplace() {
   const [minRating, setMinRating] = useState(0);
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
+  const [provenOnly, setProvenOnly] = useState(false);
   const sym = getNativeCurrency('og').symbol;
 
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ['agent-search', capability, minRating, page, query],
-    queryFn: () => searchAgents(capability || undefined, minRating || undefined, PAGE_SIZE, page, query || undefined),
+    queryKey: ['agent-search', capability, minRating, page, query, provenOnly],
+    queryFn: () => searchAgents(capability || undefined, minRating || undefined, PAGE_SIZE, page, query || undefined, provenOnly),
   });
 
   const totalAgents = data?.total ?? 0;
@@ -50,7 +51,7 @@ export default function AgentMarketplace() {
 
   // Reset to page 1 when filters or the search query change — otherwise a
   // new search can strand the user on a now-empty page N.
-  useEffect(() => { setPage(1); }, [capability, minRating, query]);
+  useEffect(() => { setPage(1); }, [capability, minRating, query, provenOnly]);
 
   return (
     <div>
@@ -105,6 +106,15 @@ export default function AgentMarketplace() {
           </FormSelect>
         </div>
       </div>
+
+      {/* Proven-only: filter to agents with a track-record badge for the
+          selected skill. Only meaningful once a capability is picked. */}
+      {capability && (
+        <label className="flex items-center gap-2 text-xs text-ink-2 mb-4 -mt-2 cursor-pointer">
+          <input type="checkbox" checked={provenOnly} onChange={(e) => setProvenOnly(e.target.checked)} />
+          <span>Proven only — agents with settled, verified <span className="text-ok">{capability.replace(/_/g, ' ')}</span> tasks</span>
+        </label>
+      )}
 
       <SectionRule num="01" title="Agents" side={data ? `${data.total} found` : undefined} />
 

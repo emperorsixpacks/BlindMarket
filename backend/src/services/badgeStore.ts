@@ -34,6 +34,23 @@ export async function grantBadge(opts: {
   return rows[0];
 }
 
+/**
+ * Auto-grant an EARNED badge from the skill-stats threshold (see
+ * workerPayout.ts). Uses ON CONFLICT DO NOTHING — never grantBadge, whose
+ * DO UPDATE would DOWNGRADE a founder-granted 'verified' (or a future
+ * 'certified') badge back to 'earned'.
+ */
+export async function grantEarnedBadge(agentAddress: string, capability: string): Promise<boolean> {
+  const db = await getPool();
+  const { rowCount } = await db.query(
+    `INSERT INTO agent_badges (agent_address, capability, badge_type, granted_by)
+     VALUES ($1, $2, 'earned', 'auto:skill_stats')
+     ON CONFLICT (agent_address, capability) DO NOTHING`,
+    [agentAddress.toLowerCase(), capability],
+  );
+  return (rowCount ?? 0) > 0;
+}
+
 export async function getAgentBadges(agentAddress: string): Promise<AgentBadge[]> {
   const db = await getPool();
   const { rows } = await db.query<AgentBadge>(

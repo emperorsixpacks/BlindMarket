@@ -66,13 +66,18 @@ export async function scoreAgent(
   const overlap = requiredCapabilities.filter((c) => effectiveCaps.includes(c));
   const capabilityOverlap = overlap.length;
 
-  // 2. Badge bonus: +2 per required cap that has a verified badge
+  // 2. Badge bonus, weighted by provenance: founder-reviewed 'verified' (and
+  // future 'certified') +2.0 per required cap; auto-'earned' (5+ settled
+  // completions via skill_stats) +1.0 — real proof, but founder review stays
+  // the stronger signal.
   let badgeScore = 0;
   if (capabilityOverlap > 0) {
     const badges = await badgeStore.getAgentBadges(addr);
-    const badgedCaps = new Set(badges.map((b) => b.capability));
+    const badgeTypeByCap = new Map(badges.map((b) => [b.capability, b.badge_type]));
     for (const cap of overlap) {
-      if (badgedCaps.has(cap)) badgeScore += 2.0;
+      const type = badgeTypeByCap.get(cap);
+      if (type === 'earned') badgeScore += 1.0;
+      else if (type) badgeScore += 2.0;
     }
   }
 
