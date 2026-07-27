@@ -14,6 +14,7 @@ import * as serviceStore from './serviceStore.js';
 import * as skillStatsStore from './skillStatsStore.js';
 import * as badgeStore from './badgeStore.js';
 import * as a2aStore from './a2aStore.js';
+import * as semanticMatch from './semanticMatch.js';
 import { redis } from './redis.js';
 
 // Earned-badge threshold: N settled completions per (agent, capability) with a
@@ -184,6 +185,9 @@ export async function recordWorkerPayout(
       console.warn(`[a2a] skill-stats credit failed for ${taskHash.slice(0, 10)}…:`, (statsErr as Error).message);
     }
 
+    // Shadow measurement (semantic matching Phase 1): task settled. Best-effort.
+    void semanticMatch.recordShadowOutcome(taskHash, { settled: true });
+
     // On-chain reputation is updated by BlindEscrow internally when
     // completeVerification → BlindReputation.rate() fires.
   } catch (err) {
@@ -225,6 +229,8 @@ export async function recordWorkerDispute(taskHash: string, executorAddr: string
     } catch (statsErr) {
       console.warn(`[a2a] skill-stats failure record failed for ${taskHash.slice(0, 10)}…:`, (statsErr as Error).message);
     }
+    // Shadow measurement: task failed/disputed. Best-effort.
+    void semanticMatch.recordShadowOutcome(taskHash, { settled: false });
   } catch (err) {
     console.warn(
       `[a2a] recordWorkerDispute failed for ${taskHash.slice(0, 10)}… executor=${executorAddr}:`,

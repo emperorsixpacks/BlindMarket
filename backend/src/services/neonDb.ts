@@ -394,6 +394,32 @@ const migrations: Array<{ id: number; name: string; sql: string }> = [
         ON task_embeddings USING hnsw (embedding vector_cosine_ops);
     `,
   },
+  {
+    // Semantic matching (Phase 1): SHADOW log — for every indexed task with
+    // routing text, record how semantic KNN would have ranked agents vs the
+    // capability-tag ranking, then fill in who actually accepted and whether
+    // it settled. This is pure measurement (nothing reads it for routing);
+    // the tuning loop compares the two rankings against real outcomes until
+    // semantic is provably better ("flip-ready").
+    id: 18,
+    name: 'match_shadow_log',
+    sql: `
+      CREATE TABLE IF NOT EXISTS match_shadow_log (
+        task_hash TEXT PRIMARY KEY,
+        routing_text TEXT NOT NULL,
+        embedding_model TEXT NOT NULL,
+        semantic_topk JSONB NOT NULL DEFAULT '[]',
+        tag_topk JSONB NOT NULL DEFAULT '[]',
+        required_capabilities TEXT[] NOT NULL DEFAULT '{}',
+        accepted_by TEXT,
+        settled BOOLEAN,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_shadow_created ON match_shadow_log(created_at);
+    `,
+  },
 ];
 
 async function runMigrations(p: pg.Pool): Promise<void> {
