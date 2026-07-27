@@ -26,6 +26,8 @@ vi.mock('./agentScorer.js', () => ({
     if (t === null || !a.minReward) return true;
     try { return BigInt(a.minReward) <= t; } catch { return true; }
   },
+  hasAllCapabilities: (a: { capabilities: string[] }, req: string[]) =>
+    req.every((c) => a.capabilities.includes(c)),
 }));
 vi.mock('./agentStore.js', () => ({ getAgent: vi.fn() }));
 vi.mock('./agentEmbedding.js', () => ({ buildAgentDoc: vi.fn() }));
@@ -246,6 +248,19 @@ describe('semanticCascadeRanking (Phase 2 flip — cascade offer queue)', () => 
       rootHash: '0xroot',
       wrappedKeys: { '0xbbb': 'eciesblob' },
     });
+    expect(out?.map((e) => e.address)).toEqual(['0xbbb']);
+  });
+
+  it('with a custody blob, keeps only slice-holders or self-heal-capable candidates (registered publicKey)', async () => {
+    arm();
+    vi.mocked(getAgent).mockImplementation(async (addr: string) =>
+      ({ ...(agentRow(addr) as Record<string, unknown>), publicKey: addr === '0xbbb' ? '04abc' : undefined }) as never);
+    const out = await semanticCascadeRanking({
+      ...meta,
+      rootHash: '0xroot',
+      keyCustodyBlob: { keyId: 'k1', blob: 'aa' },
+    });
+    // 0xaaa has no slice and no publicKey → accept's re-wrap would 403 → dropped.
     expect(out?.map((e) => e.address)).toEqual(['0xbbb']);
   });
 

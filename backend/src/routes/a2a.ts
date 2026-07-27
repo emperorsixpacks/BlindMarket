@@ -21,7 +21,7 @@ import { redis } from '../services/redis.js';
 import { ethers } from 'ethers';
 import type { AuthRequest, ApiResponse, AgentCapability } from '../types.js';
 import { AGENT_CAPABILITIES } from '../types.js';
-import { rankAgents, pickExplorationAgent } from '../services/agentScorer.js';
+import { rankAgents, pickExplorationAgent, hasAllCapabilities } from '../services/agentScorer.js';
 import { emitTaskOffer, emitTaskAvailable } from '../services/socket.js';
 import { EXPIRY_GRACE_SEC } from '../constants.js';
 import { config } from '../config.js';
@@ -402,7 +402,7 @@ a2aRouter.post('/tasks/:id/accept', requireAuth, async (req: AuthRequest, res, n
 
     // ── 3. Capability match (more expensive — do after cheap checks) ──────────
     if (meta.requiredCapabilities.length > 0) {
-      const hasAll = meta.requiredCapabilities.every((c) => agent.capabilities.includes(c));
+      const hasAll = hasAllCapabilities(agent, meta.requiredCapabilities);
       if (!hasAll) {
         console.warn(`[a2a] accept: capability mismatch for ${taskId}: agent has [${agent.capabilities.join(',')}], must have ALL of [${meta.requiredCapabilities.join(',')}]`);
         await a2aStore.logAcceptAttempt(taskId, address, 'rejected_precheck');
@@ -730,8 +730,7 @@ a2aRouter.post('/tasks/:id/bid', requireAuth, async (req: AuthRequest, res, next
       );
     }
     if (meta.requiredCapabilities.length > 0) {
-      const hasAll = meta.requiredCapabilities.every((c) => agent.capabilities.includes(c));
-      if (!hasAll) {
+      if (!hasAllCapabilities(agent, meta.requiredCapabilities)) {
         throw new AppError(
           403,
           'CAPABILITY_MISMATCH',
@@ -1248,17 +1247,35 @@ a2aRouter.post('/tasks/index', requireAuth, async (req: AuthRequest, res, next) 
       routingSummary: data.routingSummary,
     });
 
+    // The meta slice both the shadow record and the routing decision read —
+    // built ONCE so the shadow log's routing text can never diverge from what
+    // the cascade actually ranked on.
+    const routingMeta: semanticMatch.RoutingMeta = {
+      requiredCapabilities: requiredCaps,
+      publicBrief: isPublic ? data.publicBrief : undefined,
+      routingSummary: data.routingSummary,
+      targetExecutor,
+      // Accept-gate mirror inputs: lets the semantic ranking skip agents whose
+      // /accept is guaranteed to 403 (poster, verifier, missing wrapped slice
+      // on a sealed no-custody task) instead of burning offer windows on them.
+      posterAddress: address,
+      verifierAddress: data.verifierAddress?.toLowerCase(),
+      wrappedKeys: mergedWrappedKeys,
+      privacy: isPublic ? 'public' : undefined,
+      rootHash: data.rootHash,
+      skipKeyWrap: existingMeta?.skipKeyWrap,
+      keyCustodyBlob: data.keyCustodyBlob,
+    };
+
     // Semantic matching (Phase 1 SHADOW): embed the task's public routing text
     // and record how semantic KNN would have ranked agents vs the live tag
     // ranking. Pure measurement — fire-and-forget, never affects indexing.
     void semanticMatch.recordMatchShadow({
+      ...routingMeta,
       taskId: taskHash,
       targetExecutorType: 'agent',
       verificationMode: data.verificationMode ?? 'manual',
-      requiredCapabilities: requiredCaps,
-      publicBrief: isPublic ? data.publicBrief : undefined,
-      routingSummary: data.routingSummary,
-    } as Parameters<typeof semanticMatch.recordMatchShadow>[0]);
+    });
 
     console.log(
       `[a2a] indexed taskHash=${taskHash.slice(0, 10)}… → onChainId=${onChainTaskId} poster=${address}`,
@@ -1282,22 +1299,6 @@ a2aRouter.post('/tasks/index', requireAuth, async (req: AuthRequest, res, next) 
     // reaches the pinned agent immediately and the accept gate keeps everyone
     // else out. (Pinned+capped tasks previously entered the tag cascade —
     // that was this same lockout.)
-    const routingMeta: semanticMatch.RoutingMeta = {
-      requiredCapabilities: requiredCaps,
-      publicBrief: isPublic ? data.publicBrief : undefined,
-      routingSummary: data.routingSummary,
-      targetExecutor,
-      // Accept-gate mirror inputs: lets the semantic ranking skip agents whose
-      // /accept is guaranteed to 403 (poster, verifier, missing wrapped slice
-      // on a sealed no-custody task) instead of burning offer windows on them.
-      posterAddress: address,
-      verifierAddress: data.verifierAddress?.toLowerCase(),
-      wrappedKeys: mergedWrappedKeys,
-      privacy: isPublic ? 'public' : undefined,
-      rootHash: data.rootHash,
-      skipKeyWrap: existingMeta?.skipKeyWrap,
-      keyCustodyBlob: data.keyCustodyBlob,
-    };
     const semanticEligible = semanticMatch.semanticRoutingEligible(routingMeta);
     if (!config.cascadeEnabled || targetExecutor || (requiredCaps.length === 0 && !semanticEligible)) {
       emitTaskAvailable(taskHash, broadcastMeta(requiredCaps));

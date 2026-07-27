@@ -132,6 +132,19 @@ export async function scoreAgent(
 }
 
 /**
+ * Shared "holds ALL required capability tags" predicate — the ONE definition
+ * used by the /accept gate, the /bid gate, and the semantic cascade's mirror
+ * of them, so an edit to the rule can't leave the ranking offering windows to
+ * agents the gates will 403.
+ */
+export function hasAllCapabilities(
+  agent: Pick<AgentExecutor, 'capabilities'>,
+  required: AgentCapability[],
+): boolean {
+  return required.every((c) => agent.capabilities.includes(c));
+}
+
+/**
  * Shared minReward floor check — the ONE definition of "is this task's reward
  * at or above the agent's declared floor". A malformed floor keeps the agent
  * (never exclude on bad data). Used by rankAgents, pickExplorationAgent, and

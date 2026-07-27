@@ -1,7 +1,7 @@
 import { getPool } from './neonDb.js';
 import { config } from '../config.js';
 import { embed, toVectorLiteral, embeddingModelId, EMBED_FETCH_TIMEOUT_MS } from './embeddingService.js';
-import { rankAgents, meetsRewardFloor, dominanceMultiplier } from './agentScorer.js';
+import { rankAgents, meetsRewardFloor, dominanceMultiplier, hasAllCapabilities } from './agentScorer.js';
 import { buildAgentDoc } from './agentEmbedding.js';
 import * as agentStore from './agentStore.js';
 import type { CascadeEntry } from './a2aStore.js';
@@ -193,11 +193,12 @@ function toCascadeScore(c: SemanticCandidate | RerankedCandidate): number {
  * during the transition, tags posted on a task remain a hard constraint even
  * though ranking is semantic; the tag retirement phase removes this), the
  * poster themselves (SELF_ACCEPT), the designated verifier (IS_VERIFIER),
- * candidates with no wrapped brief slice on a sealed task with no custody
- * blob (NEEDS_WRAP with no self-heal path; when a custody blob exists we
- * optimistically keep them — accept re-wraps server-side unless the custody
- * key rotated), agents whose declared minReward floor exceeds the task's
- * reward, and candidates whose registration row has vanished since embedding.
+ * candidates who can't decrypt a sealed brief (NEEDS_WRAP: no wrapped slice,
+ * and no usable custody self-heal — which needs both a custody blob and the
+ * agent's registered publicKey to re-wrap to; a blob sealed to a since-rotated
+ * key is undetectable at rank time and stays optimistic), agents whose
+ * declared minReward floor exceeds the task's reward, and candidates whose
+ * registration row has vanished since embedding.
  *
  * The tag era's dominance cap also applies: an agent past the rolling
  * assignment cap gets the same soft score taper, so topping the similarity
@@ -223,11 +224,11 @@ export async function semanticCascadeRanking(
     const requiredCaps = (meta.requiredCapabilities ?? []) as AgentCapability[];
     const posterLc = meta.posterAddress?.toLowerCase();
     const verifierLc = meta.verifierAddress?.toLowerCase();
-    // A sealed task with no custody blob can only be accepted by agents that
-    // already hold a wrapped slice — everyone else 403s NEEDS_WRAP (they can
-    // still /bid via broadcast, exactly as before the flip).
-    const needsSlice =
-      meta.privacy !== 'public' && !!meta.rootHash && !meta.skipKeyWrap && !meta.keyCustodyBlob;
+    // A sealed brief is only acceptable to agents holding a wrapped slice, or
+    // — when a custody blob exists — agents accept can re-wrap to, which
+    // requires their registered publicKey. Everyone else 403s NEEDS_WRAP
+    // (they can still /bid via broadcast, exactly as before the flip).
+    const sealed = meta.privacy !== 'public' && !!meta.rootHash && !meta.skipKeyWrap;
     let taskReward: bigint | null = null;
     try { taskReward = taskRewardWei ? BigInt(taskRewardWei) : null; } catch { taskReward = null; }
     const entries: CascadeEntry[] = [];
@@ -237,10 +238,10 @@ export async function semanticCascadeRanking(
       const addrLc = ranked[i].address.toLowerCase();
       if (posterLc && addrLc === posterLc) continue;   // SELF_ACCEPT
       if (verifierLc && addrLc === verifierLc) continue; // IS_VERIFIER
-      if (needsSlice && !meta.wrappedKeys?.[addrLc]) continue; // NEEDS_WRAP
+      if (sealed && !meta.wrappedKeys?.[addrLc] && (!meta.keyCustodyBlob || !agent.publicKey)) continue; // NEEDS_WRAP
       // Mirror of the /accept CAPABILITY_MISMATCH gate (full capability set,
       // not preferredCapabilities — accept checks the full set).
-      if (requiredCaps.length > 0 && !requiredCaps.every((c) => agent.capabilities.includes(c))) continue;
+      if (requiredCaps.length > 0 && !hasAllCapabilities(agent, requiredCaps)) continue;
       if (!meetsRewardFloor(agent, taskReward)) continue;
       entries.push({
         address: ranked[i].address,
