@@ -18,9 +18,9 @@ import { redis } from '../services/redis.js';
 import { ethers } from 'ethers';
 import type { AuthRequest, ApiResponse, AgentCapability } from '../types.js';
 import { AGENT_CAPABILITIES } from '../types.js';
-import { rankAgents } from '../services/agentScorer.js';
+import { rankAgents, pickExplorationAgent } from '../services/agentScorer.js';
 import { emitTaskOffer, emitTaskAvailable } from '../services/socket.js';
-import { EXPIRY_GRACE_SEC } from '../services/a2aExpirySweep.js';
+import { EXPIRY_GRACE_SEC } from '../constants.js';
 import { config } from '../config.js';
 import * as serviceStore from '../services/serviceStore.js';
 import { consumePendingCost } from '../services/railwaySandbox.js';
@@ -277,26 +277,31 @@ a2aRouter.get('/tasks', async (req, res, next) => {
  * Accept a task (capability match + reputation gate).
  */
 a2aRouter.post('/tasks/:id/accept', requireAuth, async (req: AuthRequest, res, next) => {
-  try {
-    const taskId = req.params.id as string;
-    const address = req.user!.address;
-    console.log(`[a2a] POST /accept: taskId=${taskId}, executor=${address}`);
+  const taskId = req.params.id as string;
+  const address = req.user!.address;
+  const addrLc = address.toLowerCase();
+  let lockAcquired = false;
+  console.log(`[a2a] POST /accept: taskId=${taskId}, executor=${address}`);
 
+  try {
+    // ── 1. Redis lock (first gate — serialises concurrent /accept calls) ──────
+    // Whoever acquires the lock proceeds; everyone else is rejected immediately,
+    // before touching Postgres or doing capability checks. Lock is per-task_id
+    // so agents racing for different tasks never block each other.
+    lockAcquired = await a2aStore.acquireAcceptLock(taskId, address);
+    if (!lockAcquired) {
+      await a2aStore.logAcceptAttempt(taskId, address, 'rejected_locked');
+      throw new AppError(409, 'ACCEPT_LOCKED', 'Another agent is currently accepting this task');
+    }
+
+    // ── 2. Cheap identity checks (reordered — cheapest first) ────────────────
     const meta = await a2aStore.getMeta(taskId);
     if (!meta) {
-      console.warn(`[a2a] accept: task meta not found for ${taskId}`);
+      await a2aStore.logAcceptAttempt(taskId, address, 'rejected_precheck');
       throw new AppError(404, 'NOT_FOUND', 'Task not found or not A2A-enabled');
     }
 
-    // Deadline pre-check. The authoritative gate stays on-chain
-    // (marketplaceAssign reverts DeadlineReached), but when meta carries the
-    // deadline we can refuse before burning the CAS + a settle round-trip.
-    // The refusal is cheap and reversible, so it uses no grace margin — but
-    // the terminal off-chain close only happens once clearly past the
-    // boundary (same grace as the sweep), so a server clock running a few
-    // seconds ahead of block.timestamp can never close a task the contract
-    // would still assign. Inside the grace window the worst case is the
-    // pre-batch-4 behaviour: the on-chain revert decides.
+    // Deadline pre-check (cheap — pure arithmetic on meta).
     if (meta.deadline) {
       const nowSec = Math.floor(Date.now() / 1000);
       if (nowSec >= meta.deadline) {
@@ -304,6 +309,7 @@ a2aRouter.post('/tasks/:id/accept', requireAuth, async (req: AuthRequest, res, n
         if (nowSec >= meta.deadline + EXPIRY_GRACE_SEC) {
           try { await a2aStore.tryExpire(taskId, 'expired'); } catch { /* best-effort */ }
         }
+        await a2aStore.logAcceptAttempt(taskId, address, 'rejected_precheck');
         throw new AppError(
           409,
           'TASK_EXPIRED',
@@ -312,27 +318,37 @@ a2aRouter.post('/tasks/:id/accept', requireAuth, async (req: AuthRequest, res, n
       }
     }
 
-    // Check agent is registered + capability match BEFORE the CAS, so we don't
-    // burn the open→accepted transition on a caller who'd be 403'd anyway.
+    // Poster self-accept (cheap — string compare on meta).
+    if (meta.posterAddress && meta.posterAddress.toLowerCase() === addrLc) {
+      await a2aStore.logAcceptAttempt(taskId, address, 'rejected_precheck');
+      throw new AppError(403, 'SELF_ACCEPT', 'You posted this task — a poster cannot also execute it');
+    }
+
+    // Designated verifier can't also execute.
+    if (meta.verifierAddress && meta.verifierAddress.toLowerCase() === addrLc) {
+      await a2aStore.logAcceptAttempt(taskId, address, 'rejected_precheck');
+      throw new AppError(403, 'IS_VERIFIER', 'You are the designated verifier for this task and cannot also execute it');
+    }
+
+    // Registered agent check.
     const agent = await agentStore.getAgent(address);
     if (!agent) {
-      console.warn(`[a2a] accept: agent not registered: ${address}`);
+      await a2aStore.logAcceptAttempt(taskId, address, 'rejected_precheck');
       throw new AppError(403, 'NOT_REGISTERED', 'Register as an agent executor first');
     }
-    // rent-your-agent: a per-call "Use now" invocation is PINNED to one agent.
-    // Reject any other executor before the CAS, so they don't burn the
-    // open→accepted transition on a task only the target can decrypt anyway.
-    if (meta.targetExecutor && meta.targetExecutor.toLowerCase() !== address.toLowerCase()) {
+
+    // Rent-your-agent: pinned to one agent.
+    if (meta.targetExecutor && meta.targetExecutor.toLowerCase() !== addrLc) {
+      await a2aStore.logAcceptAttempt(taskId, address, 'rejected_precheck');
       throw new AppError(403, 'NOT_TARGET_EXECUTOR', 'This task is reserved for a specific agent');
     }
+
+    // ── 3. Capability match (more expensive — do after cheap checks) ──────────
     if (meta.requiredCapabilities.length > 0) {
-      // Match the PostTask UI copy: "an executor agent matches only if it has ALL
-      // of them". Required caps are strict requirements (superset match): the
-      // agent's capability set must include every cap the task lists — a worker
-      // with only summarization can NOT take a task tagged web_research+summarization.
       const hasAll = meta.requiredCapabilities.every((c) => agent.capabilities.includes(c));
       if (!hasAll) {
         console.warn(`[a2a] accept: capability mismatch for ${taskId}: agent has [${agent.capabilities.join(',')}], must have ALL of [${meta.requiredCapabilities.join(',')}]`);
+        await a2aStore.logAcceptAttempt(taskId, address, 'rejected_precheck');
         throw new AppError(
           403,
           'CAPABILITY_MISMATCH',
@@ -341,42 +357,11 @@ a2aRouter.post('/tasks/:id/accept', requireAuth, async (req: AuthRequest, res, n
       }
     }
 
-    // A poster-designated verifier cannot also execute the task it must judge —
-    // it would later be blocked at /verdict (SELF_VERIFICATION), trapping the
-    // escrow in awaiting_verification with no exit but the poster's claimTimeout.
-    // Refuse the accept up front.
-    if (meta.verifierAddress && meta.verifierAddress.toLowerCase() === address.toLowerCase()) {
-      throw new AppError(
-        403,
-        'IS_VERIFIER',
-        'You are the designated verifier for this task and cannot also execute it',
-      );
-    }
-
-    // A poster cannot execute their own task. Self-acceptance lets one wallet
-    // wash-trade reputation (rating itself per completed task) and recycle its
-    // own escrow minus the platform fee — marketplace numbers must stay net of
-    // self-dealing. posterAddress is absent only on pre-pivot legacy rows.
-    if (meta.posterAddress && meta.posterAddress.toLowerCase() === address.toLowerCase()) {
-      throw new AppError(403, 'SELF_ACCEPT', 'You posted this task — a poster cannot also execute it');
-    }
-
-    const addrLc = address.toLowerCase();
+    // ── 4. Wrapped key / custody checks ──────────────────────────────────────
     const hasOwnSlice = !!meta.wrappedKeys?.[addrLc];
-    // Self-heal is possible when the task is encrypted, this caller has no slice
-    // yet, the poster sealed the key to custody, a custody backend is live, AND
-    // the blob is sealed to the key that backend actually holds. rewrap()
-    // hard-throws on any non-active keyId, so without the keyId check a task
-    // sealed to a rotated custody key passes this gate, wins the CAS, fails
-    // rewrap, gets released, and bounces open↔accepted forever. This is what
-    // lets a late joiner pick up the task with no poster present.
     const custodySvc = keyCustody.getKeyCustodyService();
     let activeCustodyKeyId: string | null = null;
     if (meta.keyCustodyBlob && custodySvc) {
-      // catch → null: a transient custody-backend error must read as
-      // "self-heal unavailable right now" (generic NEEDS_WRAP, retryable),
-      // NOT as a rotated key — the rotated diagnosis below tells the poster
-      // to re-wrap or cancel, and requires a successful key read to claim.
       activeCustodyKeyId = await custodySvc.getActiveKey().then((k) => k.keyId).catch(() => null);
     }
     const custodyKeyIsActive =
@@ -385,12 +370,6 @@ a2aRouter.post('/tasks/:id/accept', requireAuth, async (req: AuthRequest, res, n
       meta.keyCustodyBlob.keyId === activeCustodyKeyId;
     const canSelfHeal = !!meta.rootHash && !hasOwnSlice && custodyKeyIsActive;
 
-    // NEEDS_WRAP gate — refuse BEFORE the CAS so the open→accepted transition
-    // isn't burned on a caller who can't decrypt the brief. An encrypted task
-    // with no slice for this caller is only acceptable if we can self-heal from
-    // the key-custody blob (below). Otherwise the caller must /bid and wait for
-    // the poster's browser (or the posting agent's wrap loop) to ship a slice.
-    // Tasks with no rootHash (legacy / unencrypted) skip this entirely.
     if (meta.rootHash && !hasOwnSlice && !canSelfHeal && !meta.skipKeyWrap) {
       const custodyRotated =
         !!meta.keyCustodyBlob &&
@@ -400,6 +379,7 @@ a2aRouter.post('/tasks/:id/accept', requireAuth, async (req: AuthRequest, res, n
         `[a2a] accept: needs wrap for ${taskId}, agent=${address}` +
           (custodyRotated ? ` (custody blob keyId=${meta.keyCustodyBlob!.keyId} != active ${activeCustodyKeyId} — server-side re-wrap impossible)` : ''),
       );
+      await a2aStore.logAcceptAttempt(taskId, address, 'rejected_precheck');
       throw new AppError(
         403,
         'NEEDS_WRAP',
@@ -409,11 +389,9 @@ a2aRouter.post('/tasks/:id/accept', requireAuth, async (req: AuthRequest, res, n
       );
     }
 
-    // A keyless agent can never be re-wrapped to — refuse before the CAS. New
-    // registrations always carry a pubkey (enforced at /register), so this only
-    // guards pre-guardrail Redis rows.
     if (canSelfHeal && !agent.publicKey && !meta.skipKeyWrap) {
       console.warn(`[a2a] accept: self-heal blocked — agent ${address} has no public key`);
+      await a2aStore.logAcceptAttempt(taskId, address, 'rejected_precheck');
       throw new AppError(
         403,
         'NEEDS_WRAP',
@@ -421,47 +399,35 @@ a2aRouter.post('/tasks/:id/accept', requireAuth, async (req: AuthRequest, res, n
       );
     }
 
-    // Check for an exclusive offer. If one exists and it's for this caller,
-    // proceed to CAS. If one exists for a different caller, refuse — the
-    // best-fit agent should get first dibs. If no offer (expired or never
-    // created), fall through to open CAS race.
+    // Exclusive offer check.
     const offer = await a2aStore.getOffer(taskId);
     if (offer) {
-      if (offer.address.toLowerCase() !== address.toLowerCase()) {
+      if (offer.address.toLowerCase() !== addrLc) {
         console.warn(`[a2a] accept: offer belongs to ${offer.address}, caller is ${address}`);
+        await a2aStore.logAcceptAttempt(taskId, address, 'rejected_precheck');
         throw new AppError(
           409,
           'OFFER_HELD',
           'This task has been offered to a higher-scored agent; wait for the offer window to expire for CAS-race fallback',
         );
       }
-      // Caller holds the offer — they are the expected winner. Continue to CAS.
     }
 
-    // Atomic open→accepted via a Lua CAS. Two concurrent /accept requests can
-    // both pass an open-state read, so we serialise the transition itself on
-    // the Redis server. Loser gets 409, no on-chain side effect — preserves
-    // the invariant that the executor in Redis matches the one in the bridge
-    // tx (and thereby the on-chain t.worker).
-    //
-    // Idempotent path: if the caller is already the recorded executor (resume
-    // after restart), skip the CAS and re-confirm on-chain assignment.
+    // ── 5. Postgres/Lua CAS (durable state transition) ───────────────────────
+    // Idempotent path: if the caller is already the recorded executor, skip CAS.
     const currentState = await a2aStore.getState(taskId);
-    if (currentState?.executorAddress?.toLowerCase() === address.toLowerCase() &&
+    if (currentState?.executorAddress?.toLowerCase() === addrLc &&
         (currentState.status === 'accepted' || currentState.status === 'in_progress')) {
       console.log(`[a2a] accept: already accepted by ${address} for ${taskId} — re-confirming on-chain assignment`);
-      // Re-check on-chain assignment; the settleAssignment call is idempotent
-      // (alreadyAssigned returns success true).
       const reSettleResult = await settleAssignment(taskId, address);
       if (!reSettleResult.success) {
         if (reSettleResult.expired || reSettleResult.cancelled) {
+          await a2aStore.logAcceptAttempt(taskId, address, 'error');
           throw new AppError(409, 'TASK_EXPIRED', 'Task is no longer available on-chain.');
         }
+        await a2aStore.logAcceptAttempt(taskId, address, 'error');
         throw new AppError(503, 'SETTLEMENT_FAILED', `On-chain assignment re-check failed: ${reSettleResult.error}.`);
       }
-      // Return the same shape as a fresh accept so the caller doesn't need
-      // to distinguish fresh vs resumed. The wrapped key may have been
-      // persisted already; best-effort re-read from meta.
       const currentMeta = await a2aStore.getMeta(taskId);
       const wrappedKey = currentMeta?.wrappedKeys?.[addrLc];
       const body: ApiResponse = {
@@ -475,6 +441,7 @@ a2aRouter.post('/tasks/:id/accept', requireAuth, async (req: AuthRequest, res, n
           assignTxHash: reSettleResult.txHash,
         },
       };
+      await a2aStore.logAcceptAttempt(taskId, address, 'won');
       res.json(body);
       return;
     }
@@ -482,6 +449,7 @@ a2aRouter.post('/tasks/:id/accept', requireAuth, async (req: AuthRequest, res, n
     const accept = await a2aStore.tryAccept(taskId, address, new Date().toISOString());
     if (!accept.ok) {
       console.warn(`[a2a] accept: CAS lost for ${taskId}, currentStatus=${accept.currentStatus}`);
+      await a2aStore.logAcceptAttempt(taskId, address, 'lost_cas');
       throw new AppError(
         409,
         'NOT_OPEN',
@@ -529,7 +497,18 @@ a2aRouter.post('/tasks/:id/accept', requireAuth, async (req: AuthRequest, res, n
     // contract knows who to pay. The HTTP response waits for confirmation,
     // eliminating the redundant 12s sleep on the worker side.
     console.log(`[a2a] accept: CAS won for ${taskId}, awaiting on-chain settlement`);
+
+    // Gas-liveness deadline: if on-chain confirm doesn't arrive within
+    // SETTLEMENT_DEADLINE_TTL_S, the sweep reverts the task to 'open'.
+    await a2aStore.startSettlementDeadline(taskId);
+
     const settleResult = await settleAssignment(taskId, address);
+
+    // On-chain confirmed (or already settled) — clear the deadline.
+    if (settleResult.success) {
+      await a2aStore.clearSettlementDeadline(taskId);
+    }
+
     if (!settleResult.success) {
       // Deadline passed while the task was still Funded: TERMINAL. Do NOT
       // releaseToOpen — that would re-list the task for the next /accept to
@@ -616,6 +595,9 @@ a2aRouter.post('/tasks/:id/accept', requireAuth, async (req: AuthRequest, res, n
     };
     res.json(body);
 
+    // Log successful accept for audit trail.
+    await a2aStore.logAcceptAttempt(taskId, address, 'won').catch(() => {});
+
     // Bids are only needed until a task is assigned — drop the index now that it
     // is (best-effort; the addBid TTL is the backstop if this fails).
     bidsStore.clearBids(taskId).catch(() => {});
@@ -628,6 +610,12 @@ a2aRouter.post('/tasks/:id/accept', requireAuth, async (req: AuthRequest, res, n
   } catch (err) {
     console.error(`[a2a] accept failed for ${req.params.id}:`, (err as Error).message);
     next(err);
+  } finally {
+    // Always release the Redis lock — TTL is the backstop for crashes, not
+    // the primary release mechanism.
+    if (lockAcquired) {
+      await a2aStore.releaseAcceptLock(taskId).catch(() => {});
+    }
   }
 });
 
@@ -1090,34 +1078,86 @@ a2aRouter.post('/tasks/index', requireAuth, async (req: AuthRequest, res, next) 
       emitTaskAvailable(taskHash, requiredCaps.length > 0 ? { requiredCapabilities: requiredCaps } : {});
     } else if (requiredCaps.length > 0) {
       const taskRewardWei = onChainAmount;
-      rankAgents(requiredCaps, taskRewardWei).then((ranked) => {
-        if (ranked.length === 0) {
-          emitTaskAvailable(taskHash, { requiredCapabilities: requiredCaps });
+
+      // Cold-start: try the exploration slot first. If a new agent is picked,
+      // offer to them; if they pass or timeout, fall back to normal ranked flow.
+      const agentMode = existingMeta?.agentSelectionMode ?? 'merit';
+      pickExplorationAgent(requiredCaps, agentMode, taskRewardWei).then((explorationPick) => {
+        if (explorationPick) {
+          console.log(`[a2a] exploration slot: offering to new agent ${explorationPick.address} (score=${explorationPick.score})`);
+          const deadline = Date.now() + a2aStore.CASCADE_OFFER_MS;
+          a2aStore.setOffer(taskHash, {
+            address: explorationPick.address,
+            score: explorationPick.score,
+            expiresAt: deadline,
+          }).catch(() => {});
+          emitTaskOffer(explorationPick.address, taskHash, {
+            requiredCapabilities: requiredCaps,
+          }, explorationPick.score, deadline);
+          // If they pass/timeout, the cascade advance will run normal ranked flow.
+          scheduleCascadeAdvance(taskHash, requiredCaps, data.rootHash);
           return;
         }
-        const cascadeEntries = ranked.map((r) => ({
-          address: r.address,
-          score: r.score,
-          displayName: r.displayName,
-        }));
-        a2aStore.setCascade(taskHash, cascadeEntries).catch(() => {});
-        // Offer to position 0
-        const best = ranked[0];
-        const deadline = Date.now() + a2aStore.CASCADE_OFFER_MS;
-        a2aStore.setOffer(taskHash, {
-          address: best.address,
-          score: best.score,
-          expiresAt: deadline,
-        }).catch(() => {});
-        // rootHash deliberately omitted — unauthenticated WS room, see above.
-        emitTaskOffer(best.address, taskHash, {
-          requiredCapabilities: requiredCaps,
-        }, best.score, deadline);
-        // Schedule advancement after the per-position window
-        scheduleCascadeAdvance(taskHash, requiredCaps, data.rootHash);
+
+        // Normal ranked flow
+        rankAgents(requiredCaps, taskRewardWei).then((ranked) => {
+          if (ranked.length === 0) {
+            emitTaskAvailable(taskHash, { requiredCapabilities: requiredCaps });
+            return;
+          }
+          const cascadeEntries = ranked.map((r) => ({
+            address: r.address,
+            score: r.score,
+            displayName: r.displayName,
+          }));
+          a2aStore.setCascade(taskHash, cascadeEntries).catch(() => {});
+          // Offer to position 0
+          const best = ranked[0];
+          const deadline = Date.now() + a2aStore.CASCADE_OFFER_MS;
+          a2aStore.setOffer(taskHash, {
+            address: best.address,
+            score: best.score,
+            expiresAt: deadline,
+          }).catch(() => {});
+          // rootHash deliberately omitted — unauthenticated WS room, see above.
+          emitTaskOffer(best.address, taskHash, {
+            requiredCapabilities: requiredCaps,
+          }, best.score, deadline);
+          // Schedule advancement after the per-position window
+          scheduleCascadeAdvance(taskHash, requiredCaps, data.rootHash);
+        }).catch((err) => {
+          console.error(`[a2a] scoring/offer failed for ${taskHash.slice(0, 10)}…:`, (err as Error).message);
+          emitTaskAvailable(taskHash, { requiredCapabilities: requiredCaps });
+        });
       }).catch((err) => {
-        console.error(`[a2a] scoring/offer failed for ${taskHash.slice(0, 10)}…:`, (err as Error).message);
-        emitTaskAvailable(taskHash, { requiredCapabilities: requiredCaps });
+        console.error(`[a2a] exploration slot failed for ${taskHash.slice(0, 10)}…:`, (err as Error).message);
+        // Fallback: normal ranked flow
+        rankAgents(requiredCaps, taskRewardWei).then((ranked) => {
+          if (ranked.length === 0) {
+            emitTaskAvailable(taskHash, { requiredCapabilities: requiredCaps });
+            return;
+          }
+          const cascadeEntries = ranked.map((r) => ({
+            address: r.address,
+            score: r.score,
+            displayName: r.displayName,
+          }));
+          a2aStore.setCascade(taskHash, cascadeEntries).catch(() => {});
+          const best = ranked[0];
+          const deadline = Date.now() + a2aStore.CASCADE_OFFER_MS;
+          a2aStore.setOffer(taskHash, {
+            address: best.address,
+            score: best.score,
+            expiresAt: deadline,
+          }).catch(() => {});
+          emitTaskOffer(best.address, taskHash, {
+            requiredCapabilities: requiredCaps,
+          }, best.score, deadline);
+          scheduleCascadeAdvance(taskHash, requiredCaps, data.rootHash);
+        }).catch((fallbackErr) => {
+          console.error(`[a2a] fallback scoring/offer failed for ${taskHash.slice(0, 10)}…:`, (fallbackErr as Error).message);
+          emitTaskAvailable(taskHash, { requiredCapabilities: requiredCaps });
+        });
       });
     } else {
       emitTaskAvailable(taskHash, {});
