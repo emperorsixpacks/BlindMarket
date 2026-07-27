@@ -26,7 +26,15 @@ import * as THREE from 'three';
  * prefers-reduced-motion, pauses offscreen / when hidden, caps DPR at 2,
  * resizes via ResizeObserver, disposes everything on unmount.
  */
-export function AgentMesh({ className = '' }: { className?: string }) {
+export function AgentMesh({
+  className = '',
+  forceDark = false,
+}: {
+  className?: string;
+  /** Pin the scene to the dark palette regardless of the app theme — used by
+   * the marketing landing, whose hero is a fixed dark composition. */
+  forceDark?: boolean;
+}) {
   const mountRef = useRef<HTMLDivElement>(null);
   // Bumped whenever the theme flips, so the scene rebuilds with the new
   // palette/blending instead of staying stuck at its mount-time theme.
@@ -46,9 +54,11 @@ export function AgentMesh({ className = '' }: { className?: string }) {
 
     // ── Theme resolution ────────────────────────────────────────────
     const css = (name: string, fb: string) =>
-      getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fb;
+      forceDark
+        ? fb
+        : getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fb;
     const bgStr = css('--bb-bg', '#09090b');
-    const isDark = hexLuminance(bgStr) < 0.5;
+    const isDark = forceDark || hexLuminance(bgStr) < 0.5;
 
     const cream = new THREE.Color(css('--bb-cream', isDark ? '#f5efe0' : '#b8860b')); // task / work (the accent)
     const ink = new THREE.Color(css('--bb-ink', isDark ? '#fafaf9' : '#09090b'));     // globe dots + settlement
@@ -148,6 +158,14 @@ export function AgentMesh({ className = '' }: { className?: string }) {
     });
     group.add(new THREE.LineSegments(linkGeo, linkMat));
 
+    // Adjacency list — who each agent can hire directly. Used by the
+    // cursor-excite and burst behaviours below.
+    const neighbors: number[][] = Array.from({ length: NODE_COUNT }, () => []);
+    for (const [a, b] of edges) {
+      neighbors[a].push(b);
+      neighbors[b].push(a);
+    }
+
     // ── Outer dust shell (depth) ────────────────────────────────────
     const DUST = 260;
     const dustPos = new Float32Array(DUST * 3);
@@ -191,7 +209,7 @@ export function AgentMesh({ className = '' }: { className?: string }) {
     }
 
     // ── Ring-pulse pool — arrival flashes at receiving agents ───────
-    interface Pulse { sprite: THREE.Sprite; mat: THREE.SpriteMaterial; age: number; life: number; active: boolean; }
+    interface Pulse { sprite: THREE.Sprite; mat: THREE.SpriteMaterial; age: number; life: number; scaleMul: number; active: boolean; }
     const MAX_PULSES = 14;
     const pulses: Pulse[] = [];
     for (let i = 0; i < MAX_PULSES; i++) {
@@ -201,19 +219,28 @@ export function AgentMesh({ className = '' }: { className?: string }) {
       const sprite = new THREE.Sprite(mat);
       sprite.visible = false;
       group.add(sprite);
-      pulses.push({ sprite, mat, age: 0, life: 0.7, active: false });
+      pulses.push({ sprite, mat, age: 0, life: 0.7, scaleMul: 1, active: false });
     }
     const pulseOpacity = isDark ? 0.5 : 0.4;
 
-    const firePulse = (pos: THREE.Vector3, color: THREE.Color) => {
+    const firePulse = (pos: THREE.Vector3, color: THREE.Color, scaleMul = 1) => {
       const p = pulses.find((x) => !x.active);
       if (!p) return;
       p.active = true;
       p.age = 0;
+      p.scaleMul = scaleMul;
       p.mat.color.copy(color);
       p.sprite.position.copy(pos);
       p.sprite.visible = true;
     };
+
+    // ── Cursor-excite halo — the agent nearest your cursor lights up ─
+    const hoverMat = new THREE.SpriteMaterial({
+      map: dot, color: cream, transparent: true, depthWrite: false, blending, opacity: 0.95,
+    });
+    const hoverSprite = new THREE.Sprite(hoverMat);
+    hoverSprite.visible = false;
+    group.add(hoverSprite);
 
     const spawnPacket = (from: THREE.Vector3, to: THREE.Vector3, kind: 'task' | 'settle') => {
       const p = packets.find((x) => !x.active);
@@ -235,15 +262,35 @@ export function AgentMesh({ className = '' }: { className?: string }) {
       spawnPacket(nodes[from], nodes[to], 'task');
     };
 
-    // ── Pointer parallax ────────────────────────────────────────────
+    // A well-connected agent fans work out to several neighbours at once,
+    // with a bigger arrival flash — the scene's periodic "story beat".
+    const startBurst = () => {
+      const hubs: number[] = [];
+      for (let i = 0; i < NODE_COUNT; i++) if (neighbors[i].length >= 3) hubs.push(i);
+      if (!hubs.length) return;
+      const hub = hubs[(Math.random() * hubs.length) | 0];
+      const ns = [...neighbors[hub]].sort(() => Math.random() - 0.5).slice(0, 4);
+      ns.forEach((n) => spawnPacket(nodes[hub], nodes[n], 'task'));
+      firePulse(nodes[hub], cream, 2.2);
+    };
+
+    // ── Pointer — parallax lean + node excitation ───────────────────
+    const clamp = (v: number, m: number) => Math.max(-m, Math.min(m, v));
     const pointer = { x: 0, y: 0 };
     const targetP = { x: 0, y: 0 };
+    let hasPointer = false;
     const onPointerMove = (e: PointerEvent) => {
+      hasPointer = true;
       const rect = mount.getBoundingClientRect();
-      targetP.x = ((e.clientX - rect.left) / rect.width - 0.5) * 2;
-      targetP.y = ((e.clientY - rect.top) / rect.height - 0.5) * 2;
+      if (!rect.width || !rect.height) return;
+      targetP.x = clamp(((e.clientX - rect.left) / rect.width - 0.5) * 2, 1.2);
+      targetP.y = clamp(((e.clientY - rect.top) / rect.height - 0.5) * 2, 1.2);
     };
     window.addEventListener('pointermove', onPointerMove, { passive: true });
+
+    const raycaster = new THREE.Raycaster();
+    const ndc = new THREE.Vector2();
+    const nodeWorld = new THREE.Vector3();
 
     // ── Sizing ──────────────────────────────────────────────────────
     const resize = () => {
@@ -263,6 +310,9 @@ export function AgentMesh({ className = '' }: { className?: string }) {
     let visible = true;
     let t = 0;
     let spawnTimer = 0;
+    let burstTimer = 5;
+    let hoverIndex = -1;
+    let hoverSpawnCd = 0;
     const tmp = new THREE.Vector3();
 
     const updateTraffic = (dt: number) => {
@@ -270,6 +320,24 @@ export function AgentMesh({ className = '' }: { className?: string }) {
       if (spawnTimer <= 0) {
         startExchange();
         spawnTimer = 0.5 + Math.random() * 0.45;
+      }
+
+      burstTimer -= dt;
+      if (burstTimer <= 0) {
+        startBurst();
+        burstTimer = 6 + Math.random() * 4;
+      }
+
+      // Touching the market makes it transact: the agent under your cursor
+      // keeps hiring while you hover it.
+      hoverSpawnCd -= dt;
+      if (hoverIndex >= 0 && hoverSpawnCd <= 0) {
+        const ns = neighbors[hoverIndex];
+        if (ns.length) {
+          spawnPacket(nodes[hoverIndex], nodes[ns[(Math.random() * ns.length) | 0]], 'task');
+          firePulse(nodes[hoverIndex], cream, 0.8);
+        }
+        hoverSpawnCd = 0.38;
       }
 
       for (const p of packets) {
@@ -294,7 +362,7 @@ export function AgentMesh({ className = '' }: { className?: string }) {
         p.age += dt;
         const k = p.age / p.life;
         if (k >= 1) { p.active = false; p.sprite.visible = false; continue; }
-        p.sprite.scale.setScalar(0.4 + k * 2.4);
+        p.sprite.scale.setScalar((0.4 + k * 2.4) * p.scaleMul);
         p.mat.opacity = (1 - k) * pulseOpacity;
       }
     };
@@ -306,12 +374,45 @@ export function AgentMesh({ className = '' }: { className?: string }) {
 
       pointer.x += (targetP.x - pointer.x) * 0.04;
       pointer.y += (targetP.y - pointer.y) * 0.04;
-      group.rotation.y += pointer.x * 0.22;
-      group.rotation.x += pointer.y * 0.16;
+      group.rotation.y += pointer.x * 0.3;
+      group.rotation.x += pointer.y * 0.22;
+
+      // Camera: slight counter-parallax for depth, plus a scroll dolly that
+      // flies INTO the network as the hero scrolls away. window.scrollY is
+      // read here in the rAF loop — no scroll listener, no React state.
+      const sc = Math.min(1, Math.max(0, window.scrollY / Math.max(1, window.innerHeight)));
+      camera.position.z = 16.5 - sc * 7;
+      camera.position.x = pointer.x * 0.7;
+      camera.position.y = -pointer.y * 0.5;
+      camera.lookAt(0, 0, 0);
 
       linkMat.opacity = linkBaseOpacity + linkSwing * (0.5 + 0.5 * Math.sin(t * 0.8));
 
-      if (!reduceMotion) updateTraffic(dt);
+      if (!reduceMotion) {
+        // Which front-facing agent is the cursor nearest? Light it up.
+        hoverIndex = -1;
+        if (hasPointer && Math.abs(targetP.x) <= 1 && Math.abs(targetP.y) <= 1) {
+          group.updateMatrixWorld();
+          ndc.set(pointer.x, -pointer.y);
+          raycaster.setFromCamera(ndc, camera);
+          let best = 1.5; // world-units ray distance threshold
+          for (let i = 0; i < NODE_COUNT; i++) {
+            nodeWorld.copy(nodes[i]).applyMatrix4(group.matrixWorld);
+            if (nodeWorld.z < 0.5) continue; // back hemisphere
+            const d = raycaster.ray.distanceToPoint(nodeWorld);
+            if (d < best) { best = d; hoverIndex = i; }
+          }
+        }
+        if (hoverIndex >= 0) {
+          hoverSprite.visible = true;
+          hoverSprite.position.copy(nodes[hoverIndex]);
+          hoverSprite.scale.setScalar(0.55 + 0.12 * Math.sin(t * 7));
+        } else {
+          hoverSprite.visible = false;
+        }
+
+        updateTraffic(dt);
+      }
 
       renderer.render(scene, camera);
     };
@@ -365,13 +466,14 @@ export function AgentMesh({ className = '' }: { className?: string }) {
       dustMat.dispose();
       taskMat.dispose();
       settleMat.dispose();
+      hoverMat.dispose();
       pulses.forEach((p) => p.mat.dispose());
       dot.dispose();
       ringTex.dispose();
       renderer.dispose();
       if (renderer.domElement.parentNode === mount) mount.removeChild(renderer.domElement);
     };
-  }, [themeTick]);
+  }, [themeTick, forceDark]);
 
   return <div ref={mountRef} aria-hidden className={className} />;
 }

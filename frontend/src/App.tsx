@@ -22,7 +22,7 @@ import { ThemeSync, getStoredTheme } from './components/ThemeSync';
 // loads. The QueryClient now lives solely in main.tsx (a second, defaults-less
 // client used to be created here and silently shadowed it — staleTime:0 →
 // refetch storms on every navigation/window-focus).
-const LandingV2 = lazy(() => import('./pages/LandingV2'));
+const LandingV3 = lazy(() => import('./pages/LandingV3'));
 const TaskDetail = lazy(() => import('./pages/TaskDetail'));
 const A2ADashboard = lazy(() => import('./pages/A2ADashboard'));
 const HowItWorks = lazy(() => import('./pages/HowItWorks'));
@@ -109,7 +109,7 @@ export default function App() {
                     footer so the first click doesn't context-switch into the
                     dashboard shell. The app starts at "Launch app". */}
                 <Route element={<MarketingLayout />}>
-                  <Route path="/" element={<LandingV2 />} />
+                  <Route path="/" element={<LandingV3 />} />
                   <Route path="/how-it-works" element={<HowItWorks />} />
                 </Route>
                 {/* The redesign (formerly previewed at /v2) is now the live
