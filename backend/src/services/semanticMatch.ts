@@ -2,6 +2,7 @@ import { getPool } from './neonDb.js';
 import { config } from '../config.js';
 import { embed, toVectorLiteral, embeddingModelId } from './embeddingService.js';
 import { rankAgents } from './agentScorer.js';
+import { buildAgentDoc } from './agentEmbedding.js';
 import type { A2ATaskMeta, AgentCapability } from '../types.js';
 
 /**
@@ -98,8 +99,43 @@ export async function rerankCandidates(
     throw new Error(`Voyage rerank failed: ${res.status} ${await res.text().catch(() => '')}`.slice(0, 300));
   }
   const json = (await res.json()) as { data: Array<{ index: number; relevance_score: number }> };
-  // Voyage returns items sorted by relevance; `index` points back into `candidates`.
-  return json.data.map((d) => ({ ...candidates[d.index], rerankScore: d.relevance_score }));
+  // Voyage returns items sorted by relevance; `index` points back into
+  // `candidates`. Bounds-check so a malformed index never yields an entry with
+  // an undefined address (which would later 500 the metrics path).
+  return json.data
+    .filter((d) => d.index >= 0 && d.index < candidates.length)
+    .map((d) => ({ ...candidates[d.index], rerankScore: d.relevance_score }));
+}
+
+/**
+ * Rank registered agents for a piece of public routing text, by meaning:
+ * embed → KNN recall → optional rerank precision. Reusable core for the
+ * shadow log, the /semantic-candidates endpoint, and (in the next stage) the
+ * offer routing itself. `rerank` fetches each candidate's agent doc so the
+ * cross-encoder has real text to judge.
+ */
+/** Parallel agent-doc fetch for the reranker (independent DB reads). */
+async function docsForCandidates(candidates: SemanticCandidate[]): Promise<Map<string, string>> {
+  const docs = await Promise.all(candidates.map((c) => buildAgentDoc(c.address).catch(() => c.displayName)));
+  return new Map(candidates.map((c, i) => [c.address.toLowerCase(), docs[i]]));
+}
+
+export async function semanticRankedAgents(
+  routingText: string,
+  opts: { k?: number; rerank?: boolean } = {},
+): Promise<Array<SemanticCandidate | RerankedCandidate>> {
+  if (!routingText.trim()) return [];
+  const { vector } = await embed(routingText);
+  const candidates = await semanticCandidates(vector, opts.k ?? 10);
+  if (!opts.rerank || candidates.length === 0) return candidates;
+  // Degrade gracefully: a reranker blip falls back to the embeddings-only
+  // ranking rather than 500-ing the caller.
+  try {
+    return await rerankCandidates(routingText, candidates, await docsForCandidates(candidates));
+  } catch (err) {
+    console.warn('[semanticMatch] rerank failed, returning embeddings-only order:', (err as Error).message);
+    return candidates;
+  }
 }
 
 /**
@@ -117,18 +153,33 @@ export async function recordMatchShadow(meta: A2ATaskMeta): Promise<void> {
       rankAgents((meta.requiredCapabilities ?? []) as AgentCapability[]).catch(() => []),
     ]);
 
+    // Also capture the reranked order when the reranker is enabled, so prod
+    // evidence includes embeddings+rerank (mirrors the offline eval bench).
+    // Its OWN try/catch: a rerank/doc-fetch failure must never abort the
+    // semantic+tag row write (before this the whole shadow row was dropped,
+    // silently gapping the tuning dataset).
+    let reranked: RerankedCandidate[] = [];
+    if (config.rerankEnabled && semantic.length > 0) {
+      try {
+        reranked = await rerankCandidates(routingText, semantic, await docsForCandidates(semantic));
+      } catch (rerankErr) {
+        console.warn(`[semanticMatch] rerank capture failed for ${meta.taskId.slice(0, 10)}… (row still written):`, (rerankErr as Error).message);
+      }
+    }
+
     const db = await getPool();
     await db.query(
-      `INSERT INTO match_shadow_log (task_hash, routing_text, embedding_model, semantic_topk, tag_topk, required_capabilities)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO match_shadow_log (task_hash, routing_text, embedding_model, semantic_topk, semantic_rerank_topk, tag_topk, required_capabilities)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        ON CONFLICT (task_hash) DO UPDATE SET
-         routing_text = $2, embedding_model = $3, semantic_topk = $4, tag_topk = $5,
-         required_capabilities = $6, updated_at = NOW()`,
+         routing_text = $2, embedding_model = $3, semantic_topk = $4, semantic_rerank_topk = $5,
+         tag_topk = $6, required_capabilities = $7, updated_at = NOW()`,
       [
         meta.taskId.toLowerCase(),
         routingText,
         embeddingModelId(),
         JSON.stringify(semantic),
+        JSON.stringify(reranked),
         JSON.stringify(tagRanked.slice(0, 10).map((a) => ({ address: a.address, displayName: a.displayName, score: a.score }))),
         meta.requiredCapabilities ?? [],
       ],
@@ -165,21 +216,26 @@ export async function recordShadowOutcome(
 
 export interface ShadowRow {
   semantic_topk: Array<{ address: string }>;
+  semantic_rerank_topk?: Array<{ address: string }>;
   tag_topk: Array<{ address: string }>;
   accepted_by: string | null;
   settled: boolean | null;
 }
 
+export interface RankMetric { hit1: number; hit3: number; mrr: number }
 export interface ShadowMetrics {
   tasks: number;            // rows with a known acceptor
   settledTasks: number;
-  semantic: { hit1: number; hit3: number; mrr: number };
-  tag: { hit1: number; hit3: number; mrr: number };
+  semantic: RankMetric;
+  semanticRerank: RankMetric;
+  tag: RankMetric;
 }
 
-/** Rank (1-based) of the actual acceptor in a ranking, or 0 if absent. */
-function rankOf(list: Array<{ address: string }>, addr: string): number {
-  const i = list.findIndex((e) => e.address.toLowerCase() === addr);
+/** Rank (1-based) of the actual acceptor in a ranking, or 0 if absent.
+ *  Tolerates malformed entries (missing address) so a bad persisted row can't
+ *  crash the admin report. */
+function rankOf(list: Array<{ address?: string }>, addr: string): number {
+  const i = list.findIndex((e) => e.address?.toLowerCase() === addr);
   return i === -1 ? 0 : i + 1;
 }
 
@@ -210,6 +266,9 @@ export function computeShadowMetrics(rows: ShadowRow[]): ShadowMetrics {
     tasks: scored.length,
     settledTasks: scored.filter((r) => r.settled === true).length,
     semantic: agg((r) => r.semantic_topk),
+    // Falls back to the semantic order for rows recorded before rerank capture
+    // (or when the reranker was disabled), so the metric stays comparable.
+    semanticRerank: agg((r) => (r.semantic_rerank_topk?.length ? r.semantic_rerank_topk : r.semantic_topk)),
     tag: agg((r) => r.tag_topk),
   };
 }

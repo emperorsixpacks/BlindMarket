@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { requireAuth } from '../middleware/auth.js';
+import { createUserRateLimiter } from '../middleware/rateLimit.js';
 import { AppError } from '../middleware/errorHandler.js';
 import * as agentStore from '../services/agentStore.js';
 import * as a2aStore from '../services/a2aStore.js';
@@ -251,6 +252,45 @@ a2aRouter.get('/executors', async (req, res, next) => {
       },
     };
     res.json(body);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /api/v1/a2a/semantic-candidates
+ *
+ * Rank registered agents for a task BY MEANING (embeddings + optional rerank).
+ *   ?q=<routing text>       match against arbitrary public text, OR
+ *   ?taskHash=<indexed>     resolve the task's public routing text from meta
+ *   ?rerank=true            add the cross-encoder precision pass
+ *   ?k=<1..25>              how many candidates (default 10)
+ *
+ * Non-breaking: this only READS a ranking — it does not change accept gating,
+ * scoring, or offers (that's the next, gated stage). Each call spends a paid
+ * embedding (+ rerank) provider call, so it's requireAuth AND a
+ * per-wallet rate limit (keyed by principal, so rotating IPs / many agents
+ * can't run up the provider bill).
+ */
+const semanticCandidatesLimiter = createUserRateLimiter(20);
+a2aRouter.get('/semantic-candidates', requireAuth, semanticCandidatesLimiter, async (req: AuthRequest, res, next) => {
+  try {
+    // Express parses repeated/bracketed params as arrays — coerce to a single
+    // string so a `?q=a&q=b` can't throw a 500 in the string ops below.
+    const first = (v: unknown): string => (Array.isArray(v) ? (v[0] ?? '') : (v ?? '')).toString();
+    const k = Math.min(Math.max(parseInt(first(req.query.k)) || 10, 1), 25);
+    const rerank = first(req.query.rerank) === 'true';
+    let text = first(req.query.q).trim();
+    const taskHash = first(req.query.taskHash);
+    if (!text && taskHash) {
+      const meta = await a2aStore.getMeta(taskHash);
+      if (meta) text = semanticMatch.buildTaskRoutingText(meta);
+    }
+    if (!text) {
+      throw new AppError(400, 'NO_ROUTING_TEXT', 'Provide ?q=<routing text> or ?taskHash=<an indexed task with public routing text>');
+    }
+    const candidates = await semanticMatch.semanticRankedAgents(text, { k, rerank });
+    res.json({ success: true, data: { candidates, reranked: rerank } });
   } catch (err) {
     next(err);
   }

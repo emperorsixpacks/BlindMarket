@@ -85,6 +85,23 @@ describe('computeShadowMetrics (the loop success gate)', () => {
     expect(m.semantic.mrr).toBeCloseTo((1 + 0.5 + 1) / 3, 2);
     expect(m.tag.hit1).toBeCloseTo(1 / 3, 3);
     expect(m.tag.mrr).toBeCloseTo((1 / 3 + 1 + 0) / 3, 2);
+    // No rerank list present → semanticRerank mirrors semantic (back-compat).
+    expect(m.semanticRerank).toEqual(m.semantic);
+  });
+
+  it('uses semantic_rerank_topk when present, else falls back to semantic', () => {
+    const acceptor = '0xwinner';
+    const filler = (n: number) => Array.from({ length: n }, (_, i) => ({ address: `0xo${i}` }));
+    const withRerank: ShadowRow = {
+      semantic_topk: [...filler(2), { address: acceptor }],       // semantic: rank 3
+      semantic_rerank_topk: [{ address: acceptor }, ...filler(2)], // rerank promotes to rank 1
+      tag_topk: [],
+      accepted_by: acceptor,
+      settled: true,
+    };
+    const m = computeShadowMetrics([withRerank]);
+    expect(m.semantic.hit1).toBe(0);       // semantic had it at rank 3
+    expect(m.semanticRerank.hit1).toBe(1); // rerank fixed it
   });
 
   it('ignores rows with no known acceptor and counts settled', () => {
