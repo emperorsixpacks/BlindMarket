@@ -118,6 +118,18 @@ initSocket(httpServer, corsOptions);
 
 httpServer.listen(config.port, () => {
   console.log(`BlindMarket backend listening on port ${config.port} (${config.nodeEnv})`);
+
+  // Semantic routing (Phase 2 flip) posture. Loud misconfig warning: flipping
+  // routing on while embeddings are mock/keyless would order cascade offers by
+  // deterministic hash vectors, not meaning (mechanically safe — tag/broadcast
+  // fallbacks still apply — but a nonsense canary).
+  if (config.semanticRoutingEnabled) {
+    if (config.embeddingProvider === 'mock' || !config.embeddingApiKey) {
+      console.warn('[semantic] SEMANTIC_ROUTING_ENABLED=true but embeddings are mock/keyless — offers would be ranked by hash vectors, NOT meaning. Set EMBEDDING_PROVIDER + EMBEDDING_API_KEY or turn the flag off.');
+    } else {
+      console.log(`[semantic] routing FLIPPED ON — cascade offers ranked by meaning (rerank=${config.rerankEnabled ? 'on' : 'off'}); capability tags are fallback-only`);
+    }
+  }
   // Start the BlindEscrow TaskCreated poller — populates the taskHash↔taskId
   // mapping that the A2A settlement bridge needs to call assignWorker /
   // completeVerification by on-chain id.

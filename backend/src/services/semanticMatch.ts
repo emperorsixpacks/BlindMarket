@@ -3,6 +3,8 @@ import { config } from '../config.js';
 import { embed, toVectorLiteral, embeddingModelId } from './embeddingService.js';
 import { rankAgents } from './agentScorer.js';
 import { buildAgentDoc } from './agentEmbedding.js';
+import * as agentStore from './agentStore.js';
+import type { CascadeEntry } from './a2aStore.js';
 import type { A2ATaskMeta, AgentCapability } from '../types.js';
 
 /**
@@ -135,6 +137,115 @@ export async function semanticRankedAgents(
   } catch (err) {
     console.warn('[semanticMatch] rerank failed, returning embeddings-only order:', (err as Error).message);
     return candidates;
+  }
+}
+
+// ── Phase 2 FLIP: semantic ranking as the cascade's offer queue ─────────────
+
+/** How many semantic candidates seed the cascade before broadcast fallback. */
+export const SEMANTIC_CASCADE_K = 10;
+
+/** The meta slice the routing decision needs. */
+export type RoutingMeta = Pick<
+  A2ATaskMeta,
+  'publicBrief' | 'routingSummary' | 'requiredCapabilities' | 'targetExecutor'
+>;
+
+/**
+ * Can this task be ROUTED by meaning? True only when the flag is on, the task
+ * is not pinned to one executor (a pinned task has no routing question — an
+ * exclusive offer to anyone else would lock out the only agent allowed to
+ * accept), and there is public routing text to embed.
+ */
+export function semanticRoutingEligible(meta: RoutingMeta): boolean {
+  return config.semanticRoutingEnabled && !meta.targetExecutor && !!buildTaskRoutingText(meta);
+}
+
+/**
+ * Map a semantic candidate onto the cascade's 0–100 score scale (what agents
+ * see on `task:offer`, alongside tag scores from the old ranker). Prefer the
+ * cross-encoder's relevance when a real rerank ran (the mock passthrough
+ * reports 0, which falls through to cosine similarity).
+ */
+function toCascadeScore(c: SemanticCandidate | RerankedCandidate): number {
+  const raw = 'rerankScore' in c && c.rerankScore > 0 ? c.rerankScore : c.similarity;
+  return Math.round(Math.min(1, Math.max(0, raw)) * 100 * 100) / 100;
+}
+
+/**
+ * The semantic ranking, shaped for the cascade's offer queue — the Phase 2
+ * flip's core. Returns null whenever a usable semantic ranking can't be
+ * produced (flag off, pinned task, no routing text, no embedded agents,
+ * provider failure), so the caller falls back to the capability-tag flow and
+ * a task can never be stranded by the flip.
+ *
+ * minReward is respected the same way the tag ranker respects it: an agent
+ * whose declared floor exceeds the task's reward is dropped rather than
+ * burning a full cascade offer window on a guaranteed pass. Candidates whose
+ * registration row has vanished since embedding are dropped for the same
+ * reason.
+ */
+export async function semanticCascadeRanking(
+  meta: RoutingMeta,
+  taskRewardWei?: string,
+): Promise<CascadeEntry[] | null> {
+  if (!semanticRoutingEligible(meta)) return null;
+  try {
+    const ranked = await semanticRankedAgents(buildTaskRoutingText(meta), {
+      k: SEMANTIC_CASCADE_K,
+      rerank: config.rerankEnabled,
+    });
+    if (ranked.length === 0) return null;
+
+    const agents = await Promise.all(
+      ranked.map((c) => agentStore.getAgent(c.address).catch(() => undefined)),
+    );
+    let taskReward: bigint | null = null;
+    try { taskReward = taskRewardWei ? BigInt(taskRewardWei) : null; } catch { taskReward = null; }
+    const entries: CascadeEntry[] = [];
+    for (let i = 0; i < ranked.length; i++) {
+      const agent = agents[i];
+      if (!agent) continue;
+      if (taskReward !== null && agent.minReward) {
+        try { if (BigInt(agent.minReward) > taskReward) continue; } catch { /* malformed floor → keep */ }
+      }
+      entries.push({
+        address: ranked[i].address,
+        displayName: ranked[i].displayName,
+        score: toCascadeScore(ranked[i]),
+      });
+    }
+    return entries.length > 0 ? entries : null;
+  } catch (err) {
+    console.warn('[semanticMatch] semantic cascade ranking failed, falling back to tags:', (err as Error).message);
+    return null;
+  }
+}
+
+/**
+ * Record which ranking ACTUALLY drove the cascade for this task. Written by
+ * the dispatch path (fire-and-forget); keeps the shadow report honest once
+ * routing follows the semantic order (accepted_by correlating with
+ * semantic_topk is self-fulfilling post-flip — routed_by lets the metrics be
+ * segmented) and answers "how often did the flip actually engage?".
+ *
+ * Upserts a placeholder so it can't lose a race with recordMatchShadow's
+ * insert; the shadow upsert fills the real fields and never touches routed_by.
+ * Callers must only invoke this for tasks WITH routing text (the same
+ * condition under which a shadow row exists) so no orphan placeholder rows
+ * pollute the metrics.
+ */
+export async function markShadowRoutedBy(taskHash: string, routedBy: 'semantic' | 'tag'): Promise<void> {
+  try {
+    const db = await getPool();
+    await db.query(
+      `INSERT INTO match_shadow_log (task_hash, routing_text, embedding_model, routed_by)
+       VALUES ($1, '', '', $2)
+       ON CONFLICT (task_hash) DO UPDATE SET routed_by = $2, updated_at = NOW()`,
+      [taskHash.toLowerCase(), routedBy],
+    );
+  } catch (err) {
+    console.warn(`[semanticMatch] routed_by mark failed for ${taskHash.slice(0, 10)}…:`, (err as Error).message);
   }
 }
 
@@ -274,11 +385,24 @@ export function computeShadowMetrics(rows: ShadowRow[]): ShadowMetrics {
 }
 
 /** Load recent shadow rows + computed metrics (the admin report). */
-export async function shadowReport(limit = 200): Promise<{ metrics: ShadowMetrics; recent: unknown[] }> {
+export async function shadowReport(limit = 200): Promise<{
+  metrics: ShadowMetrics;
+  routedCounts: Record<string, number>;
+  recent: unknown[];
+}> {
   const db = await getPool();
   const { rows } = await db.query<ShadowRow & { task_hash: string; routing_text: string; created_at: string }>(
     'SELECT * FROM match_shadow_log ORDER BY created_at DESC LIMIT $1',
     [Math.min(1000, limit)],
   );
-  return { metrics: computeShadowMetrics(rows), recent: rows.slice(0, 25) };
+  // Canary dial: how often each router actually drove the cascade (all-time).
+  // 'unrouted' = rows dispatched with no cascade at all (broadcast) or from
+  // before the flip shipped.
+  const { rows: counts } = await db.query<{ routed_by: string | null; n: string }>(
+    'SELECT routed_by, COUNT(*)::TEXT AS n FROM match_shadow_log GROUP BY routed_by',
+  );
+  const routedCounts = Object.fromEntries(
+    counts.map((r) => [r.routed_by ?? 'unrouted', Number(r.n)]),
+  );
+  return { metrics: computeShadowMetrics(rows), routedCounts, recent: rows.slice(0, 25) };
 }

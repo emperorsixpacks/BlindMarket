@@ -7,6 +7,11 @@ import { describe, it, expect, vi } from 'vitest';
 vi.hoisted(() => {
   process.env.EMBEDDING_PROVIDER = 'mock';
   process.env.EMBEDDING_API_KEY = '';
+  // Phase 2 flip on for this file so semanticCascadeRanking's routing logic is
+  // exercisable; the flag-off path is the same `false` short-circuit that the
+  // pinned/no-text eligibility tests already cover.
+  process.env.SEMANTIC_ROUTING_ENABLED = 'true';
+  process.env.RERANK_ENABLED = 'false';
 });
 
 // semanticMatch imports neonDb/agentScorer at module load; the functions under
@@ -14,13 +19,25 @@ vi.hoisted(() => {
 // projection tests).
 vi.mock('./neonDb.js', () => ({ getPool: vi.fn() }));
 vi.mock('./agentScorer.js', () => ({ rankAgents: vi.fn() }));
+vi.mock('./agentStore.js', () => ({ getAgent: vi.fn() }));
+vi.mock('./agentEmbedding.js', () => ({ buildAgentDoc: vi.fn() }));
 vi.mock('./embeddingService.js', () => ({
   embed: vi.fn(),
   toVectorLiteral: (v: number[]) => `[${v.join(',')}]`,
   embeddingModelId: () => 'mock-v1',
 }));
 
-import { buildTaskRoutingText, computeShadowMetrics, rerankCandidates, type ShadowRow } from './semanticMatch.js';
+import {
+  buildTaskRoutingText,
+  computeShadowMetrics,
+  rerankCandidates,
+  semanticRoutingEligible,
+  semanticCascadeRanking,
+  type ShadowRow,
+} from './semanticMatch.js';
+import { getPool } from './neonDb.js';
+import { getAgent } from './agentStore.js';
+import { embed } from './embeddingService.js';
 
 describe('buildTaskRoutingText (source precedence)', () => {
   it('prefers publicBrief over everything', () => {
@@ -119,5 +136,85 @@ describe('computeShadowMetrics (the loop success gate)', () => {
       settled: true,
     }]);
     expect(m.semantic.hit1).toBe(1);
+  });
+});
+
+describe('semanticRoutingEligible (Phase 2 flip gate)', () => {
+  it('true for an unpinned task with routing text (flag on in this file)', () => {
+    expect(semanticRoutingEligible({ publicBrief: 'Translate docs to French', requiredCapabilities: [] as never })).toBe(true);
+  });
+
+  it('true via the caps-only routing-text fallback', () => {
+    expect(semanticRoutingEligible({ requiredCapabilities: ['code_review'] as never })).toBe(true);
+  });
+
+  it('false when the task is pinned to one executor', () => {
+    expect(semanticRoutingEligible({
+      publicBrief: 'Translate docs',
+      requiredCapabilities: [] as never,
+      targetExecutor: '0xpinned',
+    })).toBe(false);
+  });
+
+  it('false when there is no routing text at all', () => {
+    expect(semanticRoutingEligible({ requiredCapabilities: [] as never })).toBe(false);
+  });
+});
+
+describe('semanticCascadeRanking (Phase 2 flip — cascade offer queue)', () => {
+  // KNN rows the mocked pool returns: Alice closest (dist 0.1 → sim 0.9),
+  // Bob further (dist 0.4 → sim 0.6).
+  const knnRows = [
+    { address: '0xaaa', display_name: 'Alice', dist: 0.1 },
+    { address: '0xbbb', display_name: 'Bob', dist: 0.4 },
+  ];
+  const meta = { publicBrief: 'Summarize this repo', requiredCapabilities: [] as never };
+  const agentRow = (address: string, minReward?: string) =>
+    ({ address, displayName: address, capabilities: [], reputation: 0, tasksCompleted: 0, registeredAt: '' , minReward }) as never;
+
+  const arm = (rows: unknown[] = knnRows) => {
+    vi.mocked(embed).mockResolvedValue({ vector: [1, 2], model: 'mock-v1' });
+    vi.mocked(getPool).mockResolvedValue({ query: vi.fn().mockResolvedValue({ rows }) } as never);
+    vi.mocked(getAgent).mockImplementation(async (addr: string) => agentRow(addr));
+  };
+
+  it('short-circuits to null on an ineligible (pinned) task without spending an embedding', async () => {
+    vi.mocked(embed).mockClear();
+    const out = await semanticCascadeRanking({ ...meta, targetExecutor: '0xpinned' });
+    expect(out).toBeNull();
+    expect(vi.mocked(embed)).not.toHaveBeenCalled();
+  });
+
+  it('maps KNN order onto cascade entries with 0-100 scores', async () => {
+    arm();
+    const out = await semanticCascadeRanking(meta);
+    expect(out).toEqual([
+      { address: '0xaaa', displayName: 'Alice', score: 90 },
+      { address: '0xbbb', displayName: 'Bob', score: 60 },
+    ]);
+  });
+
+  it('drops candidates whose minReward floor exceeds the task reward', async () => {
+    arm();
+    vi.mocked(getAgent).mockImplementation(async (addr: string) =>
+      agentRow(addr, addr === '0xaaa' ? '2000' : undefined));
+    const out = await semanticCascadeRanking(meta, '1000');
+    expect(out?.map((e) => e.address)).toEqual(['0xbbb']);
+  });
+
+  it('drops candidates whose registration row has vanished; null when none survive', async () => {
+    arm();
+    vi.mocked(getAgent).mockResolvedValue(undefined);
+    expect(await semanticCascadeRanking(meta)).toBeNull();
+  });
+
+  it('returns null when KNN finds no embedded agents (→ tag fallback)', async () => {
+    arm([]);
+    expect(await semanticCascadeRanking(meta)).toBeNull();
+  });
+
+  it('returns null instead of throwing when the provider fails', async () => {
+    vi.mocked(embed).mockRejectedValue(new Error('voyage 500'));
+    expect(await semanticCascadeRanking(meta)).toBeNull();
   });
 });
