@@ -1,5 +1,13 @@
 import { redis } from './redis.js';
 import type { A2ATaskMeta, A2ATaskState, AgentCapability } from '../types.js';
+import {
+  ACCEPT_LOCK_TTL_S,
+  ATTEMPT_STREAM_TTL_S,
+  SETTLEMENT_DEADLINE_TTL_S,
+  CASCADE_TTL_MS,
+  CASCADE_OFFER_MS,
+  OFFER_TTL_MS,
+} from '../constants.js';
 
 // ── Keys ─────────────────────────────────────────────────────────────────────
 //
@@ -22,8 +30,6 @@ export interface TaskOffer {
   score: number;
   expiresAt: number; // epoch ms
 }
-
-const OFFER_TTL_MS = 15_000; // exclusive offer window
 
 const KEY = {
   meta: (taskId: string) => `a2a:meta:${taskId.toLowerCase()}`,
@@ -658,12 +664,6 @@ export interface TaskCascade {
   startedAt: number;    // epoch ms
 }
 
-/** How long the cascade stays alive before falling back to CAS race. */
-const CASCADE_TTL_MS = 120_000;
-
-/** Per-position offer window inside a cascade. */
-const CASCADE_OFFER_MS = 12_000;
-
 /**
  * Store the full ranked agent list for a task and start the cascade.
  * The caller should then offer to position 0 and schedule advancement.
@@ -744,4 +744,96 @@ async function loadTasksByIndex(
     });
   }
   return out;
+}
+
+// ── Accept lock + attempt logging (Part 1: Race Condition Fix) ─────────────────
+
+const LOCK_KEY = {
+  accept: (taskId: string) => `a2a:accept_lock:${taskId.toLowerCase()}`,
+  attempts: (taskId: string) => `a2a:accept_attempts:${taskId.toLowerCase()}`,
+};
+
+export async function acquireAcceptLock(taskId: string, agentAddress: string): Promise<boolean> {
+  const key = LOCK_KEY.accept(taskId);
+  const result = await redis.set(key, agentAddress, 'EX', ACCEPT_LOCK_TTL_S, 'NX');
+  return result === 'OK';
+}
+
+export async function releaseAcceptLock(taskId: string): Promise<void> {
+  await redis.del(LOCK_KEY.accept(taskId));
+}
+
+export async function logAcceptAttempt(
+  taskId: string,
+  agentAddress: string,
+  result: string,
+): Promise<void> {
+  const key = LOCK_KEY.attempts(taskId);
+  const pipe = redis.pipeline();
+  pipe.xadd(
+    key,
+    '*',
+    'agent_id', agentAddress,
+    'result', result,
+    'ts', new Date().toISOString(),
+  );
+  pipe.expire(key, ATTEMPT_STREAM_TTL_S);
+  await pipe.exec();
+}
+
+export async function getAcceptAttempts(
+  taskId: string,
+): Promise<{ agent_id: string; result: string; ts: string }[]> {
+  const key = LOCK_KEY.attempts(taskId);
+  const raw = await redis.xrange(key, '-', '+');
+  if (!raw || !Array.isArray(raw)) return [];
+  return raw.map((entry: any) => {
+    const fields = entry[1] as string[];
+    const obj: Record<string, string> = {};
+    for (let i = 0; i < fields.length; i += 2) {
+      obj[fields[i]] = fields[i + 1];
+    }
+    return obj as any;
+  });
+}
+
+// ── Gas-Liveness Timeout (Part 3) ─────────────────────────────────────────────
+
+const settlementDeadlineKey = (taskId: string) =>
+  `a2a:settlement_deadline:${taskId.toLowerCase()}`;
+
+export async function startSettlementDeadline(taskId: string): Promise<void> {
+  await redis.setex(settlementDeadlineKey(taskId), SETTLEMENT_DEADLINE_TTL_S, 'pending');
+}
+
+export async function clearSettlementDeadline(taskId: string): Promise<void> {
+  await redis.del(settlementDeadlineKey(taskId));
+}
+
+export async function getSettlementDeadlineTTL(taskId: string): Promise<number> {
+  return redis.ttl(settlementDeadlineKey(taskId));
+}
+
+/**
+ * List all tasks in 'accepted' status (for gas-liveness sweep).
+ * Scans for state keys and filters for accepted status.
+ */
+export async function listAcceptedTasks(): Promise<Array<{ taskId: string; executorAddress?: string }>> {
+  const result: Array<{ taskId: string; executorAddress?: string }> = [];
+  let cursor = '0';
+  do {
+    const [nextCursor, keys] = await redis.scan(cursor, 'MATCH', 'a2a:state:*', 'COUNT', 50);
+    cursor = nextCursor;
+    for (const key of keys) {
+      const raw = await redis.get(key);
+      if (!raw) continue;
+      try {
+        const state = JSON.parse(raw) as A2ATaskState;
+        if (state.status === 'accepted') {
+          result.push({ taskId: key.replace('a2a:state:', ''), executorAddress: state.executorAddress });
+        }
+      } catch { /* malformed state, skip */ }
+    }
+  } while (cursor !== '0');
+  return result;
 }
