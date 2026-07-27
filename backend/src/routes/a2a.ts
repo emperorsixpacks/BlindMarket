@@ -13,6 +13,7 @@ import { getTaskIdByHash } from '../services/escrowEvents.js';
 import * as escrowService from '../services/escrow.js';
 import * as reputationService from '../services/reputation.js';
 import * as reputationDecay from '../services/reputationDecay.js';
+import * as agentEmbedding from '../services/agentEmbedding.js';
 import { provider, escrow } from '../services/chain.js';
 import { redis } from '../services/redis.js';
 import { ethers } from 'ethers';
@@ -191,6 +192,11 @@ a2aRouter.post('/register', requireAuth, async (req: AuthRequest, res, next) => 
       tasksCompleted: existing?.tasksCompleted ?? 0,
       registeredAt: existing?.registeredAt ?? new Date().toISOString(),
     });
+
+    // Semantic matching (Phase 0): (re)compute this executor's embedding now
+    // that its routing text (display name, capabilities) is set. Best-effort —
+    // never blocks registration.
+    agentEmbedding.recomputeForWalletBestEffort(address);
 
     const body: ApiResponse = {
       success: true,
