@@ -1,9 +1,25 @@
 import { Router } from 'express';
 import { requireAuth, requireFounder } from '../middleware/auth.js';
 import * as a2aStore from '../services/a2aStore.js';
+import { shadowReport } from '../services/semanticMatch.js';
 import type { AuthRequest } from '../types.js';
 
 export const adminRouter = Router();
+
+/**
+ * GET /api/v1/admin/match-shadow
+ *
+ * Semantic-matching shadow report (Phase 1): hit@1 / hit@3 / MRR of the
+ * semantic vs capability-tag rankings against who actually accepted each
+ * task, plus the most recent rows. This is the tuning loop's evidence;
+ * "flip-ready" = semantic ≥ tag on MRR without a lower settled rate.
+ */
+adminRouter.get('/match-shadow', requireAuth, requireFounder, async (req: AuthRequest, res, next) => {
+  try {
+    const limit = parseInt(req.query.limit as string) || 200;
+    res.json({ success: true, data: await shadowReport(limit) });
+  } catch (err) { next(err); }
+});
 
 /**
  * POST /api/v1/admin/tasks/:id/skip-wrap

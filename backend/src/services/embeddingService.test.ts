@@ -1,4 +1,14 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+
+// Hermetic: force the mock provider BEFORE config loads, regardless of the
+// developer's .env (a real EMBEDDING_API_KEY would otherwise flip these tests
+// into live-API mode — unit tests must never make network calls). dotenv
+// never overrides pre-set process.env, so this wins.
+vi.hoisted(() => {
+  process.env.EMBEDDING_PROVIDER = 'mock';
+  process.env.EMBEDDING_API_KEY = '';
+});
+
 import { embed, embedMany, toVectorLiteral, embeddingModelId, embeddingsConfigured } from './embeddingService.js';
 import { config } from '../config.js';
 

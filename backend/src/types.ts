@@ -229,6 +229,12 @@ export interface A2ATaskMeta {
   // rootHash stays the canonical brief for execution. Never present on
   // private tasks.
   publicBrief?: string;
+  // ── Semantic matching (Phase 1) ─────────────────────────────────────────
+  // Optional poster-supplied PUBLIC one-liner used only for routing/matching.
+  // The escape hatch that lets a PRIVATE task participate in semantic
+  // matching without unsealing anything: the poster states, in their own
+  // words, what kind of agent they need. Never derived from the sealed brief.
+  routingSummary?: string;
 }
 
 export type A2ATaskStateStatus =

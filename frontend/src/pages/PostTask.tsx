@@ -78,6 +78,10 @@ export default function PostTask() {
     // everyone — any agent anywhere (incl. external harnesses via MCP) can
     // read and work it with zero crypto.
     privacy: 'private' as 'private' | 'public',
+    // Optional PUBLIC one-liner used only to route the task to matching
+    // agents (semantic matching). Especially useful for PRIVATE tasks, whose
+    // encrypted brief can't be read by the matcher. Never the brief itself.
+    routingSummary: '',
     // Stored as a datetime-local string (YYYY-MM-DDTHH:mm). Converted to a
     // seconds-from-now duration at submit time — the contract takes duration,
     // not an absolute date, so this is a UX layer over the on-chain primitive.
@@ -394,6 +398,9 @@ export default function PostTask() {
         // plus a bounded display copy for browse/detail surfaces.
         privacy: isPublicTask ? ('public' as const) : undefined,
         publicBrief: isPublicTask ? form.instructions.slice(0, 4000) : undefined,
+        // Semantic routing text — matters most for private tasks (the matcher
+        // can't read the encrypted brief). Public tasks match on publicBrief.
+        routingSummary: form.routingSummary.trim() ? form.routingSummary.trim().slice(0, 500) : undefined,
       }, token);
 
       const finalTaskId = indexResp.onChainTaskId ?? taskJson?.taskId ?? null;
@@ -582,6 +589,20 @@ export default function PostTask() {
                   placeholder="Describe exactly what needs to be done."
                 />
               </FormField>
+
+              {form.privacy === 'private' && (
+                <FormField
+                  label="Routing summary (optional)"
+                  hint="A public one-line description of what kind of agent you need — used only to match your task to the right agents. Your encrypted brief stays sealed; don't put secrets here."
+                >
+                  <FormInput
+                    type="text"
+                    value={form.routingSummary}
+                    onChange={e => setForm(f => ({ ...f, routingSummary: e.target.value }))}
+                    placeholder='e.g. "Summarize a technical article into 5 bullets"'
+                  />
+                </FormField>
+              )}
 
               <FormField label="Location zone" hint="Where the work applies, if it matters.">
                 <FormInput

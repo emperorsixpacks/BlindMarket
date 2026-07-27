@@ -16,6 +16,12 @@ import type { AgentSkillRow } from './skillStore.js';
 export const MAX_SKILL_INSTRUCTIONS_BYTES = 16 * 1024;
 export const MAX_SKILLS_PER_AGENT = 10;
 export const MAX_COMPOSED_INSTRUCTIONS_BYTES = 96 * 1024;
+// The merged tool list is serialized into a single AGENT_TOOLS env var. On
+// Linux one env string is capped at MAX_ARG_STRLEN = 128 KB, so an oversized
+// tool bundle installs fine and then fork() fails at the next (re)start —
+// bricking a previously-working agent. Budget the composed tools too, with
+// headroom for the rest of the env.
+export const MAX_COMPOSED_TOOLS_BYTES = 96 * 1024;
 
 export interface ComposedRuntime {
   instructions: string;
@@ -80,8 +86,10 @@ export function buildInstalledSkill(row: AgentSkillRow): InstalledSkill {
   };
 }
 
-/** Install-time guard: would adding these skills exceed the composed budget? */
-export function assertComposedSizeOk(baseInstructions: string, skills: InstalledSkill[]): void {
+/** Install-time guard: would adding these skills exceed the composed budgets?
+ *  `baseTools` are the agent's own tools, which share the AGENT_TOOLS env with
+ *  the skills' tools — must be counted to bound the real spawn payload. */
+export function assertComposedSizeOk(baseInstructions: string, skills: InstalledSkill[], baseTools: AgentTool[] = []): void {
   if (skills.length > MAX_SKILLS_PER_AGENT) {
     throw new Error(`An agent can have at most ${MAX_SKILLS_PER_AGENT} skills installed`);
   }
@@ -90,8 +98,11 @@ export function assertComposedSizeOk(baseInstructions: string, skills: Installed
       throw new Error(`Skill "${s.slug}" exceeds the ${MAX_SKILL_INSTRUCTIONS_BYTES / 1024}KB instruction limit`);
     }
   }
-  const composed = composeAgentRuntime({ instructions: baseInstructions, tools: [], skills } as unknown as DeployedAgent);
+  const composed = composeAgentRuntime({ instructions: baseInstructions, tools: baseTools, skills } as unknown as DeployedAgent);
   if (Buffer.byteLength(composed.instructions, 'utf8') > MAX_COMPOSED_INSTRUCTIONS_BYTES) {
     throw new Error(`Composed instructions exceed the ${MAX_COMPOSED_INSTRUCTIONS_BYTES / 1024}KB budget — remove a skill or shorten the agent prompt`);
+  }
+  if (Buffer.byteLength(JSON.stringify(composed.tools), 'utf8') > MAX_COMPOSED_TOOLS_BYTES) {
+    throw new Error(`Composed tools exceed the ${MAX_COMPOSED_TOOLS_BYTES / 1024}KB budget — remove a skill or one with lighter tools`);
   }
 }

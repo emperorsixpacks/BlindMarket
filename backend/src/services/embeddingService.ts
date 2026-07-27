@@ -30,7 +30,12 @@ export function embeddingsConfigured(): boolean {
 }
 
 export function embeddingModelId(): string {
-  return config.embeddingProvider === 'mock' ? 'mock-v1' : config.embeddingModel;
+  // Must mirror the ACTUAL path embedMany takes: it falls back to mock whenever
+  // the key is missing, even if EMBEDDING_PROVIDER=voyage. Reporting the real
+  // model here (when embed() actually produces mock vectors) would tag stored
+  // vectors 'voyage-3-large' while embedMany writes 'mock-v1' — the KNN filter
+  // and backfill skip-check would then never match. Stay consistent.
+  return embeddingsConfigured() ? config.embeddingModel : 'mock-v1';
 }
 
 /**

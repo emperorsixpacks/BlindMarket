@@ -14,6 +14,7 @@ import * as escrowService from '../services/escrow.js';
 import * as reputationService from '../services/reputation.js';
 import * as reputationDecay from '../services/reputationDecay.js';
 import * as agentEmbedding from '../services/agentEmbedding.js';
+import * as semanticMatch from '../services/semanticMatch.js';
 import { provider, escrow } from '../services/chain.js';
 import { redis } from '../services/redis.js';
 import { ethers } from 'ethers';
@@ -142,6 +143,10 @@ const indexTaskSchema = z.object({
   // Bounded display copy of a PUBLIC brief (browse/detail render it without a
   // storage fetch). Only allowed when privacy='public'.
   publicBrief: z.string().min(1).max(4000).optional(),
+  // Semantic matching: optional PUBLIC one-liner used only for routing. Lets a
+  // PRIVATE task be matched by meaning without unsealing anything — allowed in
+  // both privacy modes (public tasks usually rely on publicBrief instead).
+  routingSummary: z.string().min(1).max(500).optional(),
 });
 
 const verifySchema = z.object({
@@ -626,6 +631,10 @@ a2aRouter.post('/tasks/:id/accept', requireAuth, async (req: AuthRequest, res, n
     // Bids are only needed until a task is assigned — drop the index now that it
     // is (best-effort; the addBid TTL is the backstop if this fails).
     bidsStore.clearBids(taskId).catch(() => {});
+
+    // Shadow measurement: record who ACTUALLY won the task so the tuning loop
+    // can compare it against both rankings. Best-effort.
+    void semanticMatch.recordShadowOutcome(taskId, { acceptedBy: address });
 
     // Fire webhook for task assignment (non-blocking)
     try {
@@ -1115,7 +1124,20 @@ a2aRouter.post('/tasks/index', requireAuth, async (req: AuthRequest, res, next) 
       // every pre-existing row).
       privacy: isPublic ? 'public' : undefined,
       publicBrief: isPublic ? data.publicBrief : undefined,
+      routingSummary: data.routingSummary,
     });
+
+    // Semantic matching (Phase 1 SHADOW): embed the task's public routing text
+    // and record how semantic KNN would have ranked agents vs the live tag
+    // ranking. Pure measurement — fire-and-forget, never affects indexing.
+    void semanticMatch.recordMatchShadow({
+      taskId: taskHash,
+      targetExecutorType: 'agent',
+      verificationMode: data.verificationMode ?? 'manual',
+      requiredCapabilities: requiredCaps,
+      publicBrief: isPublic ? data.publicBrief : undefined,
+      routingSummary: data.routingSummary,
+    } as Parameters<typeof semanticMatch.recordMatchShadow>[0]);
 
     console.log(
       `[a2a] indexed taskHash=${taskHash.slice(0, 10)}… → onChainId=${onChainTaskId} poster=${address}`,
