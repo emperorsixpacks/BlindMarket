@@ -179,11 +179,13 @@ function toCascadeScore(c: SemanticCandidate | RerankedCandidate): number {
  * provider failure), so the caller falls back to the capability-tag flow and
  * a task can never be stranded by the flip.
  *
- * minReward is respected the same way the tag ranker respects it: an agent
- * whose declared floor exceeds the task's reward is dropped rather than
- * burning a full cascade offer window on a guaranteed pass. Candidates whose
- * registration row has vanished since embedding are dropped for the same
- * reason.
+ * Hard accept-gates are respected so an offer window is never burned on an
+ * agent who is FORBIDDEN from taking the task: candidates missing any of the
+ * task's requiredCapabilities are dropped (/accept 403s CAPABILITY_MISMATCH —
+ * during the transition, tags posted on a task remain a hard constraint even
+ * though ranking is semantic; the tag retirement phase removes this), as are
+ * agents whose declared minReward floor exceeds the task's reward and
+ * candidates whose registration row has vanished since embedding.
  */
 export async function semanticCascadeRanking(
   meta: RoutingMeta,
@@ -200,12 +202,16 @@ export async function semanticCascadeRanking(
     const agents = await Promise.all(
       ranked.map((c) => agentStore.getAgent(c.address).catch(() => undefined)),
     );
+    const requiredCaps = (meta.requiredCapabilities ?? []) as AgentCapability[];
     let taskReward: bigint | null = null;
     try { taskReward = taskRewardWei ? BigInt(taskRewardWei) : null; } catch { taskReward = null; }
     const entries: CascadeEntry[] = [];
     for (let i = 0; i < ranked.length; i++) {
       const agent = agents[i];
       if (!agent) continue;
+      // Mirror of the /accept CAPABILITY_MISMATCH gate (full capability set,
+      // not preferredCapabilities — accept checks the full set).
+      if (requiredCaps.length > 0 && !requiredCaps.every((c) => agent.capabilities.includes(c))) continue;
       if (taskReward !== null && agent.minReward) {
         try { if (BigInt(agent.minReward) > taskReward) continue; } catch { /* malformed floor → keep */ }
       }
@@ -231,9 +237,11 @@ export async function semanticCascadeRanking(
  *
  * Upserts a placeholder so it can't lose a race with recordMatchShadow's
  * insert; the shadow upsert fills the real fields and never touches routed_by.
- * Callers must only invoke this for tasks WITH routing text (the same
- * condition under which a shadow row exists) so no orphan placeholder rows
- * pollute the metrics.
+ * Callers must gate this on SEMANTIC_ROUTING_ENABLED (flag-off must remain a
+ * strict no-op — NULL routed_by means flag-off/broadcast/pre-flip) and on the
+ * task having routing text. If recordMatchShadow's own write fails, the
+ * placeholder row survives with empty rankings — computeShadowMetrics skips
+ * rows with no ranking data, so a stray placeholder can't drag the metrics.
  */
 export async function markShadowRoutedBy(taskHash: string, routedBy: 'semantic' | 'tag'): Promise<void> {
   try {
@@ -269,6 +277,11 @@ export async function recordMatchShadow(meta: A2ATaskMeta): Promise<void> {
     // Its OWN try/catch: a rerank/doc-fetch failure must never abort the
     // semantic+tag row write (before this the whole shadow row was dropped,
     // silently gapping the tuning dataset).
+    // NOTE: when the routing flip is on, the dispatch path runs its own
+    // rerank over the same candidates — the embed is deduped by the
+    // embeddingService memo, but the rerank call is intentionally repeated
+    // here so the shadow row stays an independent record (cost ≈ 1 extra
+    // cheap rerank per task while both are enabled).
     let reranked: RerankedCandidate[] = [];
     if (config.rerankEnabled && semantic.length > 0) {
       try {
@@ -357,7 +370,15 @@ function rankOf(list: Array<{ address?: string }>, addr: string): number {
  * = semantic ≥ tag on MRR (primary) without a lower settled rate.
  */
 export function computeShadowMetrics(rows: ShadowRow[]): ShadowMetrics {
-  const scored = rows.filter((r) => !!r.accepted_by);
+  // A row must have a known acceptor AND at least one recorded ranking to be
+  // scorable. Rows with no ranking data (e.g. a routed_by placeholder whose
+  // recordMatchShadow write failed on a provider outage) would count as a
+  // miss for every ranking and silently deflate the flip's success gate.
+  const scored = rows.filter(
+    (r) =>
+      !!r.accepted_by &&
+      (r.semantic_topk.length > 0 || (r.semantic_rerank_topk?.length ?? 0) > 0 || r.tag_topk.length > 0),
+  );
   const agg = (pick: (r: ShadowRow) => Array<{ address: string }>) => {
     let hit1 = 0, hit3 = 0, rr = 0;
     for (const r of scored) {
@@ -391,16 +412,20 @@ export async function shadowReport(limit = 200): Promise<{
   recent: unknown[];
 }> {
   const db = await getPool();
-  const { rows } = await db.query<ShadowRow & { task_hash: string; routing_text: string; created_at: string }>(
-    'SELECT * FROM match_shadow_log ORDER BY created_at DESC LIMIT $1',
-    [Math.min(1000, limit)],
-  );
-  // Canary dial: how often each router actually drove the cascade (all-time).
-  // 'unrouted' = rows dispatched with no cascade at all (broadcast) or from
-  // before the flip shipped.
-  const { rows: counts } = await db.query<{ routed_by: string | null; n: string }>(
-    'SELECT routed_by, COUNT(*)::TEXT AS n FROM match_shadow_log GROUP BY routed_by',
-  );
+  // Canary dial alongside the metrics: how often each router actually drove
+  // the cascade over the last 30 days (bounded via idx_shadow_created so the
+  // append-only table can't make the admin report a full-table scan).
+  // 'unrouted' = broadcast, flag-off, or pre-flip rows.
+  const [{ rows }, { rows: counts }] = await Promise.all([
+    db.query<ShadowRow & { task_hash: string; routing_text: string; created_at: string }>(
+      'SELECT * FROM match_shadow_log ORDER BY created_at DESC LIMIT $1',
+      [Math.min(1000, limit)],
+    ),
+    db.query<{ routed_by: string | null; n: string }>(
+      `SELECT routed_by, COUNT(*)::TEXT AS n FROM match_shadow_log
+        WHERE created_at > NOW() - INTERVAL '30 days' GROUP BY routed_by`,
+    ),
+  ]);
   const routedCounts = Object.fromEntries(
     counts.map((r) => [r.routed_by ?? 'unrouted', Number(r.n)]),
   );

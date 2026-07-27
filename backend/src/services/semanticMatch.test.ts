@@ -128,6 +128,13 @@ describe('computeShadowMetrics (the loop success gate)', () => {
     expect(m.settledTasks).toBe(1);
   });
 
+  it('skips rows with no ranking data (a routed_by placeholder whose shadow write failed)', () => {
+    const placeholder: ShadowRow = { semantic_topk: [], tag_topk: [], accepted_by: '0xwinner', settled: true };
+    const m = computeShadowMetrics([placeholder, row(1, 1, true)]);
+    expect(m.tasks).toBe(1);       // placeholder is not scorable…
+    expect(m.semantic.hit1).toBe(1); // …and doesn't deflate the real row's metrics
+  });
+
   it('is case-insensitive on addresses', () => {
     const m = computeShadowMetrics([{
       semantic_topk: [{ address: '0xWINNER' }],
@@ -192,6 +199,17 @@ describe('semanticCascadeRanking (Phase 2 flip — cascade offer queue)', () => 
       { address: '0xaaa', displayName: 'Alice', score: 90 },
       { address: '0xbbb', displayName: 'Bob', score: 60 },
     ]);
+  });
+
+  it('drops candidates missing a required capability (their /accept would 403)', async () => {
+    arm();
+    vi.mocked(getAgent).mockImplementation(async (addr: string) =>
+      ({ ...(agentRow(addr) as Record<string, unknown>), capabilities: addr === '0xbbb' ? ['code_review'] : [] }) as never);
+    const out = await semanticCascadeRanking({
+      publicBrief: 'Review my PR',
+      requiredCapabilities: ['code_review'] as never,
+    });
+    expect(out?.map((e) => e.address)).toEqual(['0xbbb']);
   });
 
   it('drops candidates whose minReward floor exceeds the task reward', async () => {

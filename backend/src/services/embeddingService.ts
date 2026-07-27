@@ -122,9 +122,31 @@ export async function embedMany(texts: string[]): Promise<EmbeddingResult> {
   return { vectors, model: config.embeddingModel };
 }
 
+/**
+ * Short-TTL memo for single-text embeds, keyed by (model, text-hash). The
+ * dispatch path embeds the same routing text twice per indexed task — once for
+ * the shadow record, once for flip routing — in the same tick; caching the
+ * in-flight PROMISE collapses those into one paid provider call (and dedupes
+ * repeated /semantic-candidates queries). Failed promises are evicted so an
+ * error is never served from cache.
+ */
+const EMBED_CACHE_TTL_MS = 5 * 60 * 1000;
+const EMBED_CACHE_MAX = 200;
+const embedCache = new Map<string, { at: number; promise: Promise<{ vector: number[]; model: string }> }>();
+
 export async function embed(text: string): Promise<{ vector: number[]; model: string }> {
-  const { vectors, model } = await embedMany([text]);
-  return { vector: vectors[0], model };
+  const key = `${embeddingModelId()}:${createHash('sha256').update(text).digest('hex')}`;
+  const hit = embedCache.get(key);
+  if (hit && Date.now() - hit.at < EMBED_CACHE_TTL_MS) return hit.promise;
+  const promise = embedMany([text]).then(({ vectors, model }) => ({ vector: vectors[0], model }));
+  embedCache.set(key, { at: Date.now(), promise });
+  promise.catch(() => embedCache.delete(key));
+  if (embedCache.size > EMBED_CACHE_MAX) {
+    // Maps iterate in insertion order — drop the oldest entry.
+    const oldest = embedCache.keys().next().value;
+    if (oldest !== undefined) embedCache.delete(oldest);
+  }
+  return promise;
 }
 
 /** pgvector literal — a bracketed comma list, e.g. "[0.1,0.2,…]". */
