@@ -14,7 +14,7 @@ import {
 } from '../components/bb';
 import { ToolManager, type AnyTool } from '../components/bb/ToolManager';
 import SkillPicker from '../components/bb/SkillPicker';
-import { get, post } from '../lib/api';
+import { get, post, authedPost } from '../lib/api';
 import { AGENT_CAPABILITIES } from '../config/capabilities';
 import { useChainAddress } from '../hooks/useChainWallet';
 import { getNativeCurrency } from '../config/constants';
@@ -148,6 +148,11 @@ export default function DeployAgentForm() {
   // Installed skills (slugs). Selecting a skill auto-checks its capability tags
   // in section 03 so the agent's declared caps reflect what it can do.
   const [skillSlugs, setSkillSlugs] = useState<string[]>([]);
+  // Slugs imported as PRIVATE drafts via the SkillPicker importer. The
+  // unauthenticated deploy route installs public skills only, so these are
+  // attached right after deploy via the authed POST /agents/:id/skills.
+  const [privateSkillSlugs, setPrivateSkillSlugs] = useState<string[]>([]);
+  const [privateSkillResults, setPrivateSkillResults] = useState<Array<{ slug: string; ok: boolean; error?: string }>>([]);
 
   const [status, setStatus] = useState<'idle' | 'deploying' | 'funding' | 'done' | 'error'>('idle');
   const submittingRef = useRef(false);
@@ -238,7 +243,9 @@ export default function DeployAgentForm() {
         ownerAddress: address,
         ownerPublicKey,
         capabilities,
-        skillSlugs,
+        // Private drafts are excluded here (the public-only deploy route
+        // would 404) and attached right after deploy, below.
+        skillSlugs: skillSlugs.filter((slug) => !privateSkillSlugs.includes(slug)),
         toolSecrets,
         tools: tools.map(t => {
           // Normalized ToolDefinition — pass through as-is
@@ -266,6 +273,24 @@ export default function DeployAgentForm() {
         }),
       });
       setAgentId(data.id);
+
+      // Attach private-draft skills (authed route allows the author's own
+      // drafts). Per-slug try/catch: a failed attach must not fail the
+      // deploy — the agent already exists; results surface on the success
+      // screen with a pointer to the agent page for retry.
+      const privateToInstall = skillSlugs.filter((slug) => privateSkillSlugs.includes(slug));
+      if (privateToInstall.length > 0) {
+        const results: Array<{ slug: string; ok: boolean; error?: string }> = [];
+        for (const slug of privateToInstall) {
+          try {
+            await authedPost(`/api/v1/agents/${data.id}/skills`, { slug });
+            results.push({ slug, ok: true });
+          } catch (e) {
+            results.push({ slug, ok: false, error: (e as Error).message });
+          }
+        }
+        setPrivateSkillResults(results);
+      }
 
       if (!data.walletAddress) {
         console.warn('[deploy] no walletAddress in deploy response, skipping funding step');
@@ -312,6 +337,21 @@ export default function DeployAgentForm() {
             <div className="text-xs text-ink-3">On-chain wallet minted · INFT identity created</div>
           </div>
 
+          {privateSkillResults.length > 0 && (
+            <div className="mx-auto max-w-md text-left space-y-1">
+              <div className="text-xs font-medium text-ink-2">Private skills attached</div>
+              {privateSkillResults.map((r) => (
+                <div key={r.slug} className={`flex items-start gap-2 text-xs ${r.ok ? 'text-ok' : 'text-err'}`}>
+                  <Icon name={r.ok ? 'check' : 'x'} size={12} className="mt-0.5 shrink-0" />
+                  <span className="min-w-0 break-words">
+                    <span className="font-mono">{r.slug}</span>
+                    {!r.ok && <> — {r.error || 'attach failed'}. Retry from the agent's Skills panel.</>}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
           {fundingSkipped ? (
             <div className="mx-auto max-w-md border border-warn/40 bg-warn/5 px-4 py-3 text-left text-[13px] text-ink-2 leading-relaxed space-y-1.5">
               <div className="flex items-center gap-2 font-semibold text-warn">
@@ -337,7 +377,7 @@ export default function DeployAgentForm() {
             <Button
               variant="ghost"
               label="Deploy another"
-              onClick={() => { setStatus('idle'); setAgentId(''); setFundingSkipped(false); }}
+              onClick={() => { setStatus('idle'); setAgentId(''); setFundingSkipped(false); setPrivateSkillResults([]); }}
             />
           </div>
           </div>
@@ -498,6 +538,9 @@ export default function DeployAgentForm() {
               }}
               secrets={toolSecrets}
               onSecretsChange={setToolSecrets}
+              onImported={(slug, isPublic) => {
+                if (!isPublic) setPrivateSkillSlugs((p) => (p.includes(slug) ? p : [...p, slug]));
+              }}
             />
           </FormField>
         </div>

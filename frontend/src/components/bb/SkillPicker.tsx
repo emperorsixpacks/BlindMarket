@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Button, FormField, FormInput, FormTextarea, Tag, Icon, Spinner } from './index';
 import { authedPost, get } from '../../lib/api';
 
@@ -37,6 +37,7 @@ export default function SkillPicker({
   onChange,
   secrets,
   onSecretsChange,
+  onImported,
 }: {
   selectedSlugs: string[];
   /** caps = union of the selected skills' capability tags, so the parent can
@@ -44,12 +45,24 @@ export default function SkillPicker({
   onChange: (slugs: string[], caps?: string[]) => void;
   secrets: Record<string, string>;
   onSecretsChange: (s: Record<string, string>) => void;
+  /** Fired per skill created via the importer. `isPublic=false` skills can't
+   *  install through the unauthenticated deploy route — the parent must
+   *  attach them post-deploy via the authed POST /agents/:id/skills. */
+  onImported?: (slug: string, isPublic: boolean) => void;
 }) {
   const [tab, setTab] = useState<'browse' | 'import'>('browse');
   const [query, setQuery] = useState('');
   const [list, setList] = useState<RegistrySkill[]>([]);
   const [selectedMeta, setSelectedMeta] = useState<Record<string, RegistrySkill>>({});
   const [loading, setLoading] = useState(false);
+
+  // Always-current mirrors for callbacks that fire in loops (multi-import
+  // calls onCreated several times from one click-time closure — reading the
+  // render-scoped state there would drop all but the last addition).
+  const selectedSlugsRef = useRef(selectedSlugs);
+  selectedSlugsRef.current = selectedSlugs;
+  const selectedMetaRef = useRef(selectedMeta);
+  selectedMetaRef.current = selectedMeta;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -144,14 +157,21 @@ export default function SkillPicker({
           )}
         </div>
       ) : (
-        <SkillMdImport onCreated={(s) => {
-          const meta = { ...selectedMeta, [s.slug]: s };
-          setSelectedMeta(meta);
-          const next = [...selectedSlugs, s.slug];
-          onChange(next, capsFor(next, meta));
-          void load();
-          setTab('browse');
-        }} />
+        <SkillMdImport
+          remainingSlots={Math.max(0, MAX_SKILLS - selectedSlugs.length)}
+          onCreated={(s, isPublic) => {
+            const meta = { ...selectedMetaRef.current, [s.slug]: s };
+            selectedMetaRef.current = meta;
+            setSelectedMeta(meta);
+            const next = [...selectedSlugsRef.current, s.slug];
+            selectedSlugsRef.current = next;
+            onChange(next, capsFor(next, meta));
+            onImported?.(s.slug, isPublic);
+            void load();
+            // Stay on the import tab — a multi-import batch shows per-card
+            // progress here; the selected chips below reflect additions live.
+          }}
+        />
       )}
 
       {selectedSkills.length > 0 && (
@@ -188,72 +208,208 @@ export default function SkillPicker({
   );
 }
 
-function SkillMdImport({ onCreated }: { onCreated: (s: RegistrySkill) => void }) {
+// Mirrors backend MAX_SKILLS_PER_AGENT (skillComposer.ts) — keep in sync.
+const MAX_SKILLS = 10;
+
+interface ParsedPreview {
+  name: string;
+  description: string;
+  version: string;
+  instructions: string;
+  warnings: string[];
+}
+
+interface StagedSkill {
+  key: string;                 // local list key
+  sourceLabel: string;         // filename or "pasted"
+  parsed: ParsedPreview | null; // null = parse failed
+  slug: string;                // editable
+  status: 'ready' | 'importing' | 'error';
+  error?: string;
+}
+
+const deriveSlug = (name: string) =>
+  name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60);
+
+/**
+ * Multi-skill importer: files and/or pastes accumulate into a staged queue
+ * (one card per skill, editable slug, parse warnings), then one action
+ * imports the whole queue via sequential POST /skills — per-card errors
+ * (e.g. SLUG_TAKEN) stay on their card for rename-and-retry. Max-10 cap is
+ * shared with registry selections.
+ */
+function SkillMdImport({
+  onCreated,
+  remainingSlots,
+}: {
+  onCreated: (s: RegistrySkill, isPublic: boolean) => void;
+  remainingSlots: number;
+}) {
   const [text, setText] = useState('');
-  const [parsed, setParsed] = useState<{ name: string; description: string; version: string; instructions: string; warnings: string[] } | null>(null);
-  const [slug, setSlug] = useState('');
-  const [makePublic, setMakePublic] = useState(false);
-  const [error, setError] = useState('');
+  const [queue, setQueue] = useState<StagedSkill[]>([]);
+  const [makePublic, setMakePublic] = useState(true);
   const [busy, setBusy] = useState(false);
 
-  const parse = async () => {
-    setError(''); setBusy(true);
+  let keyCounter = queue.length;
+  const nextKey = () => `staged-${Date.now()}-${keyCounter++}`;
+
+  const slotsLeft = remainingSlots - queue.filter((q) => q.parsed).length;
+
+  const parseOne = async (source: string, sourceLabel: string): Promise<StagedSkill> => {
     try {
-      const p = await authedPost<typeof parsed>('/api/v1/skills/parse-skillmd', { text });
-      setParsed(p);
-      if (p && !slug) setSlug(p.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60));
-    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+      const p = await authedPost<ParsedPreview>('/api/v1/skills/parse-skillmd', { text: source });
+      return { key: nextKey(), sourceLabel, parsed: p, slug: deriveSlug(p.name), status: 'ready' };
+    } catch (e) {
+      return { key: nextKey(), sourceLabel, parsed: null, slug: '', status: 'error', error: (e as Error).message };
+    }
   };
 
-  const create = async () => {
-    if (!parsed) return;
-    setError(''); setBusy(true);
-    try {
-      const skill = await authedPost<RegistrySkill>('/api/v1/skills', {
-        slug,
-        name: parsed.name,
-        description: parsed.description,
-        version: parsed.version,
-        instructions: parsed.instructions,
-        source: 'skillmd',
-        isPublic: makePublic,
-      });
-      onCreated(skill);
-      setText(''); setParsed(null); setSlug('');
-    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+  const addPaste = async () => {
+    if (!text.trim()) return;
+    setBusy(true);
+    const staged = await parseOne(text, 'pasted');
+    setQueue((q) => [...q, staged]);
+    if (staged.parsed) setText('');
+    setBusy(false);
+  };
+
+  const addFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setBusy(true);
+    const picked = Array.from(files);
+    const staged: StagedSkill[] = [];
+    for (const f of picked) {
+      // One SKILL.md per file — no multi-document splitting ambiguity.
+      const source = await f.text();
+      staged.push(await parseOne(source, f.name));
+    }
+    setQueue((q) => [...q, ...staged]);
+    setBusy(false);
+  };
+
+  const updateSlug = (key: string, slug: string) =>
+    setQueue((q) => q.map((item) => (item.key === key ? { ...item, slug, status: 'ready', error: undefined } : item)));
+  const remove = (key: string) => setQueue((q) => q.filter((item) => item.key !== key));
+
+  // Intra-batch duplicate slugs block import until renamed.
+  const readySlugs = queue.filter((q) => q.parsed).map((q) => q.slug);
+  const dupSlugs = new Set(readySlugs.filter((s, i) => s && readySlugs.indexOf(s) !== i));
+  const importable = queue.filter((q) => q.parsed && q.slug && !dupSlugs.has(q.slug));
+  const overCap = queue.filter((q) => q.parsed).length > remainingSlots;
+
+  const importAll = async () => {
+    setBusy(true);
+    for (const item of importable) {
+      setQueue((q) => q.map((x) => (x.key === item.key ? { ...x, status: 'importing' } : x)));
+      try {
+        const skill = await authedPost<RegistrySkill>('/api/v1/skills', {
+          slug: item.slug,
+          name: item.parsed!.name,
+          description: item.parsed!.description,
+          version: item.parsed!.version,
+          instructions: item.parsed!.instructions,
+          source: 'skillmd',
+          isPublic: makePublic,
+        });
+        onCreated(skill, makePublic);
+        setQueue((q) => q.filter((x) => x.key !== item.key)); // done → selected chip below
+      } catch (e) {
+        // e.g. 409 SLUG_TAKEN — stays on the card; edit the slug and re-import.
+        setQueue((q) => q.map((x) => (x.key === item.key ? { ...x, status: 'error', error: (e as Error).message } : x)));
+      }
+    }
+    setBusy(false);
   };
 
   return (
     <div className="space-y-3">
-      <FormField label="Paste a SKILL.md" hint="Frontmatter + instructions. Bundled scripts are never imported.">
-        <FormTextarea rows={6} value={text} onChange={(e) => setText(e.target.value)} placeholder={'---\nname: my-skill\ndescription: …\n---\n\nInstructions for the agent…'} />
+      {/* Sources: multiple files, or repeated pastes — both feed the queue. */}
+      <div className="flex flex-wrap items-center gap-3">
+        <label className={`inline-flex items-center gap-2 px-3 py-1.5 border border-line text-xs cursor-pointer transition-colors ${slotsLeft <= 0 ? 'opacity-40 cursor-not-allowed' : 'hover:border-line-2 text-ink-2'}`}>
+          <Icon name="plus" size={12} />
+          Add SKILL.md files
+          <input
+            type="file"
+            multiple
+            accept=".md,.markdown,.txt"
+            className="hidden"
+            disabled={busy || slotsLeft <= 0}
+            onChange={(e) => { void addFiles(e.target.files); e.target.value = ''; }}
+          />
+        </label>
+        <span className="text-[11px] text-ink-3">
+          {slotsLeft > 0 ? `${slotsLeft} of ${MAX_SKILLS} skill slots left` : `Skill limit reached (${MAX_SKILLS} per agent)`}
+        </span>
+      </div>
+
+      <FormField label="Or paste a SKILL.md" hint="Frontmatter + instructions. Bundled scripts are never imported.">
+        <FormTextarea rows={5} value={text} onChange={(e) => setText(e.target.value)} placeholder={'---\nname: my-skill\ndescription: …\n---\n\nInstructions for the agent…'} />
       </FormField>
-      {!parsed ? (
-        <Button type="button" variant="outline" size="sm" label={busy ? 'Parsing…' : 'Parse'} onClick={parse} disabled={busy || text.trim().length === 0} />
-      ) : (
-        <div className="border border-line bg-surface-2 p-3 space-y-2">
-          <div className="text-sm text-ink font-medium">{parsed.name} <span className="text-ink-3 font-normal">v{parsed.version}</span></div>
-          {parsed.description && <div className="text-xs text-ink-2">{parsed.description}</div>}
-          {parsed.warnings.length > 0 && (
-            <div className="border-l-2 border-warn pl-2 py-0.5 space-y-1">
-              {parsed.warnings.map((w, i) => <div key={i} className="text-[11px] text-warn leading-snug">{w}</div>)}
+      <Button
+        type="button" variant="outline" size="sm"
+        label={busy ? 'Parsing…' : 'Add to import list'}
+        onClick={() => void addPaste()}
+        disabled={busy || text.trim().length === 0 || slotsLeft <= 0}
+      />
+
+      {/* Staged queue */}
+      {queue.length > 0 && (
+        <div className="space-y-2 pt-1">
+          {queue.map((item) => (
+            <div key={item.key} className={`border p-3 space-y-2 ${item.status === 'error' ? 'border-err/50 bg-err/5' : dupSlugs.has(item.slug) ? 'border-warn/50 bg-warn/5' : 'border-line bg-surface-2'}`}>
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  {item.parsed ? (
+                    <div className="text-sm text-ink font-medium truncate">
+                      {item.parsed.name} <span className="text-ink-3 font-normal">v{item.parsed.version}</span>
+                      <span className="ml-2 text-[10px] font-mono text-ink-3">{item.sourceLabel}</span>
+                    </div>
+                  ) : (
+                    <div className="text-sm text-err font-medium truncate">Couldn't parse {item.sourceLabel}</div>
+                  )}
+                  {item.parsed?.description && <div className="text-xs text-ink-2 mt-0.5 line-clamp-2">{item.parsed.description}</div>}
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  {item.status === 'importing' && <Spinner size={14} />}
+                  <button type="button" onClick={() => remove(item.key)} aria-label="Remove from import list" className="text-ink-3 hover:text-ink">
+                    <Icon name="x" size={13} />
+                  </button>
+                </div>
+              </div>
+              {item.parsed && item.parsed.warnings.length > 0 && (
+                <div className="border-l-2 border-warn pl-2 py-0.5 space-y-1">
+                  {item.parsed.warnings.map((w, i) => <div key={i} className="text-[11px] text-warn leading-snug">{w}</div>)}
+                </div>
+              )}
+              {item.parsed && (
+                <FormField label="Slug" hint={dupSlugs.has(item.slug) ? undefined : 'Unique id, lowercase kebab-case.'}>
+                  <FormInput type="text" value={item.slug} onChange={(e) => updateSlug(item.key, deriveSlug(e.target.value) || e.target.value)} placeholder="my-skill" />
+                </FormField>
+              )}
+              {dupSlugs.has(item.slug) && <div className="text-[11px] text-warn">Duplicate slug in this import list — rename one.</div>}
+              {item.error && <div className="text-xs text-err break-words">{item.error}</div>}
             </div>
-          )}
-          <pre className="whitespace-pre-wrap break-words text-[11px] text-ink-3 max-h-40 overflow-y-auto border border-line p-2">{parsed.instructions}</pre>
-          <FormField label="Slug" hint="Unique id, lowercase kebab-case.">
-            <FormInput type="text" value={slug} onChange={(e) => setSlug(e.target.value)} placeholder="my-skill" />
-          </FormField>
+          ))}
+
           <label className="flex items-center gap-2 text-xs text-ink-2">
             <input type="checkbox" checked={makePublic} onChange={(e) => setMakePublic(e.target.checked)} />
-            Publish to the registry (others can install it)
+            Publish to the registry (required for install at deploy; others can install too)
           </label>
-          <div className="flex gap-2">
-            <Button type="button" variant="primary" size="sm" label={busy ? 'Saving…' : 'Save & select'} onClick={create} disabled={busy || !slug} />
-            <Button type="button" variant="ghost" size="sm" label="Discard" onClick={() => setParsed(null)} />
-          </div>
+          {!makePublic && (
+            <div className="text-[11px] text-ink-3">
+              Private drafts are attached to your agent right after deploy (you'll stay signed in as the author).
+            </div>
+          )}
+
+          <Button
+            type="button" variant="primary" size="sm"
+            label={busy ? 'Importing…' : `Import ${importable.length} skill${importable.length === 1 ? '' : 's'}`}
+            onClick={() => void importAll()}
+            disabled={busy || importable.length === 0 || dupSlugs.size > 0 || overCap}
+          />
+          {overCap && <div className="text-[11px] text-warn">Too many skills staged — an agent can have at most {MAX_SKILLS}.</div>}
         </div>
       )}
-      {error && <div className="text-xs text-err">{error}</div>}
     </div>
   );
 }
