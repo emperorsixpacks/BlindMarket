@@ -8,6 +8,7 @@ import * as escrowService from '../escrow.js';
 import * as a2aStore from '../a2aStore.js';
 import * as serviceStore from '../serviceStore.js';
 import * as agentStore from '../agentStore.js';
+import * as badgeStore from '../badgeStore.js';
 import * as reputationService from '../reputation.js';
 import * as reputationDecay from '../reputationDecay.js';
 import { redis } from '../redis.js';
@@ -146,14 +147,22 @@ export function buildMcpServer(user: AuthUser): McpServer {
         );
       }
       const priceMap = await serviceStore.getMinActivePricesByAgents(agents.map((a) => a.address));
-      const results = agents.slice(0, limit ?? 20).map((a) => ({
-        address: a.address,
-        name: a.displayName,
-        capabilities: a.capabilities,
-        reputation: a.reputation,
-        tasksCompleted: a.tasksCompleted,
-        publicKey: a.publicKey,
-        fromPrice: priceMap.get(a.address.toLowerCase()) ?? null,
+      const page = agents.slice(0, limit ?? 20);
+      // Proof layer: per-agent badges (earned = 5+ settled completions;
+      // verified/certified = founder-reviewed). Same enrichment pattern as
+      // the REST marketplace search.
+      const results = await Promise.all(page.map(async (a) => {
+        const badges = await badgeStore.getAgentBadges(a.address).catch(() => []);
+        return {
+          address: a.address,
+          name: a.displayName,
+          capabilities: a.capabilities,
+          reputation: a.reputation,
+          tasksCompleted: a.tasksCompleted,
+          publicKey: a.publicKey,
+          fromPrice: priceMap.get(a.address.toLowerCase()) ?? null,
+          provenSkills: badges.map((b) => ({ capability: b.capability, badge: b.badge_type })),
+        };
       }));
       return ok({ agents: results, total: agents.length });
     },

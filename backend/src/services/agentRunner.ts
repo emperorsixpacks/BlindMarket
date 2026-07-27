@@ -13,7 +13,8 @@ import {
   touchHeartbeat, isAlive, getHeartbeat,
 } from './redis.js';
 import { saveAgent, loadAgent, loadAllAgents } from './deployedAgentStore.js';
-import type { DeployedAgent, AgentCapability, AgentStatus, LLMProvider, AgentTool } from '../types.js';
+import { composeAgentRuntime } from './skillComposer.js';
+import type { DeployedAgent, AgentCapability, AgentStatus, LLMProvider, AgentTool, InstalledSkill } from '../types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const WORKER_PATH = join(__dirname, '../../agents/worker.js');
@@ -148,6 +149,8 @@ export async function deployAgent(params: {
   tools?: AgentTool[];
   toolSecrets?: Record<string, string>;
   storageRef?: string;
+  /** Frozen skill snapshots, resolved server-side from slugs in routes/agents.ts. */
+  skills?: InstalledSkill[];
 }): Promise<DeployedAgent> {
   const { privateKey, publicKey } = generateKeyPair();
 
@@ -222,6 +225,7 @@ export async function deployAgent(params: {
     platformToken,
     toolSecrets: Object.keys(toolSecrets).length > 0 ? toolSecrets : undefined,
     encryptedToolSecrets: Object.keys(encryptedToolSecrets).length > 0 ? encryptedToolSecrets : undefined,
+    skills: params.skills?.length ? params.skills : undefined,
   };
 
   await saveAgent(agent);
@@ -262,13 +266,18 @@ export async function startAgent(id: string, opts?: { skipResume?: boolean }): P
   // Cap each agent worker at 128 MB so a leaky LLM call never OOMs the backend
   // or other agents. Without this the forked child inherits the parent's default
   // 2 GB heap limit, which on a 512 MB Render box means 9 agents = guaranteed OOM.
+  // Compose installed skills into the two env surfaces the worker consumes.
+  // With zero skills this is an exact passthrough (see skillComposer.ts) —
+  // the worker itself is skill-agnostic.
+  const composed = composeAgentRuntime(agent);
+
   const child = fork(WORKER_PATH, [], {
     execArgv: ['--max-old-space-size=128', '--import', 'tsx/esm'],
     env: {
       ...process.env,
       AGENT_ID: agent.id,
       AGENT_NAME: agent.name,
-      AGENT_INSTRUCTIONS: agent.instructions,
+      AGENT_INSTRUCTIONS: composed.instructions,
       AGENT_PROVIDER: agent.provider,
       AGENT_MODEL: agent.model,
       AGENT_API_KEY: agent.apiKey,
@@ -285,7 +294,7 @@ export async function startAgent(id: string, opts?: { skipResume?: boolean }): P
       // signs completeVerification directly against this contract.
       AGENT_ESCROW_ADDRESS: config.blindEscrowAddress,
       BACKEND_URL: `http://localhost:${config.port}`,
-      AGENT_TOOLS: JSON.stringify(agent.tools ?? []),
+      AGENT_TOOLS: JSON.stringify(composed.tools),
       AGENT_TOOL_SECRETS: JSON.stringify(agent.toolSecrets ?? {}),
       AGENT_CAPABILITIES: JSON.stringify(agent.capabilities ?? []),
       AGENT_MIN_REWARD: agent.minReward ?? '',
@@ -496,7 +505,7 @@ export async function listAgents(ownerAddress?: string): Promise<DeployedAgent[]
     : all;
 }
 
-export async function updateAgent(id: string, patch: Partial<Pick<DeployedAgent, 'instructions' | 'model' | 'tools' | 'capabilities' | 'minReward'>>): Promise<DeployedAgent | undefined> {
+export async function updateAgent(id: string, patch: Partial<Pick<DeployedAgent, 'instructions' | 'model' | 'tools' | 'capabilities' | 'minReward' | 'skills'>>): Promise<DeployedAgent | undefined> {
   const agent = await loadAgent(id);
   if (!agent) return undefined;
   // Strip undefined values before merging. Callers can send a subset of the

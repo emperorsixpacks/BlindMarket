@@ -520,7 +520,10 @@ export type LLMProvider = 'openai' | 'anthropic' | 'groq' | 'gemini' | '0g-compu
 
 export const LLM_PROVIDER_MODELS: Record<LLMProvider, string[]> = {
   openai:      ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo'],
-  anthropic:   ['claude-opus-4-5', 'claude-sonnet-4-5', 'claude-3-haiku-20240307'],
+  // Current Claude lineup first; opus-4-5/sonnet-4-5 kept (still active,
+  // ~40 deployed agents use them). claude-3-haiku-20240307 REMOVED —
+  // retired by Anthropic 2026-04-19, returns 404 (drop-in: claude-haiku-4-5).
+  anthropic:   ['claude-opus-4-8', 'claude-sonnet-5', 'claude-haiku-4-5', 'claude-opus-4-5', 'claude-sonnet-4-5'],
   groq:        ['llama-3.3-70b-versatile', 'llama3-8b-8192', 'mixtral-8x7b-32768'],
   gemini:      ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'],
   '0g-compute': ['deepseek-ai/DeepSeek-V3.1', 'qwen/qwen-2.5-7b-instruct', 'google/gemma-3-27b-it'],
@@ -565,6 +568,34 @@ export interface DeployedAgent {
   // Per-tool secrets (API keys, tokens) — ECIES-encrypted at rest
   toolSecrets?: Record<string, string>;              // plaintext, only in worker env
   encryptedToolSecrets?: Record<string, string>;     // ECIES blobs encrypted to owner pubkey
+  // Installed skills — frozen SNAPSHOTS, not live registry refs. A registry
+  // author edit must never silently repoint an agent's system prompt (the
+  // agent holds funds and can delegate_to_agent). Updates are explicit
+  // re-installs. Composed into AGENT_INSTRUCTIONS/AGENT_TOOLS at spawn by
+  // services/skillComposer.ts — the worker itself is skill-agnostic.
+  skills?: InstalledSkill[];
+}
+
+// ── Skills (agent-ready: installable behavior) ─────────────────────────────
+
+/** A skill snapshot frozen onto an agent at install time. Built server-side
+ *  from an agent_skills registry row (skillComposer.buildInstalledSkill) —
+ *  never accepted from a client. */
+export interface InstalledSkill {
+  skillId: number;
+  slug: string;
+  version: string;
+  name: string;
+  /** Markdown instructions, injected as a [SKILL: …] section of the system prompt. */
+  instructions: string;
+  /** Declarative tools only (normalized ToolDefinition + type:'tool'). */
+  tools: ToolDefinition[];
+  /** secret_ref manifest — drives the secrets UI at install time. */
+  secretRefs: string[];
+  /** Routing tags — unioned into agent.capabilities at deploy/install. */
+  capabilities: AgentCapability[];
+  source: 'local' | 'skillmd' | 'mcp' | 'openapi';
+  installedAt: string;
 }
 
 export interface TaskForensicRequirement {
