@@ -2,9 +2,57 @@ import { Router } from 'express';
 import { requireAuth, requireFounder } from '../middleware/auth.js';
 import * as a2aStore from '../services/a2aStore.js';
 import { shadowReport } from '../services/semanticMatch.js';
+import { backfillAgentEmbeddings } from '../services/agentEmbedding.js';
+import { getPool } from '../services/neonDb.js';
+import { embeddingModelId, embeddingsConfigured } from '../services/embeddingService.js';
 import type { AuthRequest } from '../types.js';
 
 export const adminRouter = Router();
+
+/**
+ * POST /api/v1/admin/backfill-embeddings  { force?: boolean }
+ *
+ * One-time (idempotent) op: embed every registered executor that has no
+ * current vector (or ?force to re-embed all). Existing prod agents were
+ * deployed before the embedding code and start with NULL vectors — until
+ * they're embedded, semantic matching has nothing to rank them by. Founder-
+ * gated; safe to re-run. Runs synchronously; may take a while on a large
+ * roster (one embedding call per agent), so callers should allow a generous
+ * timeout.
+ */
+adminRouter.post('/backfill-embeddings', requireAuth, requireFounder, async (req: AuthRequest, res, next) => {
+  try {
+    const force = !!(req.body as { force?: boolean })?.force;
+    const result = await backfillAgentEmbeddings({ force });
+    res.json({ success: true, data: { ...result, model: embeddingModelId(), real: embeddingsConfigured() } });
+  } catch (err) { next(err); }
+});
+
+/**
+ * GET /api/v1/admin/embedding-coverage
+ *
+ * How many registered executors carry a vector, by model — so we can see
+ * whether the backfill worked and whether they're REAL (voyage) vs mock.
+ */
+adminRouter.get('/embedding-coverage', requireAuth, requireFounder, async (_req: AuthRequest, res, next) => {
+  try {
+    const db = await getPool();
+    const total = await db.query<{ n: string }>('SELECT COUNT(*)::text AS n FROM agent_executors');
+    const withVec = await db.query<{ n: string }>('SELECT COUNT(*)::text AS n FROM agent_executors WHERE embedding IS NOT NULL');
+    const byModel = await db.query<{ embedding_model: string | null; n: string }>(
+      'SELECT embedding_model, COUNT(*)::text AS n FROM agent_executors WHERE embedding IS NOT NULL GROUP BY embedding_model',
+    );
+    res.json({
+      success: true,
+      data: {
+        totalAgents: Number(total.rows[0].n),
+        embedded: Number(withVec.rows[0].n),
+        activeModel: embeddingModelId(),
+        byModel: Object.fromEntries(byModel.rows.map((r) => [r.embedding_model ?? 'null', Number(r.n)])),
+      },
+    });
+  } catch (err) { next(err); }
+});
 
 /**
  * GET /api/v1/admin/match-shadow

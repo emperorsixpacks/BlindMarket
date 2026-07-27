@@ -2,6 +2,7 @@ import { getPool } from './neonDb.js';
 import { config } from '../config.js';
 import { embed, toVectorLiteral, embeddingModelId } from './embeddingService.js';
 import { rankAgents } from './agentScorer.js';
+import { buildAgentDoc } from './agentEmbedding.js';
 import type { A2ATaskMeta, AgentCapability } from '../types.js';
 
 /**
@@ -103,6 +104,26 @@ export async function rerankCandidates(
 }
 
 /**
+ * Rank registered agents for a piece of public routing text, by meaning:
+ * embed → KNN recall → optional rerank precision. Reusable core for the
+ * shadow log, the /semantic-candidates endpoint, and (in the next stage) the
+ * offer routing itself. `rerank` fetches each candidate's agent doc so the
+ * cross-encoder has real text to judge.
+ */
+export async function semanticRankedAgents(
+  routingText: string,
+  opts: { k?: number; rerank?: boolean } = {},
+): Promise<Array<SemanticCandidate | RerankedCandidate>> {
+  if (!routingText.trim()) return [];
+  const { vector } = await embed(routingText);
+  const candidates = await semanticCandidates(vector, opts.k ?? 10);
+  if (!opts.rerank || candidates.length === 0) return candidates;
+  const docByAddress = new Map<string, string>();
+  for (const c of candidates) docByAddress.set(c.address.toLowerCase(), await buildAgentDoc(c.address));
+  return rerankCandidates(routingText, candidates, docByAddress);
+}
+
+/**
  * Fire-and-forget shadow record for one freshly indexed task. Failures are
  * logged and swallowed — shadow measurement must never affect indexing.
  */
@@ -117,18 +138,28 @@ export async function recordMatchShadow(meta: A2ATaskMeta): Promise<void> {
       rankAgents((meta.requiredCapabilities ?? []) as AgentCapability[]).catch(() => []),
     ]);
 
+    // Also capture the reranked order when the reranker is enabled, so prod
+    // evidence includes embeddings+rerank (mirrors the offline eval bench).
+    let reranked: RerankedCandidate[] = [];
+    if (config.rerankEnabled && semantic.length > 0) {
+      const docByAddress = new Map<string, string>();
+      for (const c of semantic) docByAddress.set(c.address.toLowerCase(), await buildAgentDoc(c.address));
+      reranked = await rerankCandidates(routingText, semantic, docByAddress).catch(() => []);
+    }
+
     const db = await getPool();
     await db.query(
-      `INSERT INTO match_shadow_log (task_hash, routing_text, embedding_model, semantic_topk, tag_topk, required_capabilities)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO match_shadow_log (task_hash, routing_text, embedding_model, semantic_topk, semantic_rerank_topk, tag_topk, required_capabilities)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        ON CONFLICT (task_hash) DO UPDATE SET
-         routing_text = $2, embedding_model = $3, semantic_topk = $4, tag_topk = $5,
-         required_capabilities = $6, updated_at = NOW()`,
+         routing_text = $2, embedding_model = $3, semantic_topk = $4, semantic_rerank_topk = $5,
+         tag_topk = $6, required_capabilities = $7, updated_at = NOW()`,
       [
         meta.taskId.toLowerCase(),
         routingText,
         embeddingModelId(),
         JSON.stringify(semantic),
+        JSON.stringify(reranked),
         JSON.stringify(tagRanked.slice(0, 10).map((a) => ({ address: a.address, displayName: a.displayName, score: a.score }))),
         meta.requiredCapabilities ?? [],
       ],
@@ -165,16 +196,19 @@ export async function recordShadowOutcome(
 
 export interface ShadowRow {
   semantic_topk: Array<{ address: string }>;
+  semantic_rerank_topk?: Array<{ address: string }>;
   tag_topk: Array<{ address: string }>;
   accepted_by: string | null;
   settled: boolean | null;
 }
 
+export interface RankMetric { hit1: number; hit3: number; mrr: number }
 export interface ShadowMetrics {
   tasks: number;            // rows with a known acceptor
   settledTasks: number;
-  semantic: { hit1: number; hit3: number; mrr: number };
-  tag: { hit1: number; hit3: number; mrr: number };
+  semantic: RankMetric;
+  semanticRerank: RankMetric;
+  tag: RankMetric;
 }
 
 /** Rank (1-based) of the actual acceptor in a ranking, or 0 if absent. */
@@ -210,6 +244,9 @@ export function computeShadowMetrics(rows: ShadowRow[]): ShadowMetrics {
     tasks: scored.length,
     settledTasks: scored.filter((r) => r.settled === true).length,
     semantic: agg((r) => r.semantic_topk),
+    // Falls back to the semantic order for rows recorded before rerank capture
+    // (or when the reranker was disabled), so the metric stays comparable.
+    semanticRerank: agg((r) => (r.semantic_rerank_topk?.length ? r.semantic_rerank_topk : r.semantic_topk)),
     tag: agg((r) => r.tag_topk),
   };
 }

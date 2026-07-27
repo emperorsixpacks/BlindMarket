@@ -257,6 +257,38 @@ a2aRouter.get('/executors', async (req, res, next) => {
 });
 
 /**
+ * GET /api/v1/a2a/semantic-candidates
+ *
+ * Rank registered agents for a task BY MEANING (embeddings + optional rerank).
+ *   ?q=<routing text>       match against arbitrary public text, OR
+ *   ?taskHash=<indexed>     resolve the task's public routing text from meta
+ *   ?rerank=true            add the cross-encoder precision pass
+ *   ?k=<1..25>              how many candidates (default 10)
+ *
+ * Non-breaking: this only READS a ranking — it does not change accept gating,
+ * scoring, or offers (that's the next, gated stage). requireAuth because the
+ * rerank pass costs a provider call; gate anonymous abuse.
+ */
+a2aRouter.get('/semantic-candidates', requireAuth, async (req: AuthRequest, res, next) => {
+  try {
+    const k = Math.min(Math.max(parseInt(req.query.k as string) || 10, 1), 25);
+    const rerank = req.query.rerank === 'true';
+    let text = ((req.query.q as string) || '').trim();
+    if (!text && req.query.taskHash) {
+      const meta = await a2aStore.getMeta(req.query.taskHash as string);
+      if (meta) text = semanticMatch.buildTaskRoutingText(meta);
+    }
+    if (!text) {
+      throw new AppError(400, 'NO_ROUTING_TEXT', 'Provide ?q=<routing text> or ?taskHash=<an indexed task with public routing text>');
+    }
+    const candidates = await semanticMatch.semanticRankedAgents(text, { k, rerank });
+    res.json({ success: true, data: { candidates, reranked: rerank } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
  * GET /api/v1/a2a/tasks
  * Browse agent-targeted tasks (filter by capabilities, minReputation).
  */

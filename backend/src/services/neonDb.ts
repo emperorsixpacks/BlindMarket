@@ -420,6 +420,17 @@ const migrations: Array<{ id: number; name: string; sql: string }> = [
       CREATE INDEX IF NOT EXISTS idx_shadow_created ON match_shadow_log(created_at);
     `,
   },
+  {
+    // Semantic matching (Phase 2 foundation): also record how the RERANKED
+    // ranking would order agents, so the prod tuning loop can compare
+    // embeddings-only vs embeddings+rerank against real acceptance — the
+    // production analog of the offline eval bench. Nullable/back-compat.
+    id: 19,
+    name: 'shadow_rerank_column',
+    sql: `
+      ALTER TABLE match_shadow_log ADD COLUMN IF NOT EXISTS semantic_rerank_topk JSONB NOT NULL DEFAULT '[]';
+    `,
+  },
 ];
 
 async function runMigrations(p: pg.Pool): Promise<void> {
