@@ -132,10 +132,40 @@ export async function scoreAgent(
 }
 
 /**
+ * Shared "holds ALL required capability tags" predicate — the ONE definition
+ * used by the /accept gate, the /bid gate, and the semantic cascade's mirror
+ * of them, so an edit to the rule can't leave the ranking offering windows to
+ * agents the gates will 403.
+ */
+export function hasAllCapabilities(
+  agent: Pick<AgentExecutor, 'capabilities'>,
+  required: AgentCapability[],
+): boolean {
+  return required.every((c) => agent.capabilities.includes(c));
+}
+
+/**
+ * Shared minReward floor check — the ONE definition of "is this task's reward
+ * at or above the agent's declared floor". A malformed floor keeps the agent
+ * (never exclude on bad data). Used by rankAgents, pickExplorationAgent, and
+ * the semantic cascade ranking so the three paths can't drift.
+ */
+export function meetsRewardFloor(
+  agent: Pick<AgentExecutor, 'minReward'>,
+  taskReward: bigint | null,
+): boolean {
+  if (taskReward === null || !agent.minReward) return true;
+  try { return BigInt(agent.minReward) <= taskReward; } catch { return true; }
+}
+
+/**
  * Check if an agent has been assigned too many tasks recently (dominance cap).
  * Returns the penalty multiplier (1.0 = no penalty, 0.7 = soft taper).
+ * Exported so the semantic cascade ranking applies the same taper — without
+ * it a doc-stuffing agent could top the similarity queue on every task with
+ * no rate limit.
  */
-async function dominanceMultiplier(agentAddr: string): Promise<number> {
+export async function dominanceMultiplier(agentAddr: string): Promise<number> {
   const executorTasks = await a2aStore.getExecutorTasks(agentAddr);
   const cutoff = Date.now() - DOMINANCE_WINDOW_DAYS * 24 * 60 * 60 * 1000;
   const recentCount = executorTasks.filter((t) => {
@@ -171,13 +201,7 @@ export async function pickExplorationAgent(
 
   // Filter to eligible agents (minReward check)
   const taskReward = taskRewardWei ? BigInt(taskRewardWei) : null;
-  let eligible = agents;
-  if (taskReward !== null) {
-    eligible = agents.filter((a) => {
-      if (!a.minReward) return true;
-      try { return BigInt(a.minReward) <= taskReward; } catch { return true; }
-    });
-  }
+  const eligible = agents.filter((a) => meetsRewardFloor(a, taskReward));
 
   // Filter to "new" agents: fewer than EXPERIENCE_THRESHOLD completed tasks
   const newAgents = eligible.filter((a) => {
@@ -206,13 +230,7 @@ export async function rankAgents(
 
   // Filter by minReward
   const taskReward = taskRewardWei ? BigInt(taskRewardWei) : null;
-  let eligible = agents;
-  if (taskReward !== null) {
-    eligible = agents.filter((a) => {
-      if (!a.minReward) return true;
-      try { return BigInt(a.minReward) <= taskReward; } catch { return true; }
-    });
-  }
+  const eligible = agents.filter((a) => meetsRewardFloor(a, taskReward));
   if (eligible.length === 0) return [];
 
   const scored = await Promise.all(

@@ -100,6 +100,14 @@ export const config = {
   // before enabling in routing).
   rerankEnabled: optional('RERANK_ENABLED', 'false').toLowerCase() === 'true',
   rerankModel: optional('RERANK_MODEL', 'rerank-2.5'),
+  // Phase 2 FLIP: when true, the cascade's exclusive-offer queue is ranked by
+  // MEANING (semanticRankedAgents: embeddings + optional rerank) instead of the
+  // capability-tag scorer. The tag ranking stays as fallback whenever semantic
+  // can't produce candidates (no routing text, no embedded agents, provider
+  // error) and CAS-race broadcast remains the floor — the flip can never
+  // strand a task. Default OFF; enable as a monitored canary only after the
+  // shadow report agrees semantic ≥ tag on real outcomes.
+  semanticRoutingEnabled: optional('SEMANTIC_ROUTING_ENABLED', 'false').toLowerCase() === 'true',
 
   // Railway Sandboxes — ephemeral compute for agent tool execution
   railwayApiToken: process.env.RAILWAY_API_TOKEN || '',

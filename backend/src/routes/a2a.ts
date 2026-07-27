@@ -21,7 +21,7 @@ import { redis } from '../services/redis.js';
 import { ethers } from 'ethers';
 import type { AuthRequest, ApiResponse, AgentCapability } from '../types.js';
 import { AGENT_CAPABILITIES } from '../types.js';
-import { rankAgents, pickExplorationAgent } from '../services/agentScorer.js';
+import { rankAgents, pickExplorationAgent, hasAllCapabilities } from '../services/agentScorer.js';
 import { emitTaskOffer, emitTaskAvailable } from '../services/socket.js';
 import { EXPIRY_GRACE_SEC } from '../constants.js';
 import { config } from '../config.js';
@@ -402,7 +402,7 @@ a2aRouter.post('/tasks/:id/accept', requireAuth, async (req: AuthRequest, res, n
 
     // ── 3. Capability match (more expensive — do after cheap checks) ──────────
     if (meta.requiredCapabilities.length > 0) {
-      const hasAll = meta.requiredCapabilities.every((c) => agent.capabilities.includes(c));
+      const hasAll = hasAllCapabilities(agent, meta.requiredCapabilities);
       if (!hasAll) {
         console.warn(`[a2a] accept: capability mismatch for ${taskId}: agent has [${agent.capabilities.join(',')}], must have ALL of [${meta.requiredCapabilities.join(',')}]`);
         await a2aStore.logAcceptAttempt(taskId, address, 'rejected_precheck');
@@ -730,8 +730,7 @@ a2aRouter.post('/tasks/:id/bid', requireAuth, async (req: AuthRequest, res, next
       );
     }
     if (meta.requiredCapabilities.length > 0) {
-      const hasAll = meta.requiredCapabilities.every((c) => agent.capabilities.includes(c));
-      if (!hasAll) {
+      if (!hasAllCapabilities(agent, meta.requiredCapabilities)) {
         throw new AppError(
           403,
           'CAPABILITY_MISMATCH',
@@ -896,6 +895,12 @@ a2aRouter.get('/key-custody/pubkey', async (_req, res, next) => {
   }
 });
 
+/** task:available meta — caps included only when the task actually has them,
+ *  so every broadcast path emits the same shape. */
+function broadcastMeta(requiredCaps: string[]): Record<string, unknown> {
+  return requiredCaps.length > 0 ? { requiredCapabilities: requiredCaps } : {};
+}
+
 /**
  * Advance the cascade to the next ranked agent after the per-position offer
  * window expires. If the task has already been accepted (status !== open) or
@@ -906,7 +911,6 @@ a2aRouter.get('/key-custody/pubkey', async (_req, res, next) => {
 function scheduleCascadeAdvance(
   taskHash: string,
   requiredCaps: string[],
-  rootHash: string | undefined,
 ): void {
   setTimeout(async () => {
     try {
@@ -915,7 +919,7 @@ function scheduleCascadeAdvance(
 
       const next = await a2aStore.advanceCascade(taskHash);
       if (!next) {
-        emitTaskAvailable(taskHash, { requiredCapabilities: requiredCaps });
+        emitTaskAvailable(taskHash, broadcastMeta(requiredCaps));
         return;
       }
 
@@ -933,11 +937,87 @@ function scheduleCascadeAdvance(
         requiredCapabilities: requiredCaps,
       }, next.score, deadline);
 
-      scheduleCascadeAdvance(taskHash, requiredCaps, rootHash);
+      scheduleCascadeAdvance(taskHash, requiredCaps);
     } catch (err) {
       console.error(`[a2a] cascade advance failed for ${taskHash.slice(0, 10)}…:`, (err as Error).message);
     }
   }, a2aStore.CASCADE_OFFER_MS);
+}
+
+/**
+ * Rank agents and start the cascade of exclusive offers (position 0 first),
+ * or fall back to CAS-race broadcast when no ranked candidate exists. The
+ * Phase 2 FLIP lives here: when SEMANTIC_ROUTING_ENABLED, the offer queue is
+ * ranked by MEANING (semanticCascadeRanking — embeddings + optional rerank);
+ * the capability-tag scorer remains the fallback whenever semantic yields
+ * nothing, and a caps-less task that can't be semantically ranked broadcasts
+ * exactly as before the flip. Throws are handled by the caller (→ broadcast).
+ */
+async function startRankedCascade(
+  taskHash: string,
+  requiredCaps: AgentCapability[],
+  routingMeta: semanticMatch.RoutingMeta,
+  taskRewardWei: string,
+): Promise<void> {
+  const semantic = await semanticMatch.semanticCascadeRanking(routingMeta, taskRewardWei);
+  const tagEntries = async () =>
+    (await rankAgents(requiredCaps, taskRewardWei)).map((r) => ({
+      address: r.address,
+      score: r.score,
+      displayName: r.displayName,
+    }));
+  let entries = semantic ?? (requiredCaps.length > 0 ? await tagEntries() : []);
+  if (semantic && requiredCaps.length > 0) {
+    // Coverage guarantee carried over from the tag era: every registered
+    // agent holding the required caps still gets a cascade position. Semantic
+    // decides the FRONT of the queue; the tag ranking appends anyone the
+    // top-K KNN missed (e.g. an agent whose embedding write failed or whose
+    // vector is on a stale model). Best-effort — an append failure keeps the
+    // semantic queue rather than aborting to broadcast.
+    try {
+      const seen = new Set(entries.map((e) => e.address.toLowerCase()));
+      entries = entries.concat((await tagEntries()).filter((e) => !seen.has(e.address.toLowerCase())));
+    } catch (err) {
+      console.warn(`[a2a] tag-remainder append failed for ${taskHash.slice(0, 10)}…:`, (err as Error).message);
+    }
+  }
+  if (entries.length === 0) {
+    emitTaskAvailable(taskHash, broadcastMeta(requiredCaps));
+    return;
+  }
+
+  if (semantic) {
+    console.log(
+      `[a2a] semantic cascade for ${taskHash.slice(0, 10)}…: ${entries.length} candidates, top=${entries[0].address} (score=${entries[0].score})`,
+    );
+  }
+
+  // Same fire-and-forget Redis semantics as the pre-flip dispatch: a transient
+  // write failure must not abort the offer emit — without the offer/cascade
+  // keys, /accept simply CAS-races (no enforced exclusive window), which is
+  // graceful degradation rather than a stall.
+  a2aStore.setCascade(taskHash, entries).catch(() => {});
+  const best = entries[0];
+  const deadline = Date.now() + a2aStore.CASCADE_OFFER_MS;
+  a2aStore.setOffer(taskHash, {
+    address: best.address,
+    score: best.score,
+    expiresAt: deadline,
+  }).catch(() => {});
+  // rootHash deliberately omitted — unauthenticated WS room, see
+  // scheduleCascadeAdvance.
+  emitTaskOffer(best.address, taskHash, {
+    requiredCapabilities: requiredCaps,
+  }, best.score, deadline);
+  scheduleCascadeAdvance(taskHash, requiredCaps);
+
+  // Canary dial: which ranking produced the offers that were just emitted.
+  // Gated on the flag so flag-off stays a strict no-op (no new DB writes on
+  // the default path), and recorded after the emit so it reflects what was
+  // actually dispatched.
+  if (config.semanticRoutingEnabled && semanticMatch.buildTaskRoutingText(routingMeta)) {
+    void semanticMatch.markShadowRoutedBy(taskHash, semantic ? 'semantic' : 'tag');
+  }
 }
 
 a2aRouter.post('/tasks/index', requireAuth, async (req: AuthRequest, res, next) => {
@@ -1167,17 +1247,35 @@ a2aRouter.post('/tasks/index', requireAuth, async (req: AuthRequest, res, next) 
       routingSummary: data.routingSummary,
     });
 
+    // The meta slice both the shadow record and the routing decision read —
+    // built ONCE so the shadow log's routing text can never diverge from what
+    // the cascade actually ranked on.
+    const routingMeta: semanticMatch.RoutingMeta = {
+      requiredCapabilities: requiredCaps,
+      publicBrief: isPublic ? data.publicBrief : undefined,
+      routingSummary: data.routingSummary,
+      targetExecutor,
+      // Accept-gate mirror inputs: lets the semantic ranking skip agents whose
+      // /accept is guaranteed to 403 (poster, verifier, missing wrapped slice
+      // on a sealed no-custody task) instead of burning offer windows on them.
+      posterAddress: address,
+      verifierAddress: data.verifierAddress?.toLowerCase(),
+      wrappedKeys: mergedWrappedKeys,
+      privacy: isPublic ? 'public' : undefined,
+      rootHash: data.rootHash,
+      skipKeyWrap: existingMeta?.skipKeyWrap,
+      keyCustodyBlob: data.keyCustodyBlob,
+    };
+
     // Semantic matching (Phase 1 SHADOW): embed the task's public routing text
     // and record how semantic KNN would have ranked agents vs the live tag
     // ranking. Pure measurement — fire-and-forget, never affects indexing.
     void semanticMatch.recordMatchShadow({
+      ...routingMeta,
       taskId: taskHash,
       targetExecutorType: 'agent',
       verificationMode: data.verificationMode ?? 'manual',
-      requiredCapabilities: requiredCaps,
-      publicBrief: isPublic ? data.publicBrief : undefined,
-      routingSummary: data.routingSummary,
-    } as Parameters<typeof semanticMatch.recordMatchShadow>[0]);
+    });
 
     console.log(
       `[a2a] indexed taskHash=${taskHash.slice(0, 10)}… → onChainId=${onChainTaskId} poster=${address}`,
@@ -1190,93 +1288,65 @@ a2aRouter.post('/tasks/index', requireAuth, async (req: AuthRequest, res, next) 
     // Non-blocking: if scoring fails, the task is already in a2a:open for
     // CAS-race fallback.
     // When CASCADE_ENABLED=false, skip straight to CAS-race broadcast.
-    if (!config.cascadeEnabled || requiredCaps.length === 0) {
-      emitTaskAvailable(taskHash, requiredCaps.length > 0 ? { requiredCapabilities: requiredCaps } : {});
-    } else if (requiredCaps.length > 0) {
-      const taskRewardWei = onChainAmount;
-
-      // Cold-start: try the exploration slot first. If a new agent is picked,
-      // offer to them; if they pass or timeout, fall back to normal ranked flow.
-      const agentMode = existingMeta?.agentSelectionMode ?? 'merit';
-      pickExplorationAgent(requiredCaps, agentMode, taskRewardWei).then((explorationPick) => {
-        if (explorationPick) {
-          console.log(`[a2a] exploration slot: offering to new agent ${explorationPick.address} (score=${explorationPick.score})`);
-          const deadline = Date.now() + a2aStore.CASCADE_OFFER_MS;
-          a2aStore.setOffer(taskHash, {
-            address: explorationPick.address,
-            score: explorationPick.score,
-            expiresAt: deadline,
-          }).catch(() => {});
-          emitTaskOffer(explorationPick.address, taskHash, {
-            requiredCapabilities: requiredCaps,
-          }, explorationPick.score, deadline);
-          // If they pass/timeout, the cascade advance will run normal ranked flow.
-          scheduleCascadeAdvance(taskHash, requiredCaps, data.rootHash);
-          return;
-        }
-
-        // Normal ranked flow
-        rankAgents(requiredCaps, taskRewardWei).then((ranked) => {
-          if (ranked.length === 0) {
-            emitTaskAvailable(taskHash, { requiredCapabilities: requiredCaps });
-            return;
-          }
-          const cascadeEntries = ranked.map((r) => ({
-            address: r.address,
-            score: r.score,
-            displayName: r.displayName,
-          }));
-          a2aStore.setCascade(taskHash, cascadeEntries).catch(() => {});
-          // Offer to position 0
-          const best = ranked[0];
-          const deadline = Date.now() + a2aStore.CASCADE_OFFER_MS;
-          a2aStore.setOffer(taskHash, {
-            address: best.address,
-            score: best.score,
-            expiresAt: deadline,
-          }).catch(() => {});
-          // rootHash deliberately omitted — unauthenticated WS room, see above.
-          emitTaskOffer(best.address, taskHash, {
-            requiredCapabilities: requiredCaps,
-          }, best.score, deadline);
-          // Schedule advancement after the per-position window
-          scheduleCascadeAdvance(taskHash, requiredCaps, data.rootHash);
-        }).catch((err) => {
-          console.error(`[a2a] scoring/offer failed for ${taskHash.slice(0, 10)}…:`, (err as Error).message);
-          emitTaskAvailable(taskHash, { requiredCapabilities: requiredCaps });
-        });
-      }).catch((err) => {
-        console.error(`[a2a] exploration slot failed for ${taskHash.slice(0, 10)}…:`, (err as Error).message);
-        // Fallback: normal ranked flow
-        rankAgents(requiredCaps, taskRewardWei).then((ranked) => {
-          if (ranked.length === 0) {
-            emitTaskAvailable(taskHash, { requiredCapabilities: requiredCaps });
-            return;
-          }
-          const cascadeEntries = ranked.map((r) => ({
-            address: r.address,
-            score: r.score,
-            displayName: r.displayName,
-          }));
-          a2aStore.setCascade(taskHash, cascadeEntries).catch(() => {});
-          const best = ranked[0];
-          const deadline = Date.now() + a2aStore.CASCADE_OFFER_MS;
-          a2aStore.setOffer(taskHash, {
-            address: best.address,
-            score: best.score,
-            expiresAt: deadline,
-          }).catch(() => {});
-          emitTaskOffer(best.address, taskHash, {
-            requiredCapabilities: requiredCaps,
-          }, best.score, deadline);
-          scheduleCascadeAdvance(taskHash, requiredCaps, data.rootHash);
-        }).catch((fallbackErr) => {
-          console.error(`[a2a] fallback scoring/offer failed for ${taskHash.slice(0, 10)}…:`, (fallbackErr as Error).message);
-          emitTaskAvailable(taskHash, { requiredCapabilities: requiredCaps });
-        });
-      });
+    //
+    // Phase 2 FLIP: a semantically-eligible task (flag on, not pinned, has
+    // public routing text) enters the cascade even with ZERO capability tags —
+    // the whole point of routing by meaning is that tags become optional.
+    //
+    // A pinned (targetExecutor) task never cascades AT ALL: every exclusive
+    // offer would go to an agent whose /accept 403s NOT_TARGET_EXECUTOR while
+    // the offer lock 409s the one agent actually allowed to accept. Broadcast
+    // reaches the pinned agent immediately and the accept gate keeps everyone
+    // else out. (Pinned+capped tasks previously entered the tag cascade —
+    // that was this same lockout.)
+    const semanticEligible = semanticMatch.semanticRoutingEligible(routingMeta);
+    if (!config.cascadeEnabled || targetExecutor || (requiredCaps.length === 0 && !semanticEligible)) {
+      emitTaskAvailable(taskHash, broadcastMeta(requiredCaps));
     } else {
-      emitTaskAvailable(taskHash, {});
+      const taskRewardWei = onChainAmount;
+      const broadcastAfter = (err: Error, stage: string) => {
+        console.error(`[a2a] ${stage} failed for ${taskHash.slice(0, 10)}…:`, err.message);
+        emitTaskAvailable(taskHash, broadcastMeta(requiredCaps));
+      };
+
+      if (requiredCaps.length === 0) {
+        // Caps-less semantic path: skip the exploration slot. With no cap
+        // filter it would draw a random cold-start agent from the ENTIRE
+        // registry, and its pass/timeout path (advanceCascade with no cascade
+        // stored) broadcasts without semantic ranking ever running.
+        startRankedCascade(taskHash, requiredCaps, routingMeta, taskRewardWei)
+          .catch((err) => broadcastAfter(err as Error, 'semantic scoring/offer'));
+      } else {
+        // Cold-start: try the exploration slot first. If a new agent is picked,
+        // offer to them; if they pass or timeout, fall back to normal ranked flow.
+        const agentMode = existingMeta?.agentSelectionMode ?? 'merit';
+        pickExplorationAgent(requiredCaps, agentMode, taskRewardWei).then((explorationPick) => {
+          if (explorationPick) {
+            console.log(`[a2a] exploration slot: offering to new agent ${explorationPick.address} (score=${explorationPick.score})`);
+            const deadline = Date.now() + a2aStore.CASCADE_OFFER_MS;
+            a2aStore.setOffer(taskHash, {
+              address: explorationPick.address,
+              score: explorationPick.score,
+              expiresAt: deadline,
+            }).catch(() => {});
+            emitTaskOffer(explorationPick.address, taskHash, {
+              requiredCapabilities: requiredCaps,
+            }, explorationPick.score, deadline);
+            // If they pass/timeout, the cascade advance will run normal ranked flow.
+            scheduleCascadeAdvance(taskHash, requiredCaps);
+            return;
+          }
+
+          // Normal ranked flow (semantic when flipped, tag fallback inside).
+          return startRankedCascade(taskHash, requiredCaps, routingMeta, taskRewardWei)
+            .catch((err) => broadcastAfter(err as Error, 'scoring/offer'));
+        }).catch((err) => {
+          console.error(`[a2a] exploration slot failed for ${taskHash.slice(0, 10)}…:`, (err as Error).message);
+          // Fallback: normal ranked flow
+          startRankedCascade(taskHash, requiredCaps, routingMeta, taskRewardWei)
+            .catch((fallbackErr) => broadcastAfter(fallbackErr as Error, 'fallback scoring/offer'));
+        });
+      }
     }
 
     const body: ApiResponse = {

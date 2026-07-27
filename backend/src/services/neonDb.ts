@@ -431,6 +431,20 @@ const migrations: Array<{ id: number; name: string; sql: string }> = [
       ALTER TABLE match_shadow_log ADD COLUMN IF NOT EXISTS semantic_rerank_topk JSONB NOT NULL DEFAULT '[]';
     `,
   },
+  {
+    // Semantic matching (Phase 2 FLIP): record which ranking actually drove
+    // the cascade ('semantic' | 'tag'; NULL = broadcast, flag-off, or
+    // pre-flip row — written only while SEMANTIC_ROUTING_ENABLED). Once
+    // routing follows the semantic order, accepted_by agreeing with
+    // semantic_topk is self-fulfilling — this column lets the shadow metrics
+    // be segmented by router, and measures how often the flip engages vs
+    // falls back to tags.
+    id: 20,
+    name: 'shadow_routed_by_column',
+    sql: `
+      ALTER TABLE match_shadow_log ADD COLUMN IF NOT EXISTS routed_by TEXT;
+    `,
+  },
 ];
 
 async function runMigrations(p: pg.Pool): Promise<void> {

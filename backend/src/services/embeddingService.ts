@@ -24,6 +24,15 @@ export interface EmbeddingResult {
 
 const DIM = () => config.embeddingDim;
 
+/**
+ * Hard cap on provider round-trips. The routing flip put embed (and rerank)
+ * on the task-dispatch critical path — without this, a blackholed provider
+ * connection would sit on undici's ~300s default and stall every task:offer /
+ * task:available emit for that task. A timeout rejects fast, the memo evicts
+ * the failed promise, and the caller degrades (routing → tag fallback).
+ */
+export const EMBED_FETCH_TIMEOUT_MS = 10_000;
+
 /** True when a real provider + key are configured (else we're on the mock path). */
 export function embeddingsConfigured(): boolean {
   return config.embeddingProvider !== 'mock' && !!config.embeddingApiKey;
@@ -78,6 +87,7 @@ async function voyageEmbed(texts: string[]): Promise<number[][]> {
       output_dimension: config.embeddingDim,
       input_type: 'document',
     }),
+    signal: AbortSignal.timeout(EMBED_FETCH_TIMEOUT_MS),
   });
   if (!res.ok) {
     throw new Error(`Voyage embeddings failed: ${res.status} ${await res.text().catch(() => '')}`.slice(0, 300));
@@ -98,6 +108,7 @@ async function openaiEmbed(texts: string[]): Promise<number[][]> {
       input: texts,
       dimensions: config.embeddingDim, // Matryoshka truncation to the fixed dim
     }),
+    signal: AbortSignal.timeout(EMBED_FETCH_TIMEOUT_MS),
   });
   if (!res.ok) {
     throw new Error(`OpenAI embeddings failed: ${res.status} ${await res.text().catch(() => '')}`.slice(0, 300));
@@ -122,9 +133,39 @@ export async function embedMany(texts: string[]): Promise<EmbeddingResult> {
   return { vectors, model: config.embeddingModel };
 }
 
+/**
+ * Short-TTL memo for single-text embeds, keyed by (model, text-hash). The
+ * dispatch path embeds the same routing text twice per indexed task — once for
+ * the shadow record, once for flip routing — in the same tick; caching the
+ * in-flight PROMISE collapses those into one paid provider call (and dedupes
+ * repeated /semantic-candidates queries). Failed promises are evicted so an
+ * error is never served from cache.
+ */
+const EMBED_CACHE_TTL_MS = 5 * 60 * 1000;
+const EMBED_CACHE_MAX = 200;
+const embedCache = new Map<string, { at: number; promise: Promise<{ vector: number[]; model: string }> }>();
+
 export async function embed(text: string): Promise<{ vector: number[]; model: string }> {
-  const { vectors, model } = await embedMany([text]);
-  return { vector: vectors[0], model };
+  const key = `${embeddingModelId()}:${createHash('sha256').update(text).digest('hex')}`;
+  const hit = embedCache.get(key);
+  if (hit && Date.now() - hit.at < EMBED_CACHE_TTL_MS) return hit.promise;
+  // Delete before re-set: Map.set on an existing key keeps its ORIGINAL
+  // insertion position, so a TTL-refresh would otherwise stay first in line
+  // for the size-cap eviction below.
+  if (hit) embedCache.delete(key);
+  const promise = embedMany([text]).then(({ vectors, model }) => ({ vector: vectors[0], model }));
+  embedCache.set(key, { at: Date.now(), promise });
+  // Evict on failure — but only if the slot still holds THIS promise (a late
+  // rejection must not delete a newer healthy entry cached under the same key).
+  promise.catch(() => {
+    if (embedCache.get(key)?.promise === promise) embedCache.delete(key);
+  });
+  if (embedCache.size > EMBED_CACHE_MAX) {
+    // Maps iterate in insertion order — drop the oldest entry.
+    const oldest = embedCache.keys().next().value;
+    if (oldest !== undefined) embedCache.delete(oldest);
+  }
+  return promise;
 }
 
 /** pgvector literal — a bracketed comma list, e.g. "[0.1,0.2,…]". */
