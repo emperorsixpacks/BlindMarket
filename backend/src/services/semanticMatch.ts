@@ -99,8 +99,12 @@ export async function rerankCandidates(
     throw new Error(`Voyage rerank failed: ${res.status} ${await res.text().catch(() => '')}`.slice(0, 300));
   }
   const json = (await res.json()) as { data: Array<{ index: number; relevance_score: number }> };
-  // Voyage returns items sorted by relevance; `index` points back into `candidates`.
-  return json.data.map((d) => ({ ...candidates[d.index], rerankScore: d.relevance_score }));
+  // Voyage returns items sorted by relevance; `index` points back into
+  // `candidates`. Bounds-check so a malformed index never yields an entry with
+  // an undefined address (which would later 500 the metrics path).
+  return json.data
+    .filter((d) => d.index >= 0 && d.index < candidates.length)
+    .map((d) => ({ ...candidates[d.index], rerankScore: d.relevance_score }));
 }
 
 /**
@@ -110,6 +114,12 @@ export async function rerankCandidates(
  * offer routing itself. `rerank` fetches each candidate's agent doc so the
  * cross-encoder has real text to judge.
  */
+/** Parallel agent-doc fetch for the reranker (independent DB reads). */
+async function docsForCandidates(candidates: SemanticCandidate[]): Promise<Map<string, string>> {
+  const docs = await Promise.all(candidates.map((c) => buildAgentDoc(c.address).catch(() => c.displayName)));
+  return new Map(candidates.map((c, i) => [c.address.toLowerCase(), docs[i]]));
+}
+
 export async function semanticRankedAgents(
   routingText: string,
   opts: { k?: number; rerank?: boolean } = {},
@@ -118,9 +128,14 @@ export async function semanticRankedAgents(
   const { vector } = await embed(routingText);
   const candidates = await semanticCandidates(vector, opts.k ?? 10);
   if (!opts.rerank || candidates.length === 0) return candidates;
-  const docByAddress = new Map<string, string>();
-  for (const c of candidates) docByAddress.set(c.address.toLowerCase(), await buildAgentDoc(c.address));
-  return rerankCandidates(routingText, candidates, docByAddress);
+  // Degrade gracefully: a reranker blip falls back to the embeddings-only
+  // ranking rather than 500-ing the caller.
+  try {
+    return await rerankCandidates(routingText, candidates, await docsForCandidates(candidates));
+  } catch (err) {
+    console.warn('[semanticMatch] rerank failed, returning embeddings-only order:', (err as Error).message);
+    return candidates;
+  }
 }
 
 /**
@@ -140,11 +155,16 @@ export async function recordMatchShadow(meta: A2ATaskMeta): Promise<void> {
 
     // Also capture the reranked order when the reranker is enabled, so prod
     // evidence includes embeddings+rerank (mirrors the offline eval bench).
+    // Its OWN try/catch: a rerank/doc-fetch failure must never abort the
+    // semantic+tag row write (before this the whole shadow row was dropped,
+    // silently gapping the tuning dataset).
     let reranked: RerankedCandidate[] = [];
     if (config.rerankEnabled && semantic.length > 0) {
-      const docByAddress = new Map<string, string>();
-      for (const c of semantic) docByAddress.set(c.address.toLowerCase(), await buildAgentDoc(c.address));
-      reranked = await rerankCandidates(routingText, semantic, docByAddress).catch(() => []);
+      try {
+        reranked = await rerankCandidates(routingText, semantic, await docsForCandidates(semantic));
+      } catch (rerankErr) {
+        console.warn(`[semanticMatch] rerank capture failed for ${meta.taskId.slice(0, 10)}… (row still written):`, (rerankErr as Error).message);
+      }
     }
 
     const db = await getPool();
@@ -211,9 +231,11 @@ export interface ShadowMetrics {
   tag: RankMetric;
 }
 
-/** Rank (1-based) of the actual acceptor in a ranking, or 0 if absent. */
-function rankOf(list: Array<{ address: string }>, addr: string): number {
-  const i = list.findIndex((e) => e.address.toLowerCase() === addr);
+/** Rank (1-based) of the actual acceptor in a ranking, or 0 if absent.
+ *  Tolerates malformed entries (missing address) so a bad persisted row can't
+ *  crash the admin report. */
+function rankOf(list: Array<{ address?: string }>, addr: string): number {
+  const i = list.findIndex((e) => e.address?.toLowerCase() === addr);
   return i === -1 ? 0 : i + 1;
 }
 

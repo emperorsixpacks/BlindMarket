@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { requireAuth } from '../middleware/auth.js';
+import { createUserRateLimiter } from '../middleware/rateLimit.js';
 import { AppError } from '../middleware/errorHandler.js';
 import * as agentStore from '../services/agentStore.js';
 import * as a2aStore from '../services/a2aStore.js';
@@ -266,16 +267,23 @@ a2aRouter.get('/executors', async (req, res, next) => {
  *   ?k=<1..25>              how many candidates (default 10)
  *
  * Non-breaking: this only READS a ranking — it does not change accept gating,
- * scoring, or offers (that's the next, gated stage). requireAuth because the
- * rerank pass costs a provider call; gate anonymous abuse.
+ * scoring, or offers (that's the next, gated stage). Each call spends a paid
+ * embedding (+ rerank) provider call, so it's requireAuth AND a
+ * per-wallet rate limit (keyed by principal, so rotating IPs / many agents
+ * can't run up the provider bill).
  */
-a2aRouter.get('/semantic-candidates', requireAuth, async (req: AuthRequest, res, next) => {
+const semanticCandidatesLimiter = createUserRateLimiter(20);
+a2aRouter.get('/semantic-candidates', requireAuth, semanticCandidatesLimiter, async (req: AuthRequest, res, next) => {
   try {
-    const k = Math.min(Math.max(parseInt(req.query.k as string) || 10, 1), 25);
-    const rerank = req.query.rerank === 'true';
-    let text = ((req.query.q as string) || '').trim();
-    if (!text && req.query.taskHash) {
-      const meta = await a2aStore.getMeta(req.query.taskHash as string);
+    // Express parses repeated/bracketed params as arrays — coerce to a single
+    // string so a `?q=a&q=b` can't throw a 500 in the string ops below.
+    const first = (v: unknown): string => (Array.isArray(v) ? (v[0] ?? '') : (v ?? '')).toString();
+    const k = Math.min(Math.max(parseInt(first(req.query.k)) || 10, 1), 25);
+    const rerank = first(req.query.rerank) === 'true';
+    let text = first(req.query.q).trim();
+    const taskHash = first(req.query.taskHash);
+    if (!text && taskHash) {
+      const meta = await a2aStore.getMeta(taskHash);
       if (meta) text = semanticMatch.buildTaskRoutingText(meta);
     }
     if (!text) {

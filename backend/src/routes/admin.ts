@@ -37,11 +37,13 @@ adminRouter.post('/backfill-embeddings', requireAuth, requireFounder, async (req
 adminRouter.get('/embedding-coverage', requireAuth, requireFounder, async (_req: AuthRequest, res, next) => {
   try {
     const db = await getPool();
-    const total = await db.query<{ n: string }>('SELECT COUNT(*)::text AS n FROM agent_executors');
-    const withVec = await db.query<{ n: string }>('SELECT COUNT(*)::text AS n FROM agent_executors WHERE embedding IS NOT NULL');
-    const byModel = await db.query<{ embedding_model: string | null; n: string }>(
-      'SELECT embedding_model, COUNT(*)::text AS n FROM agent_executors WHERE embedding IS NOT NULL GROUP BY embedding_model',
-    );
+    const [total, withVec, byModel] = await Promise.all([
+      db.query<{ n: string }>('SELECT COUNT(*)::text AS n FROM agent_executors'),
+      db.query<{ n: string }>('SELECT COUNT(*)::text AS n FROM agent_executors WHERE embedding IS NOT NULL'),
+      db.query<{ embedding_model: string | null; n: string }>(
+        'SELECT embedding_model, COUNT(*)::text AS n FROM agent_executors WHERE embedding IS NOT NULL GROUP BY embedding_model',
+      ),
+    ]);
     res.json({
       success: true,
       data: {
