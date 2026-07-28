@@ -777,7 +777,13 @@ agentsRouter.delete('/:id/skills/:slug', requireAuth, async (req: AuthRequest, r
 
 // GET /api/v1/agents/:id
 agentsRouter.get('/:id', async (req, res) => {
-  const agent = await getAgent(req.params.id);
+  // The marketplace links agents by WALLET ADDRESS while MyAgents links by
+  // agent id — resolve both, or every Browse-agents click 404s for visitors.
+  let agent = await getAgent(req.params.id);
+  if (!agent && /^0x[0-9a-fA-F]{40}$/.test(req.params.id)) {
+    const needle = req.params.id.toLowerCase();
+    agent = (await listAgents()).find((a) => a.walletAddress?.toLowerCase() === needle);
+  }
   if (!agent) { res.status(404).json({ success: false, error: 'Not found' }); return; }
   const stripped = strip(agent)!;
   const [onChain, decayed] = await Promise.all([

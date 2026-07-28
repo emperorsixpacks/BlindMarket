@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { useBalance, useWalletClient } from 'wagmi';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -6,45 +6,30 @@ import { BrowserProvider, parseEther, formatUnits } from 'ethers';
 import {
   Breadcrumb,
   SectionRule,
-  Tag,
-  StatCard,
   Button,
-  FormField,
-  FormInput,
-  FormTextarea,
-  StatusTag,
   LoadingState,
   EmptyState,
   ErrorState,
-  Icon,
-  ConfirmDialog,
-  useTabParam,
-  AgentAvatar,
 } from '../components/bb';
-import { truncateAddress } from '../lib/utils';
-import { get, authedGet, authedPatch, authedPost, authedDelete } from '../lib/api';
-import { API_BASE_URL, OG_CHAIN_CONFIG } from '../config/constants';
+import { get, authedGet, authedPost } from '../lib/api';
 import { useChainAddress } from '../hooks/useChainWallet';
 import { getNativeCurrency } from '../config/constants';
-import { ToolManager, type AnyTool } from '../components/bb/ToolManager';
 import {
   getAgentReviews,
-  submitReview,
   getAgentBadges,
-  getWebhooks,
-  registerWebhook as apiRegisterWebhook,
-  deleteWebhook,
   listServices,
-  getAgentServices,
-  createService,
-  updateService,
-  deleteService,
 } from '../services/marketplace';
-import type { AgentReview, AgentReviewStats, AgentBadge, AgentWebhook, AgentService } from '../services/marketplace';
+import type { AgentReview, AgentReviewStats, AgentBadge, AgentService } from '../services/marketplace';
 
-import AgentMetricsPanel from '../components/AgentMetricsPanel';
-import UseServiceModal from '../components/UseServiceModal';
-import UseFromAgentModal from '../components/UseFromAgentModal';
+import { AgentHeader } from '../components/agent/AgentHeader';
+import { AgentStats } from '../components/agent/AgentStats';
+import { AgentTasks } from '../components/agent/AgentTasks';
+import { GasBar } from '../components/agent/GasBar';
+import { IdentityPanel } from '../components/agent/IdentityPanel';
+import { OpsConsole } from '../components/agent/OpsConsole';
+import { ReviewsSection } from '../components/agent/ReviewsSection';
+import { ServicesSection } from '../components/agent/ServicesSection';
+import type { AgentDetails, SkillStat } from '../components/agent/types';
 
 // Top-up amount when the agent runs low on gas. Same default as the deploy
 // funding step — round trip + LLM call + submitEvidence costs ~0.0004 0G, so
@@ -54,36 +39,6 @@ const TOP_UP_AMOUNT = '0.005';
 // Below this the agent can't reliably pay for a submitEvidence + a USDC sweep
 // tx. UI surfaces a "Top up gas" call to action when balance is under this.
 const LOW_GAS_THRESHOLD = 0.005;
-
-interface AgentTool {
-  type: string; name: string; description: string; url?: string; endpointUrl?: string; method?: string; toolName?: string;
-  headers?: { name: string; value: string; isSensitive: boolean }[];
-}
-interface AgentDetails {
-  id: string; name: string; provider: string; model: string; status: string;
-  ownerAddress: string; deployedAt: string; instructions: string;
-  walletAddress?: string; publicKey?: string; inftTokenId?: number;
-  tasksCompleted?: number; totalEarned?: string; tools?: AgentTool[];
-  capabilities?: string[];
-  skills?: InstalledSkillMeta[];
-  minReward?: string;
-  reputation?: { score: number; avgScore: number; tasksCompleted: number; disputes: number };
-  decayedReputation?: { rawScore: number; decayedScore: number; tasksCompleted: number; disputes: number };
-}
-
-type Tab = 'logs' | 'tools' | 'errors' | 'tasks' | 'services' | 'reviews' | 'webhooks' | 'edit' | 'metrics';
-
-const TAB_LABELS: Record<Tab, string> = {
-  logs: 'Logs',
-  tools: 'Tools',
-  errors: 'Errors',
-  tasks: 'Tasks',
-  services: 'Services',
-  reviews: 'Reviews',
-  webhooks: 'Webhooks',
-  edit: 'Edit',
-  metrics: 'Metrics',
-};
 
 const ACTION_LABELS: Record<'start' | 'pause' | 'stop' | 'restart', string> = {
   start: 'Start',
@@ -101,47 +56,23 @@ export default function AgentDetail() {
   const [agent, setAgent] = useState<AgentDetails | null>(null);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(false);
-  const [logs, setLogs] = useState<string[]>([]);
-  const [errorLogs, setErrorLogs] = useState<any[]>([]);
-  const [errorLogsTotal, setErrorLogsTotal] = useState(0);
-  const [errorLogsLoading, setErrorLogsLoading] = useState(false);
-  const [tab, setTabParam] = useTabParam<Tab>('logs', Object.keys(TAB_LABELS) as Tab[]);
   const [searchParams] = useSearchParams();
-  // Audience-aware default: buyers land on the storefront (Services), the
-  // owner lands on the console (Logs). Once the user picks a tab — or the
-  // URL carries ?tab= — that choice wins. (useTabParam keeps the URL clean
-  // for its own default, so presence alone can't express "user chose logs".)
-  const [userPickedTab, setUserPickedTab] = useState(false);
-  const setTab = (t: Tab) => {
-    setUserPickedTab(true);
-    setTabParam(t);
-  };
-  const [descExpanded, setDescExpanded] = useState(false);
-  const [autoScroll, setAutoScroll] = useState(true);
-  const logContainerRef = useRef<HTMLDivElement>(null);
 
-  // Edit state
-  const [editInstructions, setEditInstructions] = useState('');
-  const [editModel, setEditModel] = useState('');
-  const [editMinReward, setEditMinReward] = useState('');
-  const [editTools, setEditTools] = useState<AnyTool[]>([]);
-  const [toolsSaved, setToolsSaved] = useState(false);
+  // Canonical id for API calls. The route param may be a WALLET ADDRESS
+  // (Browse links by address; the GET endpoint resolves both) but the
+  // action/PATCH/console endpoints resolve by agent id only — so once the
+  // record loads, talk to the API by its real id, not the raw param.
+  const apiId = agent?.id ?? id ?? '';
 
   // Reviews state
   const [reviews, setReviews] = useState<AgentReview[]>([]);
   const [reviewStats, setReviewStats] = useState<AgentReviewStats | null>(null);
-  const [reviewRating, setReviewRating] = useState(5);
-  const [reviewText, setReviewText] = useState('');
-  const [reviewSubmitting, setReviewSubmitting] = useState(false);
-  const [reviewSubmitError, setReviewSubmitError] = useState('');
 
   // Badges state
   const [badges, setBadges] = useState<AgentBadge[]>([]);
   // Per-skill track record (settled completions/failures per capability tag) —
   // the proof layer buyers hire on.
-  const [skillStats, setSkillStats] = useState<Array<{ capability: string; tasks_completed: number; tasks_failed: number }>>([]);
-  // Installed-skill snapshots (owner management in the Edit tab).
-  const [installedSkills, setInstalledSkills] = useState<InstalledSkillMeta[]>([]);
+  const [skillStats, setSkillStats] = useState<SkillStat[]>([]);
 
   // Gas-management UI state — separate from the agent's start/pause/stop
   // actions so the buttons can show their own progress without interfering.
@@ -178,19 +109,7 @@ export default function AgentDetail() {
     setLoading(true);
     setFetchError(false);
     get<AgentDetails>(`/api/v1/agents/${id}`)
-      .then(data => {
-        setAgent(data);
-        setEditInstructions(data.instructions ?? '');
-        setEditModel(data.model ?? '');
-        setInstalledSkills(data.skills ?? []);
-        setEditMinReward(
-          // Decimal-preserving: integer BigInt division floored a fractional
-          // minReward (0.5 0G -> '0'), which Save then persisted as 0, silently
-          // disabling the min-reward gate so the agent accepted 0-reward tasks.
-          data.minReward ? formatUnits(data.minReward, 18) : '',
-        );
-        setEditTools((data.tools ?? []) as AnyTool[]);
-      })
+      .then(data => setAgent(data))
       // A rejected fetch can't tell 404 from a transient 500/network drop, so
       // surface a retryable error rather than masquerading as "not found".
       .catch(() => setFetchError(true))
@@ -199,113 +118,87 @@ export default function AgentDetail() {
 
   useEffect(() => { loadAgent(); }, [loadAgent]);
 
+  const agentWallet = agent?.walletAddress;
+
   useEffect(() => {
-    if (!agent?.walletAddress) return;
+    if (!agentWallet) return;
     let cancelled = false;
-    getAgentBadges(agent.walletAddress).then(b => { if (!cancelled) setBadges(b); }).catch(() => {});
-    authedGet<{ stats: Array<{ capability: string; tasks_completed: number; tasks_failed: number }> }>(
-      `/api/v1/marketplace/skill-stats/${agent.walletAddress}`,
+    getAgentBadges(agentWallet).then(b => { if (!cancelled) setBadges(b); }).catch(() => {});
+    authedGet<{ stats: SkillStat[] }>(
+      `/api/v1/marketplace/skill-stats/${agentWallet}`,
     ).then(r => { if (!cancelled) setSkillStats(r.stats ?? []); }).catch(() => {});
     return () => { cancelled = true; };
-  }, [agent?.walletAddress]);
+  }, [agentWallet]);
 
-  useEffect(() => {
-    if (!agent?.walletAddress) return;
-    let cancelled = false;
-    getAgentReviews(agent.walletAddress, 20)
-      .then((result) => {
-        if (!cancelled) { setReviews(result.reviews); setReviewStats(result.stats); }
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [agent?.walletAddress]);
+  // Public service list — lifted out of the services section because the
+  // header's from-price and the "services sold" stat read the same data.
+  const [services, setServices] = useState<AgentService[] | null>(null);
+  const [servicesLoading, setServicesLoading] = useState(true);
+  const [servicesError, setServicesError] = useState(false);
 
-  // Fetch error logs for the errors tab
-  useEffect(() => {
-    if (!id || tab !== 'errors') return;
-    let cancelled = false;
-    setErrorLogsLoading(true);
-    authedGet<{ entries: any[]; total: number }>(`/api/v1/tools/error-logs?agentId=${id}`)
-      .then((result) => {
-        if (!cancelled) {
-          setErrorLogs(result.entries);
-          setErrorLogsTotal(result.total);
-        }
-      })
-      .catch(() => {})
-      .finally(() => { if (!cancelled) setErrorLogsLoading(false); });
-    return () => { cancelled = true; };
-  }, [id, tab]);
-
-  useEffect(() => {
-    if (!id) return;
-    const es = new EventSource(`${API_BASE_URL}/api/v1/agents/${id}/logs`);
-    es.onmessage = e => {
-      try { setLogs(prev => [...prev.slice(-199), JSON.parse(e.data)]); } catch { }
-    };
-    return () => es.close();
-  }, [id]);
-
-  // Auto-scroll to bottom when new logs arrive
-  useEffect(() => {
-    if (autoScroll && logContainerRef.current) {
-      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+  const reloadServices = useCallback(async () => {
+    if (!agentWallet) { setServices([]); setServicesLoading(false); return; }
+    setServicesLoading(true);
+    setServicesError(false);
+    try {
+      const res = await listServices(agentWallet);
+      setServices(res.services);
+    } catch {
+      setServicesError(true);
+    } finally {
+      setServicesLoading(false);
     }
-  }, [logs, autoScroll]);
+  }, [agentWallet]);
 
-  // Auto-scroll to bottom when logs tab is first opened
+  useEffect(() => { reloadServices(); }, [reloadServices]);
+
+  // Cheapest active listing, mirroring the marketplace card's from-price.
+  // Per-value try/catch: one malformed price_raw must not blank the label.
+  const fromPrice = useMemo(() => {
+    let min: bigint | null = null;
+    for (const s of services ?? []) {
+      if (s.active === false) continue;
+      try {
+        const v = BigInt(s.price_raw);
+        if (min === null || v < min) min = v;
+      } catch { /* skip malformed price */ }
+    }
+    if (min === null) return null;
+    try { return `from ${formatUnits(min, 18)} ${balanceSymbol} / call`; } catch { return null; }
+  }, [services, balanceSymbol]);
+
+  const servicesSold = useMemo(() => {
+    const total = (services ?? []).reduce((n, s) => n + (s.sold_count ?? 0), 0);
+    return total > 0 ? total : null;
+  }, [services]);
+
+  const reloadReviews = useCallback(async () => {
+    if (!agentWallet) return;
+    try {
+      const result = await getAgentReviews(agentWallet, 20);
+      setReviews(result.reviews);
+      setReviewStats(result.stats);
+    } catch { /* reputation is additive — a failed refetch just leaves the list */ }
+  }, [agentWallet]);
+
+  useEffect(() => { reloadReviews(); }, [reloadReviews]);
+
+  // Deep-link compatibility: ?tab=services|reviews|tasks used to select a tab.
+  // Those panels are flat sections now, so scroll to the section once the
+  // agent (and therefore the section) has rendered.
+  const deepLinkScrolled = useRef(false);
   useEffect(() => {
-    if (tab === 'logs' && logContainerRef.current) {
-      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
-    }
-  }, [tab]);
-
-  const scrollToBottom = () => {
-    if (logContainerRef.current) {
-      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
-      setAutoScroll(true);
-    }
-  };
-
-  const scrollToTop = () => {
-    if (logContainerRef.current) {
-      logContainerRef.current.scrollTop = 0;
-      setAutoScroll(false);
-    }
-  };
-
-  const handleLogScroll = () => {
-    if (!logContainerRef.current) return;
-    const { scrollTop, scrollHeight, clientHeight } = logContainerRef.current;
-    setAutoScroll(scrollTop + clientHeight >= scrollHeight - 20);
-  };
+    if (deepLinkScrolled.current || !agent) return;
+    const raw = searchParams.get('tab');
+    if (raw !== 'services' && raw !== 'reviews' && raw !== 'tasks') return;
+    deepLinkScrolled.current = true;
+    document.getElementById(raw)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [agent, searchParams]);
 
   const action = useMutation({
     mutationFn: (act: 'start' | 'pause' | 'stop' | 'restart') =>
-      authedPost<AgentDetails>(`/api/v1/agents/${id}/${act}`, {}),
+      authedPost<AgentDetails>(`/api/v1/agents/${apiId}/${act}`, {}),
     onSuccess: (data) => { setAgent(data); qc.invalidateQueries({ queryKey: ['my-agents'] }); },
-  });
-
-  // authedPatch so the Privy JWT flows to the backend, where requireAuth +
-  // authorizeOwner verify the caller (no more plaintext ownerAddress claim).
-  const save = useMutation({
-    mutationFn: () =>
-      authedPatch<AgentDetails>(`/api/v1/agents/${id}`, {
-        instructions: editInstructions,
-        model: editModel,
-        minReward: editMinReward
-          ? (BigInt(Math.round(Number(editMinReward) * 1e18))).toString()
-          : undefined,
-      }),
-    onSuccess: (data) => { setAgent(data); setTab('logs'); },
-  });
-
-  const saveTools = useMutation({
-    mutationFn: () =>
-      authedPatch<AgentDetails>(`/api/v1/agents/${id}`, {
-        tools: editTools,
-      }),
-    onSuccess: (data) => { setAgent(data); setToolsSaved(true); },
   });
 
   // Signature-gated owner-link recovery. When start/stop 403s because the agent
@@ -318,12 +211,12 @@ export default function AgentDetail() {
   // failure. Shared by the Start/Stop recovery banner AND the Services form 403.
   async function linkOwner(): Promise<void> {
     const challenge = await authedPost<{ nonce: string; message: string; ownerAddress: string }>(
-      `/api/v1/agents/${id}/link-owner/challenge`,
+      `/api/v1/agents/${apiId}/link-owner/challenge`,
       {},
     );
     if (!walletClient) throw new Error('Wallet not connected');
     const signature = await walletClient.signMessage({ message: challenge.message });
-    await authedPost(`/api/v1/agents/${id}/link-owner`, { nonce: challenge.nonce, signature });
+    await authedPost(`/api/v1/agents/${apiId}/link-owner`, { nonce: challenge.nonce, signature });
   }
 
   async function handleLinkOwner() {
@@ -334,7 +227,7 @@ export default function AgentDetail() {
       setLinkStatus('idle');
       // Refresh the record (now carries authorizedOwners) and retry whatever
       // action triggered the lock-out (defaults to start).
-      try { setAgent(await get<AgentDetails>(`/api/v1/agents/${id}`)); } catch { /* non-blocking */ }
+      try { setAgent(await get<AgentDetails>(`/api/v1/agents/${apiId}`)); } catch { /* non-blocking */ }
       action.mutate(action.variables ?? 'start');
     } catch (err) {
       setLinkError((err as Error).message || 'Could not link this wallet');
@@ -382,7 +275,7 @@ export default function AgentDetail() {
     setWithdrawError('');
     try {
       const data = await authedPost<{ txHash: string; amountSent: string; amountFormatted?: string; recipient: string }>(
-        `/api/v1/agents/${id}/withdraw`,
+        `/api/v1/agents/${apiId}/withdraw`,
         {},
       );
       const amount = data.amountFormatted ?? data.amountSent;
@@ -390,7 +283,7 @@ export default function AgentDetail() {
       setWithdrawStatus('done');
       await refetchBalance();
       try {
-        const fresh = await get<AgentDetails>(`/api/v1/agents/${id}`);
+        const fresh = await get<AgentDetails>(`/api/v1/agents/${apiId}`);
         setAgent(fresh);
       } catch { /* non-blocking */ }
     } catch (err) {
@@ -413,16 +306,6 @@ export default function AgentDetail() {
   }
 
   const isOwner = address?.toLowerCase() === agent.ownerAddress?.toLowerCase();
-  // Tab order mirrors what each audience came for: buyers get the storefront
-  // first (services, reviews), the owner gets the console first (logs).
-  const tabs: Tab[] = isOwner
-    ? ['logs', 'services', 'tools', 'errors', 'tasks', 'reviews', 'webhooks', 'edit', 'metrics']
-    : ['services', 'reviews', 'tasks', 'logs', 'tools', 'metrics'];
-  const requestedTab: Tab = searchParams.has('tab') || userPickedTab ? tab : isOwner ? 'logs' : 'services';
-  // A shared ?tab=edit / ?tab=webhooks link opened by a non-owner would
-  // otherwise select a tab that isn't in their tab bar and whose content is
-  // isOwner-gated — blank panel. Fall back to their first tab instead.
-  const displayTab: Tab = tabs.includes(requestedTab) ? requestedTab : tabs[0];
 
   // okx-style buy signals for the header strip. `distribution` is defensive-
   // defaulted: a stats payload without it must not crash the whole page.
@@ -431,67 +314,20 @@ export default function AgentDetail() {
     reviewStats && reviewStats.totalReviews > 0
       ? Math.round((((reviewDist[4] ?? 0) + (reviewDist[5] ?? 0)) / reviewStats.totalReviews) * 100)
       : null;
-  const description = (agent.instructions ?? '').trim();
 
   return (
     <div>
-      <Breadcrumb items={['marketplace', 'agents', 'mine', agent.name]} />
+      <Breadcrumb items={['marketplace', 'agents', isOwner ? 'mine' : 'browse', agent.name]} />
 
-      {/* Storefront header — the agent presented as a product: identicon,
-          name, what it does, and the buy signals. Owner controls stay in the
-          right rail. */}
-      <div className="flex flex-col sm:flex-row items-start gap-5 sm:gap-6 mb-8">
-        <AgentAvatar seed={agent.walletAddress || agent.id} size={96} className="mt-1" />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-3 flex-wrap">
-            <h1 className="text-3xl sm:text-[38px] font-bold text-ink leading-[1.05] tracking-tight break-words">
-              {agent.name}
-            </h1>
-            <StatusTag status={action.isPending ? action.variables : agent.status} />
-          </div>
-          <div className="mt-2 flex items-center gap-3 flex-wrap font-mono text-xs text-ink-3">
-            <span>{agent.provider} · {agent.model}</span>
-            {badges.length > 0 && (
-              <span className="text-ok">✓ {badges.length} badge{badges.length > 1 ? 's' : ''}</span>
-            )}
-          </div>
-          {description && (
-            <div className="mt-3 max-w-3xl">
-              <p className={`text-sm text-ink-2 leading-relaxed whitespace-pre-line ${descExpanded ? '' : 'line-clamp-3'}`}>
-                {description}
-              </p>
-              {description.length > 220 && (
-                <button
-                  onClick={() => setDescExpanded((v) => !v)}
-                  className="mt-1 font-mono text-[11px] uppercase tracking-widest text-ink-3 hover:text-cream transition-colors"
-                >
-                  {descExpanded ? 'show less' : 'view all'}
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-        {isOwner && (
-          <div className="flex sm:flex-col items-end gap-2 shrink-0">
-            <div className="flex flex-wrap justify-end gap-2">
-              {agent.status !== 'running' && (
-                <Button variant="outline" size="sm" disabled={action.isPending}
-                  onClick={() => action.mutate('start')} label="Start" />
-              )}
-              {agent.status === 'running' && (
-                <Button variant="outline" size="sm" disabled={action.isPending}
-                  onClick={() => action.mutate('pause')} label="Pause" />
-              )}
-              <Button variant="ghost" size="sm" disabled={action.isPending}
-                onClick={() => action.mutate('stop')} label="Stop" />
-              {agent.status !== 'stopped' && (
-                <Button variant="ghost" size="sm" disabled={action.isPending}
-                  onClick={() => action.mutate('restart')} label="Restart" />
-              )}
-            </div>
-          </div>
-        )}
-      </div>
+      <AgentHeader
+        agent={agent}
+        displayStatus={action.isPending ? action.variables : agent.status}
+        badgeCount={badges.length}
+        fromPrice={fromPrice}
+        isOwner={isOwner}
+        actionPending={action.isPending}
+        onAction={(act) => action.mutate(act)}
+      />
       {action.isError && (
         <div className="mb-4 px-4 py-2.5 border border-err/40 bg-err/10 text-xs text-err">
           <div>
@@ -520,1049 +356,95 @@ export default function AgentDetail() {
         </div>
       )}
 
-      {/* Buy-signal strip — score / positive / work / earned, okx-style.
-          The 4th cell is audience-aware: owners get the wallet balance they
-          operate on; buyers get the on-chain identity they'd verify. */}
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-0 border border-line mb-2">
-        <StatCard
-          label="Score"
-          value={reviewStats && reviewStats.totalReviews > 0 ? `★ ${reviewStats.avgRating.toFixed(2)}` : '—'}
-          sub={
-            reviewStats && reviewStats.totalReviews > 0
-              ? `${positivePct}% positive · ${reviewStats.totalReviews} reviews`
-              : 'No reviews yet'
-          }
-          subColor={positivePct != null && positivePct >= 80 ? 'ok' : 'default'}
-        />
-        <div className="border-t sm:border-t-0 sm:border-l border-line"><StatCard label="Tasks completed" value={String(agent.tasksCompleted ?? 0)} sub={`Reputation ${agent.decayedReputation?.decayedScore ?? agent.reputation?.score ?? 0}${agent.reputation?.disputes ? ` · ${agent.reputation.disputes} disputes` : ''}`} subColor={agent.reputation?.disputes && agent.reputation.disputes > 0 ? 'warn' : 'default'} /></div>
-        <div className="border-t sm:border-t-0 sm:border-l border-line"><StatCard label="Earned" value={`${parseFloat(agent.totalEarned ?? '0').toLocaleString(undefined, { maximumFractionDigits: 4 })} ${balanceSymbol}`} sub={`Native ${balanceSymbol}`} subColor="ok" /></div>
-        {isOwner ? (
-          <div className="border-t sm:border-t-0 sm:border-l border-line"><StatCard label="Wallet balance" value={balanceEther > 0 ? balanceEther.toFixed(4) : '—'} sub={isLowGas ? 'Low gas — top up' : balanceSymbol} subColor={isLowGas ? 'warn' : 'default'} /></div>
-        ) : (
-          <div className="border-t sm:border-t-0 sm:border-l border-line p-5 sm:p-6 flex flex-col justify-center">
-            <div className="font-mono text-[11px] uppercase tracking-widest text-ink-3 mb-2">On-chain</div>
-            {agent.walletAddress ? (
-              <>
-                <div className="font-mono text-sm text-ink truncate">{truncateAddress(agent.walletAddress)}</div>
-                <a
-                  href={`${OG_CHAIN_CONFIG.blockExplorerUrls[0]}/address/${agent.walletAddress}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="mt-1 font-mono text-[11px] uppercase tracking-widest text-ink-3 hover:text-cream transition-colors"
-                >
-                  view all ↗
-                </a>
-              </>
-            ) : (
-              <div className="font-mono text-sm text-ink-3">—</div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Gas management — only relevant to the agent owner. Top up sends native
-          0G to the agent wallet; Withdraw sweeps balance back to the owner.
-          Consolidated into one labelled panel with the low-gas warning. */}
-      {isOwner && agent.walletAddress && (
-        <div className="border border-line border-t-0 mb-8 px-5 py-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2.5 text-ink-2">
-              <Icon name="bolt" size={16} className={isLowGas ? 'text-warn' : 'text-ink-3'} />
-              <span className="text-[13px] font-medium">Gas management</span>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                variant={isLowGas ? 'primary' : 'outline'}
-                size="sm"
-                onClick={handleTopUp}
-                disabled={topUpStatus === 'sending'}
-                label={topUpStatus === 'sending' ? `Sending ${TOP_UP_AMOUNT} ${balanceSymbol}…` : `Top up gas (+${TOP_UP_AMOUNT} ${balanceSymbol})`}
-              />
-              {/* Withdraw — single button for both native 0G and ERC20 tokens.
-                  The backend's /withdraw endpoint auto-detects; empty body sweeps
-                  native 0G (gas reserve kept). */}
-              {agent.status !== 'running' && (
-                <>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setWithdrawConfirmOpen(true)}
-                    disabled={withdrawStatus === 'sending' || balanceEther < 0.0015}
-                    label={withdrawStatus === 'sending' ? 'Withdrawing…' : 'Withdraw to owner'}
-                  />
-                  <ConfirmDialog
-                    open={withdrawConfirmOpen}
-                    title="Withdraw agent funds"
-                    description={`Funds in this agent's wallet will be sent back to ${address ? `${address.slice(0, 8)}…` : 'your wallet'}. This can't be undone.`}
-                    confirmLabel="Withdraw funds"
-                    onConfirm={handleWithdraw}
-                    onCancel={() => setWithdrawConfirmOpen(false)}
-                  />
-                </>
-              )}
-            </div>
-          </div>
-
-          {/* Status / warning line */}
-          {(topUpStatus === 'error' ||
-            withdrawStatus === 'done' ||
-            withdrawStatus === 'error' ||
-            (isLowGas && agent.status !== 'stopped')) && (
-            <div className="mt-3 space-y-1.5 text-xs">
-              {topUpStatus === 'error' && <div className="text-err">{topUpError}</div>}
-              {withdrawStatus === 'done' && withdrawInfo && (
-                <div className="text-ok">
-                  Withdrew <span className="font-mono">{parseFloat(withdrawInfo.amount).toFixed(4)} {balanceSymbol}</span> ·
-                  tx <span className="font-mono">{withdrawInfo.txHash.slice(0, 10)}…</span>
-                </div>
-              )}
-              {withdrawStatus === 'error' && <div className="text-err">{withdrawError}</div>}
-              {isLowGas && agent.status !== 'stopped' && (
-                <div className="text-warn">
-                  Agent will fail to submit evidence below <span className="font-mono">{LOW_GAS_THRESHOLD} {balanceSymbol}</span>.
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-6">
-        {/* Identity */}
-        <div className="border border-line p-5">
-          <SectionRule num="01" title="Identity" />
-          <div className="space-y-4 text-sm">
-            <div>
-              <div className="text-[13px] font-medium text-ink-2 mb-1">Owner</div>
-              <div className="font-mono text-ink-2">{truncateAddress(agent.ownerAddress)}</div>
-            </div>
-            <div>
-              <div className="text-[13px] font-medium text-ink-2 mb-1">Deployed</div>
-              <div className="font-mono text-ink-2">{new Date(agent.deployedAt).toLocaleString()}</div>
-            </div>
-            {agent.walletAddress && (
-              <div>
-                <div className="text-[13px] font-medium text-ink-2 mb-1">Agent wallet</div>
-                <div className="font-mono text-ink-2 break-all text-xs">{agent.walletAddress}</div>
-              </div>
-            )}
-            {agent.inftTokenId !== undefined && (
-              <div>
-                <div className="text-[13px] font-medium text-ink-2 mb-1">INFT token</div>
-                <div className="font-mono text-cream">#{agent.inftTokenId}</div>
-              </div>
-            )}
-            <div>
-              <div className="text-[13px] font-medium text-ink-2 mb-1">Reputation</div>
-              <div className="flex items-baseline gap-2">
-                <span className="font-mono text-ink-2">
-                  {String(agent.decayedReputation?.decayedScore ?? agent.reputation?.score ?? 0)}
-                </span>
-                <span className="font-mono text-[11px] text-ink-3">
-                  ({agent.reputation?.tasksCompleted ?? 0} tasks · {agent.reputation?.disputes ?? 0} disputes)
-                </span>
-              </div>
-            </div>
-            {badges.length > 0 && (
-              <div>
-                <div className="text-[13px] font-medium text-ink-2 mb-1">Proven skills</div>
-                <div className="flex flex-wrap gap-1.5">
-                  {badges.map((b) => (
-                    <Tag key={b.capability} tone="ok">
-                      {b.capability.replace(/_/g, ' ')}
-                      <span className="ml-1 opacity-70">{b.badge_type === 'earned' ? 'earned' : b.badge_type === 'certified' ? 'certified' : 'verified'}</span>
-                    </Tag>
-                  ))}
-                </div>
-              </div>
-            )}
-            {skillStats.length > 0 && (
-              <div>
-                <div className="text-[13px] font-medium text-ink-2 mb-1">Track record</div>
-                <div className="space-y-1">
-                  {skillStats.map((s) => (
-                    <div key={s.capability} className="flex items-center justify-between text-xs">
-                      <span className="text-ink-2">{s.capability.replace(/_/g, ' ')}</span>
-                      <span className="font-mono text-ink-3">
-                        <span className="text-ok">{s.tasks_completed}✓</span>
-                        {s.tasks_failed > 0 && <span className="text-err"> {s.tasks_failed}✗</span>}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-                <div className="mt-1 text-[10px] text-ink-3">Settled, verified tasks per skill — on-chain proof, not self-declared.</div>
-              </div>
-            )}
-            {agent.publicKey && (
-              <div>
-                <div className="text-[13px] font-medium text-ink-2 mb-1">Public key</div>
-                <div className="font-mono text-ink-2 break-all text-xs">
-                  {agent.publicKey.slice(0, 18)}…{agent.publicKey.slice(-6)}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Tabbed right panel */}
-        <div className="border border-line flex flex-col min-w-0">
-          {/* Tabs — clean sans tab bar with a cream underline on the active tab,
-              matching the marketplace dashboard. Horizontal scroll on narrow
-              viewports so they never wrap into a broken two-line bar. */}
-          <div role="tablist" className="flex gap-6 border-b border-line px-5 overflow-x-auto scrollbar-thin">
-            {tabs.map(t => (
-              <button
-                key={t}
-                role="tab"
-                aria-selected={displayTab === t}
-                onClick={() => setTab(t)}
-                className={`pt-4 pb-3 -mb-px text-sm whitespace-nowrap border-b-2 transition-colors ${
-                  displayTab === t
-                    ? 'text-ink font-medium border-cream'
-                    : 'text-ink-3 border-transparent hover:text-ink-2'
-                }`}
-              >
-                {TAB_LABELS[t]}
-              </button>
-            ))}
-          </div>
-
-          <div className="flex-1 relative">
-          <div className="p-5 overflow-y-auto h-full max-h-[520px]" ref={logContainerRef} onScroll={handleLogScroll}>
-            {displayTab === 'logs' && (
-              logs.length > 0 ? logs.map((line, i) => {
-                const clean = line.replace(/\x1b\[[0-9;]*m/g, '');
-                const tsMatch = clean.match(/^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:Z|))\s+(.*)$/);
-                const isErr = clean.includes('[err]');
-                return (
-                  <div key={i} className={`px-3 py-1.5 text-xs font-mono flex gap-3 ${isErr ? 'text-err bg-err/10' : 'text-ink-3 hover:bg-surface-2'}`}>
-                    {tsMatch ? (
-                      <>
-                        <span className="text-ink-3/60 shrink-0" title={tsMatch[1]}>
-                          {new Date(tsMatch[1].replace('Z', '').replace(' ', 'T') + 'Z').toLocaleString([], { hour12: false })}
-                        </span>
-                        <span className="break-all">{tsMatch[2]}</span>
-                      </>
-                    ) : (
-                      <span className="break-all">{clean}</span>
-                    )}
-                  </div>
-                );
-              }) : (
-                <EmptyState
-                  icon="list"
-                  title={agent.status === 'running' ? 'Waiting for logs' : 'No logs yet'}
-                  description={agent.status === 'running'
-                    ? 'Live output will stream here as the agent works.'
-                    : 'Start the agent to begin streaming its logs.'}
-                />
-              )
-            )}
-
-            {displayTab === 'tools' && (
-              isOwner ? (
-                <div className="space-y-4">
-                  {toolsSaved && (
-                    <div className="border border-cream/30 bg-cream/5 p-4 text-sm text-ink-2">
-                      Tools saved. <strong>Restart the agent</strong> for changes to take effect — stop then start.
-                    </div>
-                  )}
-                  <ToolManager
-                    tools={editTools}
-                    onChange={setEditTools}
-                  />
-                  <div className="flex items-center gap-3">
-                    <Button
-                      variant="primary"
-                      onClick={() => saveTools.mutate()}
-                      disabled={saveTools.isPending}
-                      label={saveTools.isPending ? 'Saving…' : 'Save tools'}
-                    />
-                    {saveTools.isError && <span className="text-xs text-err">Save failed</span>}
-                  </div>
-                </div>
-              ) : (agent.tools ?? []).length === 0 ? (
-                <EmptyState
-                  icon="settings"
-                  title="No tools configured"
-                  description="This agent has no external tools or endpoints attached."
-                />
-              ) : (
-                <div className="space-y-3">
-                  {(agent.tools ?? []).map((t, i) => (
-                    <div key={i} className="border border-line p-4">
-                      <div className="flex items-center gap-3 mb-2">
-                        <span className="text-sm font-medium text-ink">{t.name}</span>
-                        <Tag tone="neutral">{t.type}</Tag>
-                      </div>
-                      {t.description && <div className="text-sm text-ink-3 leading-relaxed">{t.description}</div>}
-                      {(t.url || t.endpointUrl) && (
-                        <div className="mt-2 text-xs font-mono text-ink-3 break-all">{t.url ?? t.endpointUrl}</div>
-                      )}
-                      {t.headers && t.headers.length > 0 && (
-                        <div className="mt-2 space-y-0.5">
-                          {t.headers.map((h, j) => (
-                            <div key={j} className="text-[11px] font-mono text-ink-3 break-all">
-                              {h.name}: {h.isSensitive ? '********' : h.value}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )
-            )}
-
-            {displayTab === 'errors' && (
-              <div>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="text-xs text-ink-3">
-                    {errorLogsTotal > 0 ? `${errorLogsTotal} error(s) logged` : 'No errors'}
-                  </div>
-                  {errorLogsTotal > 0 && (
-                    <button
-                      onClick={() => {
-                        authedPost(`/api/v1/tools/error-logs`, { agentId: id })
-                          .then(() => { setErrorLogs([]); setErrorLogsTotal(0); })
-                          .catch(() => {});
-                      }}
-                      className="text-xs text-ink-3 hover:text-ink transition-colors"
-                    >
-                      Clear all
-                    </button>
-                  )}
-                </div>
-                {errorLogsLoading ? (
-                  <LoadingState />
-                ) : errorLogs.length === 0 ? (
-                  <EmptyState
-                    icon="check"
-                    title="No errors"
-                    description="Tool executions are running cleanly."
-                  />
-                ) : (
-                  <div className="space-y-3">
-                    {errorLogs.map((e: any) => (
-                      <div key={e.id} className="border border-line p-4 space-y-2">
-                        <div className="flex items-center gap-3">
-                          <span className="text-sm font-medium text-ink">{e.toolName}</span>
-                          <Tag tone="neutral">{e.toolType}</Tag>
-                          {e.statusCode != null && (
-                            <Tag tone={e.statusCode >= 400 ? 'warn' : 'neutral'}>
-                              HTTP {e.statusCode}
-                            </Tag>
-                          )}
-                          <span className="text-xs text-ink-3 ml-auto">{new Date(e.createdAt).toLocaleString()}</span>
-                        </div>
-                        <div className="text-sm text-ink-3">{e.error}</div>
-                        {e.method && e.url && (
-                          <div className="text-xs font-mono text-ink-3 break-all">
-                            {e.method} {e.url}
-                          </div>
-                        )}
-                        {e.requestInput && e.requestInput !== '{}' && (
-                          <details className="text-xs text-ink-3">
-                            <summary className="cursor-pointer hover:text-ink-2">Request input</summary>
-                            <pre className="mt-1 p-2 bg-surface-2 border border-line overflow-x-auto whitespace-pre-wrap">{e.requestInput}</pre>
-                          </details>
-                        )}
-                        {e.responseOutput && (
-                          <details className="text-xs text-ink-3">
-                            <summary className="cursor-pointer hover:text-ink-2">Response output</summary>
-                            <pre className="mt-1 p-2 bg-surface-2 border border-line overflow-x-auto whitespace-pre-wrap">{e.responseOutput}</pre>
-                          </details>
-                        )}
-                        {e.durationMs > 0 && (
-                          <div className="text-xs text-ink-3">Duration: {e.durationMs}ms</div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {displayTab === 'tasks' && (
-              <AgentTasks agentWallet={agent.walletAddress} />
-            )}
-
-            {displayTab === 'reviews' && (
-              <div className="space-y-5">
-                {/* Rating summary — big average on the left, per-star
-                    histogram bars on the right (relative to the busiest row). */}
-                {reviewStats && reviewStats.totalReviews > 0 && (
-                  <div className="flex flex-col sm:flex-row gap-6 sm:items-center border border-line p-5">
-                    <div className="shrink-0 sm:pr-6 sm:border-r border-line">
-                      <div className="font-display text-4xl text-cream tabular-nums">{reviewStats.avgRating.toFixed(2)}</div>
-                      <div className="mt-1 text-sm text-cream" aria-hidden>
-                        {'★'.repeat(Math.round(reviewStats.avgRating))}
-                        <span className="text-ink-3">{'★'.repeat(5 - Math.round(reviewStats.avgRating))}</span>
-                      </div>
-                      <div className="mt-1 font-mono text-[11px] text-ink-3">{reviewStats.totalReviews} reviews</div>
-                    </div>
-                    <div className="flex-1 space-y-1.5 min-w-0">
-                      {[5, 4, 3, 2, 1].map((star) => {
-                        const count = reviewDist[star] ?? 0;
-                        const max = Math.max(1, ...[1, 2, 3, 4, 5].map((s) => reviewDist[s] ?? 0));
-                        return (
-                          <div key={star} className="flex items-center gap-3 font-mono text-[11px] text-ink-3">
-                            <span className="w-14 shrink-0">{star} star{star > 1 ? 's' : ''}</span>
-                            <div className="flex-1 h-1.5 bg-surface-2">
-                              <div className="h-full bg-cream" style={{ width: `${(count / max) * 100}%` }} />
-                            </div>
-                            <span className="w-6 text-right text-ink-2">{count}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                {/* Review list */}
-                {reviews.length === 0 ? (
-                  <EmptyState icon="list" title="No reviews yet" description="This agent hasn't been reviewed yet." />
-                ) : (
-                  <div className="space-y-3">
-                    {reviews.map((r) => (
-                      <div key={r.id} className="border border-line p-4">
-                        <div className="flex items-center gap-3 mb-1.5">
-                          <span className="text-ink font-mono text-sm">
-                            {'★'.repeat(r.rating)}{'☆'.repeat(5 - r.rating)}
-                          </span>
-                          <span className="text-[11px] text-ink-3 font-mono">{truncateAddress(r.reviewer_address)}</span>
-                          <span className="text-[11px] text-ink-3">{new Date(r.created_at).toLocaleDateString()}</span>
-                        </div>
-                        {r.review && <p className="text-sm text-ink-2 leading-relaxed">{r.review}</p>}
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Submit review form */}
-                <div className="border border-line p-5">
-                  <div className="text-sm font-medium text-ink mb-3">Leave a review</div>
-                  <div className="flex items-center gap-1 mb-3">
-                    {[1, 2, 3, 4, 5].map((star) => (
-                      <button
-                        key={star}
-                        type="button"
-                        onClick={() => setReviewRating(star)}
-                        className={`text-lg transition-colors ${star <= reviewRating ? 'text-cream' : 'text-ink-3'}`}
-                      >
-                        ★
-                      </button>
-                    ))}
-                    <span className="text-xs text-ink-3 ml-2">{reviewRating}/5</span>
-                  </div>
-                  <FormTextarea
-                    rows={3}
-                    placeholder="Share your experience with this agent…"
-                    value={reviewText}
-                    onChange={(e) => setReviewText(e.target.value)}
-                  />
-                  <div className="flex items-center gap-3 mt-3">
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      label={reviewSubmitting ? 'Submitting…' : 'Submit review'}
-                      disabled={reviewSubmitting}
-                      onClick={async () => {
-                        if (!agent?.walletAddress) return;
-                        setReviewSubmitting(true);
-                        setReviewSubmitError('');
-                        try {
-                          await submitReview({
-                            taskId: '',
-                            agentAddress: agent.walletAddress,
-                            rating: reviewRating,
-                            review: reviewText.trim() || undefined,
-                          });
-                          setReviewText('');
-                          setReviewRating(5);
-                          const result = await getAgentReviews(agent.walletAddress, 20);
-                          setReviews(result.reviews);
-                          setReviewStats(result.stats);
-                        } catch (err) {
-                          setReviewSubmitError((err as Error).message);
-                        } finally {
-                          setReviewSubmitting(false);
-                        }
-                      }}
-                    />
-                    {reviewSubmitError && <span className="text-xs text-err">{reviewSubmitError}</span>}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {displayTab === 'services' && (
-              <ServicesTab
-                agentId={id!}
-                walletAddress={agent.walletAddress || ''}
-                isOwner={isOwner}
-                symbol={balanceSymbol}
-                agentStatus={agent.status}
-                onLinkOwner={linkOwner}
-              />
-            )}
-
-            {displayTab === 'webhooks' && isOwner && (
-              <WebhookTab agentId={id!} />
-            )}
-
-            {displayTab === 'edit' && isOwner && (
-              <div className="space-y-5">
-                <FormField label="Instructions">
-                  <FormTextarea rows={6} value={editInstructions} onChange={e => setEditInstructions(e.target.value)} />
-                </FormField>
-
-                <FormField label="Model">
-                  <FormInput className="font-mono" value={editModel} onChange={e => setEditModel(e.target.value)} />
-                </FormField>
-
-                <FormField label="Min reward" hint="0G per task — tasks below this threshold won't be offered to this agent (requires restart)">
-                  <FormInput className="font-mono" placeholder="0" value={editMinReward} onChange={e => setEditMinReward(e.target.value)} />
-                </FormField>
-
-                <div className="flex items-center gap-3 flex-wrap">
-                  <Button
-                    variant="primary"
-                    onClick={() => save.mutate()}
-                    disabled={save.isPending}
-                    label={save.isPending ? 'Saving…' : 'Save changes'}
-                  />
-                  {save.isError && <span className="text-xs text-err">Save failed</span>}
-                </div>
-
-                {/* Skills — installed as frozen snapshots; managed via the
-                    dedicated install/remove routes (not the Save above, which
-                    must never wipe skills). Takes effect on the next restart. */}
-                <div className="pt-5 border-t border-line">
-                  <SkillsManager agentId={id!} installed={installedSkills} agentRunning={agent.status === 'running'} onChange={setInstalledSkills} />
-                </div>
-              </div>
-            )}
-
-            {displayTab === 'metrics' && <AgentMetricsPanel agentId={id!} />}
-          </div>
-          {displayTab === 'logs' && logs.length > 0 && (
-            <div className="absolute bottom-3 right-3 z-10 flex flex-col gap-1.5">
-              <button
-                onClick={scrollToTop}
-                className="w-8 h-8 flex items-center justify-center bg-surface-4 hover:bg-surface-5 text-ink-1 rounded-full border border-line shadow-lg transition-all hover:scale-110"
-                title="Scroll to top"
-              >
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M3 10l5-5 5 5" />
-                </svg>
-              </button>
-              <button
-                onClick={scrollToBottom}
-                className={`w-8 h-8 flex items-center justify-center rounded-full border border-line shadow-lg transition-all hover:scale-110 ${autoScroll ? 'bg-cream/20 text-cream border-cream/40' : 'bg-surface-4 hover:bg-surface-5 text-ink-1'}`}
-                title={autoScroll ? 'Auto-scroll on (click to disable)' : 'Scroll to bottom'}
-              >
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M3 6l5 5 5-5" />
-                </svg>
-              </button>
-            </div>
-          )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-interface InstalledSkillMeta {
-  slug: string;
-  name: string;
-  version: string;
-  capabilities?: string[];
-}
-
-/** Owner-only skill install/remove for an existing agent. Uses the dedicated
- *  /agents/:id/skills routes (NOT the generic Save, which never touches
- *  skills). New skills take effect on the next restart. */
-function SkillsManager({
-  agentId,
-  installed,
-  agentRunning,
-  onChange,
-}: {
-  agentId: string;
-  installed: InstalledSkillMeta[];
-  agentRunning: boolean;
-  onChange: (skills: InstalledSkillMeta[]) => void;
-}) {
-  const [slug, setSlug] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  // Only a running worker keeps its spawn-time composition; a stopped agent
-  // picks up the change on next start, so no nudge is needed there.
-  const [needsRestart, setNeedsRestart] = useState(false);
-  const showRestart = needsRestart && agentRunning;
-
-  const install = async () => {
-    if (!slug.trim()) return;
-    setBusy(true); setError('');
-    try {
-      const res = await authedPost<{ agent: { skills?: InstalledSkillMeta[] }; requiresRestart: boolean }>(
-        `/api/v1/agents/${agentId}/skills`, { slug: slug.trim() },
-      );
-      onChange(res.agent.skills ?? []);
-      setNeedsRestart(res.requiresRestart);
-      setSlug('');
-    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
-  };
-
-  const remove = async (s: string) => {
-    setBusy(true); setError('');
-    try {
-      const res = await authedDelete<{ agent: { skills?: InstalledSkillMeta[] }; requiresRestart: boolean }>(
-        `/api/v1/agents/${agentId}/skills/${s}`,
-      );
-      onChange(res.agent.skills ?? []);
-      setNeedsRestart(res.requiresRestart);
-    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
-  };
-
-  return (
-    <div className="space-y-3">
-      <div className="text-[13px] font-medium text-ink-2">Skills</div>
-      <div className="text-xs text-ink-3 -mt-1">Installed skills shape the agent's prompt and tools. Browse the registry to find slugs.</div>
-      {installed.length > 0 ? (
-        <div className="flex flex-wrap gap-1.5">
-          {installed.map((s) => (
-            <span key={s.slug} className="inline-flex items-center gap-1.5 px-2 py-0.5 text-xs border border-cream/40 bg-cream/5 text-cream">
-              {s.name} <span className="opacity-60">v{s.version}</span>
-              <button type="button" onClick={() => remove(s.slug)} disabled={busy} aria-label={`Remove ${s.name}`}>
-                <Icon name="x" size={11} />
-              </button>
-            </span>
-          ))}
-        </div>
-      ) : (
-        <div className="text-xs text-ink-3">No skills installed.</div>
-      )}
-      <div className="flex gap-2">
-        <FormInput className="font-mono" placeholder="skill-slug" value={slug} onChange={(e) => setSlug(e.target.value)} />
-        <Button variant="outline" size="sm" label={busy ? '…' : 'Install'} onClick={install} disabled={busy || !slug.trim()} />
-      </div>
-      {showRestart && (
-        <div className="text-[11px] text-warn border-l-2 border-warn pl-2 py-0.5">Restart the agent (stop then start) for skill changes to take effect.</div>
-      )}
-      {error && <div className="text-xs text-err">{error}</div>}
-    </div>
-  );
-}
-
-function AgentTasks({ agentWallet }: { agentWallet?: string }) {
-  type Execution = {
-    meta: { taskId: string };
-    state: { status: string; acceptedAt?: string; verificationResult?: { passed: boolean } };
-  };
-  const [executions, setExecutions] = useState<Execution[]>([]);
-  const [tasksError, setTasksError] = useState(false);
-
-  const loadTasks = useCallback(() => {
-    if (!agentWallet) return;
-    setTasksError(false);
-    authedGet<{ executions?: Execution[] }>(`/api/v1/a2a/executions?address=${agentWallet}`)
-      .then(data => setExecutions(data.executions ?? []))
-      .catch(() => setTasksError(true));
-  }, [agentWallet]);
-
-  useEffect(() => {
-    loadTasks();
-  }, [loadTasks]);
-
-  if (tasksError && executions.length === 0) {
-    return <ErrorState title="Couldn't load this agent's tasks" onRetry={() => loadTasks()} />;
-  }
-
-  if (executions.length === 0) {
-    return (
-      <EmptyState
-        icon="briefcase"
-        title="No tasks yet"
-        description="Tasks this agent accepts and executes will appear here."
+      <AgentStats
+        className="mb-8"
+        isOwner={isOwner}
+        reviewStats={reviewStats}
+        positivePct={positivePct}
+        tasksCompleted={agent.tasksCompleted ?? 0}
+        reputationScore={agent.decayedReputation?.decayedScore ?? agent.reputation?.score ?? 0}
+        disputes={agent.reputation?.disputes ?? 0}
+        totalEarned={agent.totalEarned ?? '0'}
+        symbol={balanceSymbol}
+        balanceEther={balanceEther}
+        isLowGas={isLowGas}
+        servicesSold={servicesSold}
+        walletAddress={agent.walletAddress}
       />
-    );
-  }
 
-  const sorted = [...executions].sort((a, b) => {
-    const ta = a.state.acceptedAt ? Date.parse(a.state.acceptedAt) : 0;
-    const tb = b.state.acceptedAt ? Date.parse(b.state.acceptedAt) : 0;
-    return tb - ta;
-  });
-
-  return (
-    <div className="space-y-2">
-      {sorted.map(e => (
-        <div key={e.meta.taskId} className="flex items-center gap-3 border border-line px-4 py-3 text-sm">
-          <span className="font-mono text-ink-3 shrink-0">{e.meta.taskId.slice(0, 10)}…</span>
-          <span className="shrink-0"><StatusTag status={e.state.status} /></span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function ServicesTab({
-  agentId,
-  walletAddress,
-  isOwner,
-  symbol,
-  agentStatus,
-  onLinkOwner,
-}: {
-  agentId: string;
-  walletAddress: string;
-  isOwner: boolean;
-  symbol: string;
-  agentStatus: string;
-  onLinkOwner: () => Promise<void>;
-}) {
-  const [publicServices, setPublicServices] = useState<AgentService[] | null>(null);
-  const [useService, setUseService] = useState<AgentService | null>(null);
-  // "Use from your agent" — copyable prompt/script for the buyer's OWN agent
-  // to run this rent flow headlessly (works even while this agent is stopped:
-  // the copy block is documentation, the task just waits for it to start).
-  const [agentUseService, setAgentUseService] = useState<AgentService | null>(null);
-  const [needsLink, setNeedsLink] = useState(false);
-  const [linking, setLinking] = useState(false);
-  const retryRef = useRef<null | (() => Promise<void>)>(null);
-  const [ownerServices, setOwnerServices] = useState<AgentService[] | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(false);
-
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [price, setPrice] = useState('');
-  const [serviceType, setServiceType] = useState<'api' | 'a2a'>('api');
-  const [saving, setSaving] = useState(false);
-  const [formError, setFormError] = useState('');
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setLoadError(false);
-    try {
-      const pub = walletAddress ? await listServices(walletAddress) : { services: [], total: 0 };
-      setPublicServices(pub.services);
-      if (isOwner) setOwnerServices(await getAgentServices(agentId));
-    } catch {
-      setLoadError(true);
-    } finally {
-      setLoading(false);
-    }
-  }, [walletAddress, agentId, isOwner]);
-
-  useEffect(() => { load(); }, [load]);
-
-  const fmt = (wei: string) => {
-    try { return `${formatUnits(wei, 18)} ${symbol}`; } catch { return `${wei} wei`; }
-  };
-
-  // On an owner-mismatch 403, stash the failed mutation so a one-click
-  // "Link this wallet & retry" can re-run it after linking (mirrors Start/Stop).
-  function onMutationError(err: unknown, retry: () => Promise<void>) {
-    if ((err as { code?: string }).code === 'FORBIDDEN') {
-      setNeedsLink(true);
-      retryRef.current = retry;
-      setFormError("This wallet isn't linked to the agent yet — link it and retry.");
-    } else {
-      setFormError((err as Error).message);
-    }
-  }
-
-  async function linkAndRetry() {
-    setLinking(true);
-    setFormError('');
-    try {
-      await onLinkOwner();
-      setNeedsLink(false);
-      const retry = retryRef.current;
-      retryRef.current = null;
-      if (retry) await retry();
-    } catch (err) {
-      setFormError((err as Error).message || 'Could not link this wallet');
-    } finally {
-      setLinking(false);
-    }
-  }
-
-  async function handleCreate() {
-    setFormError('');
-    if (name.trim().length < 5) { setFormError('Name must be at least 5 characters.'); return; }
-    let priceRaw: string;
-    try { priceRaw = parseEther(price || '0').toString(); } catch { setFormError('Enter a valid price.'); return; }
-    if (priceRaw === '0') { setFormError('Price must be greater than 0.'); return; }
-    setSaving(true);
-    try {
-      await createService(agentId, { name: name.trim(), description: description.trim(), priceRaw, serviceType });
-      setName(''); setDescription(''); setPrice(''); setServiceType('api');
-      setNeedsLink(false);
-      await load();
-    } catch (err) {
-      onMutationError(err, handleCreate);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function toggleActive(s: AgentService) {
-    try { await updateService(agentId, s.id, { active: !s.active }); await load(); }
-    catch (err) { onMutationError(err, () => toggleActive(s)); }
-  }
-  async function remove(s: AgentService) {
-    try { await deleteService(agentId, s.id); await load(); }
-    catch (err) { onMutationError(err, () => remove(s)); }
-  }
-
-  if (loading) return <LoadingState label="Loading services…" />;
-  if (loadError) return <ErrorState title="Couldn't load services" onRetry={() => load()} />;
-
-  return (
-    <div className="space-y-8">
-      <div>
-        <SectionRule num="01" title="Services" side={publicServices?.length ? `${publicServices.length} listed` : undefined} />
-        {agentStatus !== 'running' && publicServices && publicServices.length > 0 && (
-          <div className="mb-3 text-xs text-ink-3 border border-line bg-surface-2 px-3 py-2">
-            This agent is stopped — the owner must start it before it can take calls.
-          </div>
-        )}
-        {publicServices && publicServices.length > 0 ? (
-          <div className="grid gap-3 sm:grid-cols-2">
-            {publicServices.map(s => (
-              <div key={s.id} className="border border-line bg-surface-2 p-4">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="text-ink font-medium">{s.name}</div>
-                  <Tag tone="info">{s.service_type}</Tag>
-                </div>
-                {s.description && <div className="text-xs text-ink-3 mt-1.5">{s.description}</div>}
-                <div className="flex items-center justify-between gap-3 mt-4 pt-3 border-t border-line">
-                  <div className="min-w-0">
-                    <span className="font-mono text-cream text-sm">{fmt(s.price_raw)}</span>
-                    <span className="font-mono text-ink-3 text-xs"> / call</span>
-                    {s.sold_count > 0 && (
-                      <div className="font-mono text-[11px] text-ink-3 mt-0.5">{s.sold_count} sold{s.avg_rating > 0 ? ` · ★ ${s.avg_rating.toFixed(1)}` : ''}</div>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      label="Use from your agent"
-                      disabled={!s.agent_public_key}
-                      onClick={() => setAgentUseService(s)}
-                    />
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      label="Use now"
-                      disabled={agentStatus !== 'running' || !s.agent_public_key}
-                      onClick={() => setUseService(s)}
-                    />
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <EmptyState
-            icon="briefcase"
-            title="No services listed"
-            description={isOwner ? 'Publish a service below to let others rent this agent per call.' : 'This agent has no rentable services yet.'}
+      {/* Storefront — services and reputation as flat sections (no 520px
+          console clamp), with the identity rail alongside. */}
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_300px] gap-6 lg:gap-8">
+        <div className="min-w-0 space-y-10">
+          <ServicesSection
+            agentId={apiId}
+            isOwner={isOwner}
+            symbol={balanceSymbol}
+            agentStatus={agent.status}
+            services={services}
+            loading={servicesLoading}
+            loadError={servicesError}
+            onReload={reloadServices}
+            onLinkOwner={linkOwner}
           />
-        )}
-      </div>
 
-      {isOwner && (
-        <div>
-          <SectionRule num="02" title="Manage services" />
-          <div className="border border-line bg-surface-2 p-4 space-y-4">
-            <FormField label="Service name" required>
-              <FormInput placeholder="e.g. Market sentiment analysis" value={name} onChange={e => setName(e.target.value)} />
-            </FormField>
-            <FormField label="Description">
-              <FormTextarea rows={2} placeholder="What the buyer gets per call" value={description} onChange={e => setDescription(e.target.value)} />
-            </FormField>
-            <div className="grid grid-cols-2 gap-4">
-              <FormField label={`Price per call (${symbol})`} required>
-                <FormInput className="font-mono" placeholder="0.5" value={price} onChange={e => setPrice(e.target.value)} />
-              </FormField>
-              <FormField label="Type">
-                <div className="flex gap-2">
-                  {(['api', 'a2a'] as const).map(t => (
-                    <button
-                      key={t}
-                      type="button"
-                      onClick={() => setServiceType(t)}
-                      className={`px-2.5 py-1 text-xs border transition-colors ${serviceType === t ? 'bg-cream/10 border-cream/40 text-cream' : 'bg-surface-2 border-line text-ink-3 hover:text-ink-2'}`}
-                    >
-                      {t}
-                    </button>
-                  ))}
-                </div>
-              </FormField>
-            </div>
-            {formError && <div className="text-xs text-err">{formError}</div>}
-            {needsLink && (
-              <Button variant="outline" size="sm" label={linking ? 'Linking…' : 'Link this wallet & retry'} disabled={linking} onClick={linkAndRetry} />
-            )}
-            <Button variant="primary" size="sm" label={saving ? 'Publishing…' : 'Publish service'} disabled={saving} onClick={handleCreate} />
-          </div>
+          <ReviewsSection
+            agentWallet={agent.walletAddress}
+            reviews={reviews}
+            stats={reviewStats}
+            onSubmitted={reloadReviews}
+          />
 
-          {ownerServices && ownerServices.length > 0 && (
-            <div className="mt-4 space-y-2">
-              {ownerServices.map(s => (
-                <div key={s.id} className="flex items-center justify-between gap-3 border border-line bg-surface-2 px-4 py-2.5">
-                  <div className="min-w-0">
-                    <div className="text-ink text-sm truncate">
-                      {s.name}{!s.active && <span className="text-ink-3 text-xs"> · inactive</span>}
-                    </div>
-                    <div className="font-mono text-xs text-ink-3">{fmt(s.price_raw)} / call · {s.service_type}</div>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <Button variant="ghost" size="sm" label={s.active ? 'Deactivate' : 'Activate'} onClick={() => toggleActive(s)} />
-                    <Button variant="ghost" size="sm" label="Delete" onClick={() => remove(s)} />
-                  </div>
-                </div>
-              ))}
-            </div>
+          {/* Visitors get the work history inline; the owner keeps it as a
+              console tab, next to the logs it correlates with. Signed-out
+              viewers get nothing rather than an error box: /a2a/executions is
+              requireAuth, and this section now loads eagerly instead of on a
+              tab click. */}
+          {!isOwner && !!address && (
+            <section id="tasks" className="scroll-mt-6">
+              <SectionRule num="03" title="Recent tasks" />
+              <AgentTasks agentWallet={agent.walletAddress} />
+            </section>
           )}
         </div>
-      )}
-      {useService && (
-        <UseServiceModal
-          service={useService}
-          symbol={symbol}
-          onClose={() => setUseService(null)}
-          onSettled={load}
-        />
-      )}
-      {agentUseService && (
-        <UseFromAgentModal
-          service={agentUseService}
-          symbol={symbol}
-          onClose={() => setAgentUseService(null)}
-        />
-      )}
-    </div>
-  );
-}
 
-function WebhookTab({ agentId: _agentId }: { agentId: string }) {
-  const [hooks, setHooks] = useState<AgentWebhook[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
-
-  const [url, setUrl] = useState('');
-  const [secret, setSecret] = useState('');
-  const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState('');
-
-  const loadHooks = useCallback(() => {
-    setLoading(true);
-    setError(false);
-    getWebhooks()
-      .then(setHooks)
-      .catch(() => setError(true))
-      .finally(() => setLoading(false));
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(false);
-    getWebhooks()
-      .then(h => { if (!cancelled) setHooks(h); })
-      .catch(() => { if (!cancelled) setError(true); })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, []);
-
-  async function handleCreate() {
-    if (!url) return;
-    setCreating(true);
-    setCreateError('');
-    try {
-      await apiRegisterWebhook({
-        url,
-        secret: secret.trim() || undefined,
-      });
-      setUrl('');
-      setSecret('');
-      await loadHooks();
-    } catch (err) {
-      setCreateError((err as Error).message);
-    } finally {
-      setCreating(false);
-    }
-  }
-
-  if (loading) return <LoadingState label="Loading webhooks…" />;
-  if (error) return <ErrorState title="Couldn't load webhooks" onRetry={() => loadHooks()} />;
-
-  return (
-    <div className="space-y-5">
-      {/* Existing webhooks */}
-      {hooks.length === 0 ? (
-        <EmptyState
-          icon="settings"
-          title="No webhooks configured"
-          description="Receive real-time notifications when this agent gets tasks assigned."
-        />
-      ) : (
-        <div className="space-y-2">
-          {hooks.map((h) => (
-            <div key={h.id} className="flex items-center justify-between gap-3 border border-line px-4 py-3 text-sm">
-              <div className="min-w-0 flex-1">
-                <div className="text-ink font-mono text-xs break-all truncate">{h.url}</div>
-                <div className="text-[11px] text-ink-3 mt-0.5">{h.events.join(', ')}</div>
-              </div>
-              <button
-                onClick={async () => {
-                  try {
-                    await deleteWebhook(h.id);
-                    await loadHooks();
-                  } catch (err) {
-                    // Surface instead of silently rejecting — the row staying
-                    // put with no feedback reads as a dead button.
-                    setCreateError((err as Error).message || 'Delete failed');
-                  }
-                }}
-                className="text-xs text-err hover:underline shrink-0"
-              >
-                Delete
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Register new webhook */}
-      <div className="border border-line p-5">
-        <div className="text-sm font-medium text-ink mb-3">Register webhook</div>
-        <FormField label="URL" required>
-          <FormInput className="font-mono" placeholder="https://your-service.com/webhook" value={url} onChange={(e) => setUrl(e.target.value)} />
-        </FormField>
-        <FormField label="Secret" hint="HMAC-SHA256 signing secret (auto-generated if empty)">
-          <FormInput className="font-mono" placeholder="Leave empty for auto-generate" value={secret} onChange={(e) => setSecret(e.target.value)} />
-        </FormField>
-        <div className="flex items-center gap-3 mt-3">
-          <Button
-            variant="primary"
-            size="sm"
-            label={creating ? 'Registering…' : 'Register webhook'}
-            disabled={!url || creating}
-            onClick={handleCreate}
-          />
-          {createError && <span className="text-xs text-err">{createError}</span>}
-        </div>
+        <IdentityPanel agent={agent} badges={badges} skillStats={skillStats} />
       </div>
+
+      {/* Operations — owner-only. Gas strip fused to the console below it. */}
+      {isOwner && (
+        <div className="mt-12">
+          <SectionRule num="03" title="Operations" />
+          {agent.walletAddress && (
+            <GasBar
+              symbol={balanceSymbol}
+              topUpAmount={TOP_UP_AMOUNT}
+              lowGasThreshold={LOW_GAS_THRESHOLD}
+              isLowGas={isLowGas}
+              balanceEther={balanceEther}
+              agentStatus={agent.status}
+              ownerLabel={address ? `${address.slice(0, 8)}…` : 'your wallet'}
+              topUpStatus={topUpStatus}
+              topUpError={topUpError}
+              withdrawStatus={withdrawStatus}
+              withdrawError={withdrawError}
+              withdrawInfo={withdrawInfo}
+              confirmOpen={withdrawConfirmOpen}
+              onTopUp={handleTopUp}
+              onWithdrawRequest={() => setWithdrawConfirmOpen(true)}
+              onWithdrawConfirm={handleWithdraw}
+              onWithdrawCancel={() => setWithdrawConfirmOpen(false)}
+            />
+          )}
+          <OpsConsole
+            key={agent.id}
+            agentId={apiId}
+            agent={agent}
+            onAgentUpdated={setAgent}
+            className={agent.walletAddress ? 'border-t-0' : ''}
+          />
+        </div>
+      )}
     </div>
   );
 }
