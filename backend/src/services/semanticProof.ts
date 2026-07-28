@@ -1,6 +1,7 @@
-import { embed } from './embeddingService.js';
+import { embedMany } from './embeddingService.js';
 import { buildTaskRoutingText } from './semanticMatch.js';
 import * as deployedAgentStore from './deployedAgentStore.js';
+import * as skillStore from './skillStore.js';
 import { config } from '../config.js';
 import type { A2ATaskMeta, InstalledSkill } from '../types.js';
 
@@ -12,23 +13,54 @@ import type { A2ATaskMeta, InstalledSkill } from '../types.js';
  * tags optional, so semantically routed tasks increasingly settle with no
  * tags at all, and the worker's track record silently stops accruing exactly
  * as the marketplace stops needing tags. This module closes that hole: at
- * settlement, the task's PUBLIC routing text is matched (cosine over the same
- * embeddings that route tasks) against the worker's INSTALLED SKILLS — the
- * frozen SKILL.md snapshots on their deployed agent — and the closest skill
- * above a floor is credited alongside any declared tags. Proof becomes
- * skill-slug-keyed, which is what the tag-retirement phase needs.
+ * settlement, the task's PUBLIC routing text is matched (cosine, one batched
+ * embedMany call per settlement) against the worker's installed PUBLIC skills
+ * and the closest one above a floor is credited alongside any declared tags.
  *
- * External (SDK) agents with no installed skills keep tag-only crediting —
- * slug proof is part of the incentive to declare skills. Failures are
- * swallowed by the caller's own guard: proof enrichment must never block a
- * payout.
+ * Deliberate v1 bounds:
+ * - Slug keys are NAMESPACED ('skill:<slug>') in skill_stats/agent_badges —
+ *   author-chosen slugs share a TEXT keyspace with the capability enum, and
+ *   four tags (translation, summarization, testing, scheduling) are
+ *   themselves valid slugs; without the prefix a stranger's skill named
+ *   'testing' would merge into (and poison) the QA tag's proven counts.
+ * - Only PUBLIC registry skills participate. skill_stats/badges are readable
+ *   unauthenticated, so crediting a private draft skill would leak its slug;
+ *   and skill INSTRUCTIONS are author IP (stripped from every /agents
+ *   response), so matching uses name + tags only — instructions never leave
+ *   the platform through this path.
+ * - Top-1 credit only. A task exercising two skills credits the closer one;
+ *   credit-all-above-floor risks over-crediting and can be revisited with
+ *   real distribution data.
+ * - The CURRENT skill loadout is matched, not a task-time snapshot — a skill
+ *   installed between accept and settlement can absorb the credit. Accepted
+ *   for v1: the work itself was real and paid, only the per-skill attribution
+ *   is gameable, and a task-time snapshot needs accept-time state we don't
+ *   keep.
+ *
+ * Cost honesty: the embed memo's 5-min TTL rarely spans settlements, so
+ * steady state is ONE batched provider call (task text + ≤10 short skill
+ * lines) per settlement, bounded by the 10s fetch timeout. Callers run this
+ * fire-and-forget — proof enrichment must never block a payout.
  */
 
-/** The text a skill exposes for matching — name + routing tags + the head of
- *  its instructions (enough signal without embedding a whole SKILL.md). */
-export function skillDocText(s: Pick<InstalledSkill, 'name' | 'capabilities' | 'instructions'>): string {
+/** Namespace for slug-keyed proof rows, so programmatic consumers (MCP
+ *  provenSkills, profile UIs) can tell slug proof from enum-tag proof and the
+ *  two keyspaces can never collide. */
+export const PROOF_SLUG_PREFIX = 'skill:';
+
+/** The ONE place caps + resolved slug become the proof-ledger key set —
+ *  success and dispute paths must credit/debit identical keys or the
+ *  earned-badge failure-ratio guard goes blind. */
+export function mergeProofKeys(caps: string[], slug: string | null): string[] {
+  return slug ? [...caps, `${PROOF_SLUG_PREFIX}${slug}`] : caps;
+}
+
+/** The text a skill exposes for matching — name + routing tags ONLY.
+ *  Instructions are author IP and must not be sent to the embedding
+ *  provider from this path. */
+export function skillDocText(s: Pick<InstalledSkill, 'name' | 'capabilities'>): string {
   const caps = s.capabilities?.length ? ` (${s.capabilities.join(', ')})` : '';
-  return `${s.name}${caps}\n${(s.instructions ?? '').slice(0, 1200)}`;
+  return `${s.name}${caps}`;
 }
 
 export function cosine(a: number[], b: number[]): number {
@@ -60,11 +92,10 @@ export function bestSkillSlug(
 }
 
 /**
- * Resolve the worker's best-matching installed skill slug for a settled task,
- * or null when there is nothing to credit (no deployed agent, no installed
- * skills, no routing text, weak match, or any failure). Embeds are memoized
- * by embeddingService, and a stable skill doc embeds to the same vector every
- * settlement, so steady-state cost is ~one embed per NEW routing text.
+ * Resolve the worker's best-matching PUBLIC installed skill slug for a
+ * settled task (UN-prefixed — callers key it via mergeProofKeys), or null
+ * when there is nothing to credit: no deployed agent, no public installed
+ * skills, no routing text, weak match, or any failure.
  */
 export async function resolveProofSkillSlug(
   executorAddr: string,
@@ -72,16 +103,22 @@ export async function resolveProofSkillSlug(
 ): Promise<string | null> {
   try {
     const agent = await deployedAgentStore.loadAgentByWallet(executorAddr);
-    const skills = agent?.skills ?? [];
-    if (skills.length === 0) return null;
+    const installed = agent?.skills ?? [];
+    if (installed.length === 0) return null;
 
     const routingText = buildTaskRoutingText(meta);
     if (!routingText) return null;
 
-    const [taskVec, ...skillVecs] = await Promise.all([
-      embed(routingText).then((r) => r.vector),
-      ...skills.map((s) => embed(skillDocText(s)).then((r) => r.vector)),
-    ]);
+    // Public-registry skills only: proof rows are publicly readable, so a
+    // private draft's slug must never surface through them.
+    const pub = await skillStore.listPublicSlugs(installed.map((s) => s.slug));
+    const skills = installed.filter((s) => pub.has(s.slug.toLowerCase()));
+    if (skills.length === 0) return null;
+
+    // ONE batched provider call for the task text + every skill line — never
+    // a per-skill fan-out on the settlement path.
+    const { vectors } = await embedMany([routingText, ...skills.map(skillDocText)]);
+    const [taskVec, ...skillVecs] = vectors;
     const best = bestSkillSlug(
       taskVec,
       skills.map((s, i) => ({ slug: s.slug, vector: skillVecs[i] })),

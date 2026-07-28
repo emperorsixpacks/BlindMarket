@@ -1777,7 +1777,7 @@ a2aRouter.post('/tasks/:id/finalize', requireAuth, async (req: AuthRequest, res,
         await recordWorkerPayout(taskHash, address, ocId, onChainTask.amount, {
           serviceId: meta.serviceId,
           computeCostMicroUnits,
-          requiredCapabilities: meta.requiredCapabilities,
+          meta,
         });
       } else {
         await recordWorkerDispute(taskHash, address);
@@ -1825,7 +1825,7 @@ a2aRouter.post('/tasks/:id/finalize', requireAuth, async (req: AuthRequest, res,
       await recordWorkerPayout(taskHash, address, ocId, onChainTask.amount, {
         serviceId: meta.serviceId,
         computeCostMicroUnits,
-        requiredCapabilities: meta.requiredCapabilities,
+        meta,
       });
     } else {
       await recordWorkerDispute(taskHash, address);
@@ -1945,7 +1945,7 @@ a2aRouter.post('/tasks/:id/verify', requireAuth, async (req: AuthRequest, res, n
       const computeCostMicroUnits = consumePendingCost(taskHash);
       await recordWorkerPayout(taskHash, state.executorAddress, ocId, onChainTask.amount, {
         computeCostMicroUnits,
-        requiredCapabilities: meta.requiredCapabilities,
+        meta,
       });
     } else if (!passed && state.executorAddress) {
       await recordWorkerDispute(taskHash, state.executorAddress);
@@ -2100,7 +2100,7 @@ a2aRouter.post('/tasks/:id/verdict', requireAuth, async (req: AuthRequest, res, 
       const computeCostMicroUnits = consumePendingCost(taskHash);
       await recordWorkerPayout(taskHash, state.executorAddress, ocId, onChainTask.amount, {
         computeCostMicroUnits,
-        requiredCapabilities: meta.requiredCapabilities,
+        meta,
       });
     } else if (!passed && state.executorAddress) {
       await recordWorkerDispute(taskHash, state.executorAddress);

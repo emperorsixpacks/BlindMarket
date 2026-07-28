@@ -9,12 +9,21 @@ vi.hoisted(() => {
   process.env.PROOF_SLUG_SIM_THRESHOLD = '0.5';
 });
 
-vi.mock('./embeddingService.js', () => ({ embed: vi.fn() }));
+vi.mock('./embeddingService.js', () => ({ embedMany: vi.fn() }));
 vi.mock('./deployedAgentStore.js', () => ({ loadAgentByWallet: vi.fn() }));
+vi.mock('./skillStore.js', () => ({ listPublicSlugs: vi.fn() }));
 
-import { cosine, bestSkillSlug, skillDocText, resolveProofSkillSlug } from './semanticProof.js';
-import { embed } from './embeddingService.js';
+import {
+  cosine,
+  bestSkillSlug,
+  skillDocText,
+  mergeProofKeys,
+  resolveProofSkillSlug,
+  PROOF_SLUG_PREFIX,
+} from './semanticProof.js';
+import { embedMany } from './embeddingService.js';
 import { loadAgentByWallet } from './deployedAgentStore.js';
+import { listPublicSlugs } from './skillStore.js';
 
 describe('cosine', () => {
   it('identical direction → 1, orthogonal → 0, opposite → -1', () => {
@@ -44,15 +53,25 @@ describe('bestSkillSlug (argmax with floor)', () => {
   });
 });
 
+describe('mergeProofKeys (the shared success/dispute key set)', () => {
+  it('namespaces the slug so it can never collide with a capability tag', () => {
+    // 'testing' is BOTH a valid capability tag and a valid author-chosen skill
+    // slug — without the prefix the two would merge into one proof row.
+    expect(mergeProofKeys(['testing'], 'testing')).toEqual(['testing', `${PROOF_SLUG_PREFIX}testing`]);
+  });
+  it('passes tags through untouched when no slug resolved', () => {
+    expect(mergeProofKeys(['code_review'], null)).toEqual(['code_review']);
+    expect(mergeProofKeys([], null)).toEqual([]);
+  });
+});
+
 describe('skillDocText', () => {
-  it('joins name, tags, and truncated instructions', () => {
+  it('uses name + tags ONLY — instructions are author IP and must not reach the provider', () => {
     const txt = skillDocText({
       name: 'PDF Invoice Extractor',
       capabilities: ['data_processing'] as never,
-      instructions: 'x'.repeat(5000),
     });
-    expect(txt.startsWith('PDF Invoice Extractor (data_processing)\n')).toBe(true);
-    expect(txt.length).toBeLessThan(1300);
+    expect(txt).toBe('PDF Invoice Extractor (data_processing)');
   });
 });
 
@@ -60,8 +79,10 @@ describe('resolveProofSkillSlug', () => {
   const meta = { publicBrief: 'Turn these invoices into a CSV', requiredCapabilities: [] as never };
   const skill = (slug: string) =>
     ({ slug, name: slug, instructions: 'do the thing', capabilities: [], skillId: 1, version: '1', tools: [], secretRefs: [], source: 'skillmd', installedAt: '' }) as never;
+  const allPublic = () => vi.mocked(listPublicSlugs).mockImplementation(async (slugs: string[]) => new Set(slugs.map((s) => s.toLowerCase())));
 
   it('null when the worker has no deployed agent or no skills', async () => {
+    allPublic();
     vi.mocked(loadAgentByWallet).mockResolvedValue(null);
     expect(await resolveProofSkillSlug('0xw', meta)).toBeNull();
     vi.mocked(loadAgentByWallet).mockResolvedValue({ skills: [] } as never);
@@ -69,25 +90,38 @@ describe('resolveProofSkillSlug', () => {
   });
 
   it('null when the task has no routing text', async () => {
+    allPublic();
     vi.mocked(loadAgentByWallet).mockResolvedValue({ skills: [skill('a')] } as never);
     expect(await resolveProofSkillSlug('0xw', { requiredCapabilities: [] as never })).toBeNull();
   });
 
-  it('credits the closest skill above the floor (vectors injected)', async () => {
+  it('excludes private-registry skills — their slugs must never reach the public proof tables', async () => {
+    vi.mocked(loadAgentByWallet).mockResolvedValue({ skills: [skill('secret-draft')] } as never);
+    vi.mocked(listPublicSlugs).mockResolvedValue(new Set()); // nothing public
+    expect(await resolveProofSkillSlug('0xw', meta)).toBeNull();
+    expect(vi.mocked(embedMany)).not.toHaveBeenCalled(); // no provider spend either
+  });
+
+  it('credits the closest public skill above the floor via ONE batched embed call', async () => {
+    allPublic();
     vi.mocked(loadAgentByWallet).mockResolvedValue({ skills: [skill('invoice-extractor'), skill('poem-writer')] } as never);
-    // First embed call = task text, then one per skill (in order).
-    vi.mocked(embed)
-      .mockResolvedValueOnce({ vector: [1, 0], model: 'mock-v1' })   // task
-      .mockResolvedValueOnce({ vector: [0.95, 0.31], model: 'mock-v1' }) // invoice-extractor (close)
-      .mockResolvedValueOnce({ vector: [0, 1], model: 'mock-v1' });  // poem-writer (orthogonal)
+    vi.mocked(embedMany).mockClear();
+    vi.mocked(embedMany).mockResolvedValue({
+      vectors: [
+        [1, 0],        // task
+        [0.95, 0.31],  // invoice-extractor (close)
+        [0, 1],        // poem-writer (orthogonal)
+      ],
+      model: 'mock-v1',
+    });
     expect(await resolveProofSkillSlug('0xw', meta)).toBe('invoice-extractor');
+    expect(vi.mocked(embedMany)).toHaveBeenCalledTimes(1); // batched, not per-skill
   });
 
   it('null when even the best skill is below the floor', async () => {
+    allPublic();
     vi.mocked(loadAgentByWallet).mockResolvedValue({ skills: [skill('poem-writer')] } as never);
-    vi.mocked(embed)
-      .mockResolvedValueOnce({ vector: [1, 0], model: 'mock-v1' })
-      .mockResolvedValueOnce({ vector: [0.2, 0.98], model: 'mock-v1' });
+    vi.mocked(embedMany).mockResolvedValue({ vectors: [[1, 0], [0.2, 0.98]], model: 'mock-v1' });
     expect(await resolveProofSkillSlug('0xw', meta)).toBeNull();
   });
 

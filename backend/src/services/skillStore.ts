@@ -162,6 +162,19 @@ export async function incrementInstallCount(id: number): Promise<void> {
   await db.query('UPDATE agent_skills SET install_count = install_count + 1 WHERE id = $1', [id]);
 }
 
+/** Which of these slugs are PUBLIC registry skills (returned lowercased).
+ *  Used by the proof re-key so a private draft's slug never reaches the
+ *  publicly readable skill_stats/agent_badges tables. */
+export async function listPublicSlugs(slugs: string[]): Promise<Set<string>> {
+  if (slugs.length === 0) return new Set();
+  const db = await getPool();
+  const { rows } = await db.query<{ slug: string }>(
+    'SELECT slug FROM agent_skills WHERE slug = ANY($1) AND is_public = true',
+    [slugs.map((s) => s.toLowerCase())],
+  );
+  return new Set(rows.map((r) => r.slug.toLowerCase()));
+}
+
 export async function deleteSkill(slug: string, authorAddress: string): Promise<boolean> {
   const db = await getPool();
   const { rowCount } = await db.query(
