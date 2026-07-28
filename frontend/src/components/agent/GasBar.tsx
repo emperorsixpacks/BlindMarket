@@ -1,0 +1,108 @@
+import { Button, Icon, ConfirmDialog } from '../bb';
+
+/**
+ * Gas management strip — presentational. Every piece of state and every
+ * transaction lives in the page (the balance also feeds the stats row); this
+ * only renders it and calls back.
+ */
+export function GasBar({
+  symbol,
+  topUpAmount,
+  lowGasThreshold,
+  isLowGas,
+  balanceEther,
+  agentStatus,
+  ownerLabel,
+  topUpStatus,
+  topUpError,
+  withdrawStatus,
+  withdrawError,
+  withdrawInfo,
+  confirmOpen,
+  onTopUp,
+  onWithdrawRequest,
+  onWithdrawConfirm,
+  onWithdrawCancel,
+}: {
+  symbol: string;
+  topUpAmount: string;
+  lowGasThreshold: number;
+  isLowGas: boolean;
+  balanceEther: number;
+  agentStatus: string;
+  ownerLabel: string;
+  topUpStatus: 'idle' | 'sending' | 'error';
+  topUpError: string;
+  withdrawStatus: 'idle' | 'sending' | 'done' | 'error';
+  withdrawError: string;
+  withdrawInfo: { txHash: string; amount: string } | null;
+  confirmOpen: boolean;
+  onTopUp: () => void;
+  onWithdrawRequest: () => void;
+  onWithdrawConfirm: () => void;
+  onWithdrawCancel: () => void;
+}) {
+  return (
+    <div className="border border-line px-5 py-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5 text-ink-2">
+          <Icon name="bolt" size={16} className={isLowGas ? 'text-warn' : 'text-ink-3'} />
+          <span className="text-[13px] font-medium">Gas management</span>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant={isLowGas ? 'primary' : 'outline'}
+            size="sm"
+            onClick={onTopUp}
+            disabled={topUpStatus === 'sending'}
+            label={topUpStatus === 'sending' ? `Sending ${topUpAmount} ${symbol}…` : `Top up gas (+${topUpAmount} ${symbol})`}
+          />
+          {/* Withdraw — single button for both native 0G and ERC20 tokens.
+              The backend's /withdraw endpoint auto-detects; empty body sweeps
+              native 0G (gas reserve kept). */}
+          {agentStatus !== 'running' && (
+            <>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onWithdrawRequest}
+                disabled={withdrawStatus === 'sending' || balanceEther < 0.0015}
+                label={withdrawStatus === 'sending' ? 'Withdrawing…' : 'Withdraw to owner'}
+              />
+              <ConfirmDialog
+                open={confirmOpen}
+                title="Withdraw agent funds"
+                description={`Funds in this agent's wallet will be sent back to ${ownerLabel}. This can't be undone.`}
+                confirmLabel="Withdraw funds"
+                onConfirm={onWithdrawConfirm}
+                onCancel={onWithdrawCancel}
+              />
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Status / warning line */}
+      {(topUpStatus === 'error' ||
+        withdrawStatus === 'done' ||
+        withdrawStatus === 'error' ||
+        (isLowGas && agentStatus !== 'stopped')) && (
+        <div className="mt-3 space-y-1.5 text-xs">
+          {topUpStatus === 'error' && <div className="text-err">{topUpError}</div>}
+          {withdrawStatus === 'done' && withdrawInfo && (
+            <div className="text-ok">
+              Withdrew <span className="font-mono">{parseFloat(withdrawInfo.amount).toFixed(4)} {symbol}</span> ·
+              tx <span className="font-mono">{withdrawInfo.txHash.slice(0, 10)}…</span>
+            </div>
+          )}
+          {withdrawStatus === 'error' && <div className="text-err">{withdrawError}</div>}
+          {isLowGas && agentStatus !== 'stopped' && (
+            <div className="text-warn">
+              Agent will fail to submit evidence below <span className="font-mono">{lowGasThreshold} {symbol}</span>.
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
