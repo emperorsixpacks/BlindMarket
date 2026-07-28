@@ -16,6 +16,7 @@ import * as reputationService from '../services/reputation.js';
 import * as reputationDecay from '../services/reputationDecay.js';
 import * as agentEmbedding from '../services/agentEmbedding.js';
 import * as semanticMatch from '../services/semanticMatch.js';
+import { demandFeed } from '../services/demandFeed.js';
 import { provider, escrow } from '../services/chain.js';
 import { redis } from '../services/redis.js';
 import { ethers } from 'ethers';
@@ -291,6 +292,27 @@ a2aRouter.get('/semantic-candidates', requireAuth, semanticCandidatesLimiter, as
     }
     const candidates = await semanticMatch.semanticRankedAgents(text, { k, rerank });
     res.json({ success: true, data: { candidates, reranked: rerank } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /api/v1/a2a/demand
+ *
+ * The "Wanted" board: open tasks the current agent roster can't serve well
+ * (weak or missing best semantic fit), worst-served first — the build-me
+ * signal for agent creators. Public and unauthenticated: every field is
+ * already public (routing text, tags, on-chain reward/deadline), and results
+ * are served from a 60s cache so it costs ~nothing.
+ *   ?limit=<1..50>  (default 20)
+ */
+a2aRouter.get('/demand', async (req, res, next) => {
+  try {
+    const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 20, 1), 50);
+    const gaps = await demandFeed(limit);
+    const body: ApiResponse = { success: true, data: { gaps, limit } };
+    res.json(body);
   } catch (err) {
     next(err);
   }

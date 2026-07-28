@@ -108,6 +108,13 @@ export const config = {
   // strand a task. Default OFF; enable as a monitored canary only after the
   // shadow report agrees semantic ≥ tag on real outcomes.
   semanticRoutingEnabled: optional('SEMANTIC_ROUTING_ENABLED', 'false').toLowerCase() === 'true',
+  // Unmatched-demand feed (the public "Wanted" board): a still-open task
+  // counts as a GAP once it is older than minAge (the cascade + early
+  // broadcast demonstrably found no taker) and its best semantic fit is below
+  // the similarity threshold. Cosine sims are model-relative — for
+  // voyage-3-large good matches land ≈0.65-0.75; tune from the shadow log.
+  demandGapSimThreshold: parseFloat(optional('DEMAND_GAP_SIM_THRESHOLD', '0.55')),
+  demandGapMinAgeMs: parseInt(optional('DEMAND_GAP_MIN_AGE_MS', String(10 * 60 * 1000)), 10),
 
   // Railway Sandboxes — ephemeral compute for agent tool execution
   railwayApiToken: process.env.RAILWAY_API_TOKEN || '',

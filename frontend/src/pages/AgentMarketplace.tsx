@@ -17,10 +17,77 @@ import {
 import { searchAgents, type AgentSearchResult } from '../services/marketplace';
 import { AGENT_CAPABILITIES } from '../config/capabilities';
 import { truncateAddress } from '../lib/utils';
+import { get } from '../lib/api';
 import { formatUnits } from 'ethers';
 import { getNativeCurrency } from '../config/constants';
 
 const PAGE_SIZE = 20;
+
+// ── Wanted: unserved demand ──────────────────────────────────────────────────
+// Open tasks the current roster can't serve well (weak or missing best
+// semantic fit) — the build-me signal for agent creators. Renders NOTHING
+// when the market is well served, so it adds zero chrome by default.
+
+interface DemandGapRow {
+  taskHash: string;
+  routingText: string;
+  ageMs: number;
+  bestFit: { similarity: number; displayName: string } | null;
+  rewardRaw?: string;
+}
+
+function agoLabel(ms: number): string {
+  const h = Math.floor(ms / 3_600_000);
+  if (h < 1) return `${Math.max(1, Math.floor(ms / 60_000))}m ago`;
+  if (h < 48) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
+function rewardLabel(rewardRaw: string | undefined, sym: string): string | null {
+  if (!rewardRaw) return null;
+  try {
+    return `${formatUnits(rewardRaw, 18)} ${sym}`;
+  } catch {
+    return null;
+  }
+}
+
+function WantedSection({ sym }: { sym: string }) {
+  const { data } = useQuery({
+    queryKey: ['demand-gaps'],
+    queryFn: () => get<{ gaps: DemandGapRow[] }>('/api/v1/a2a/demand?limit=5'),
+    staleTime: 60_000,
+    retry: false,
+  });
+  const gaps = data?.gaps ?? [];
+  if (gaps.length === 0) return null;
+  return (
+    <div className="border border-cream/25 mb-8">
+      <div className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3 border-b border-line">
+        <div className="text-[11px] font-medium uppercase tracking-wider text-cream">
+          Wanted · {gaps.length} open {gaps.length === 1 ? 'task' : 'tasks'} no agent serves well
+        </div>
+        <Link to="/agents/deploy">
+          <Button variant="outline" label="Build the missing agent" size="sm" />
+        </Link>
+      </div>
+      <div className="divide-y divide-line">
+        {gaps.map((g) => (
+          <div key={g.taskHash} className="flex items-center gap-4 px-4 sm:px-5 py-3">
+            <span className="flex-1 min-w-0 truncate text-sm text-ink-2">{g.routingText}</span>
+            <span className="font-mono text-xs text-ink-3 whitespace-nowrap">
+              {g.bestFit ? `best fit ${(g.bestFit.similarity * 100).toFixed(0)}%` : 'no match'}
+            </span>
+            {rewardLabel(g.rewardRaw, sym) && (
+              <span className="font-mono text-xs text-ink whitespace-nowrap">{rewardLabel(g.rewardRaw, sym)}</span>
+            )}
+            <span className="font-mono text-[11px] text-ink-3 whitespace-nowrap hidden sm:inline">{agoLabel(g.ageMs)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 // formatUnits THROWS on non-wei strings ("0.5", garbage). One malformed
 // price from the API must not blank the whole agent list.
@@ -60,6 +127,8 @@ export default function AgentMarketplace() {
         title="Browse agents"
         description="Discover agents by capability and reputation. Click through to view their details and past work."
       />
+
+      <WantedSection sym={sym} />
 
       {/* Filters */}
       <div className="flex flex-wrap items-end gap-4 mb-8">
