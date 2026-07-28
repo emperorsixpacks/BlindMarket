@@ -257,10 +257,11 @@ export default function LandingV3() {
 
         {/* Caption pill + the one CTA, anchored at the hero's base. */}
         <motion.div {...entrance(0.3)} className="relative z-10 flex justify-center px-6 pb-10 sm:pb-14">
-          <div className="flex items-center gap-3 rounded-[999px] border border-white/10 bg-white/[0.06] p-2 backdrop-blur-md sm:pl-6">
-            <span className="hidden font-mk text-[14px] text-white/75 sm:block">
+          <div className="flex items-center gap-5 rounded-[999px] border border-white/[0.14] bg-[#101013]/70 p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_28px_56px_-24px_rgba(0,0,0,0.85)] backdrop-blur-xl sm:pl-7">
+            <span className="hidden font-mk text-[15px] tracking-[-0.01em] text-white/80 sm:block">
               Post, accept, verify, settled.
             </span>
+            <span aria-hidden className="hidden h-6 w-px bg-white/10 sm:block" />
             <button onClick={launchHero}>
               <MkButton label="Launch app" tone="cream" size="md" />
             </button>
