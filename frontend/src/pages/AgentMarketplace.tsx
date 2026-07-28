@@ -6,7 +6,6 @@ import {
   PageHeader,
   SectionRule,
   Button,
-  Tag,
   FormInput,
   FormSelect,
   AgentAvatar,
@@ -15,7 +14,6 @@ import {
   ErrorState,
 } from '../components/bb';
 import { searchAgents, type AgentSearchResult } from '../services/marketplace';
-import { AGENT_CAPABILITIES } from '../config/capabilities';
 import { truncateAddress } from '../lib/utils';
 import { get } from '../lib/api';
 import { formatUnits } from 'ethers';
@@ -101,16 +99,14 @@ function fromPriceLabel(fromPrice: string | null | undefined, sym: string): stri
 }
 
 export default function AgentMarketplace() {
-  const [capability, setCapability] = useState('');
   const [minRating, setMinRating] = useState(0);
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
-  const [provenOnly, setProvenOnly] = useState(false);
   const sym = getNativeCurrency('og').symbol;
 
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ['agent-search', capability, minRating, page, query, provenOnly],
-    queryFn: () => searchAgents(capability || undefined, minRating || undefined, PAGE_SIZE, page, query || undefined, provenOnly),
+    queryKey: ['agent-search', minRating, page, query],
+    queryFn: () => searchAgents(undefined, minRating || undefined, PAGE_SIZE, page, query || undefined, false),
   });
 
   const totalAgents = data?.total ?? 0;
@@ -118,14 +114,14 @@ export default function AgentMarketplace() {
 
   // Reset to page 1 when filters or the search query change — otherwise a
   // new search can strand the user on a now-empty page N.
-  useEffect(() => { setPage(1); }, [capability, minRating, query, provenOnly]);
+  useEffect(() => { setPage(1); }, [minRating, query]);
 
   return (
     <div>
       <Breadcrumb items={['marketplace', 'agents', 'browse']} />
       <PageHeader
         title="Browse agents"
-        description="Discover agents by capability and reputation. Click through to view their details and past work."
+        description="Discover agents by reputation and work history. Click through to view their details and past work."
       />
 
       <WantedSection sym={sym} />
@@ -140,26 +136,6 @@ export default function AgentMarketplace() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
-        </div>
-        <div className="flex-[2] min-w-[200px]">
-          <div className="text-[11px] font-medium uppercase tracking-wider text-ink-3 mb-1.5">Capability</div>
-          <div className="flex flex-wrap gap-1.5">
-            <button
-              onClick={() => setCapability('')}
-              className={`px-2.5 py-1 text-xs border transition-colors ${!capability ? 'bg-cream/10 border-cream/40 text-cream' : 'bg-surface-2 border-line text-ink-3 hover:text-ink-2'}`}
-            >
-              All
-            </button>
-            {AGENT_CAPABILITIES.map((c) => (
-              <button
-                key={c}
-                onClick={() => setCapability(capability === c ? '' : c)}
-                className={`px-2.5 py-1 text-xs border transition-colors ${capability === c ? 'bg-cream/10 border-cream/40 text-cream' : 'bg-surface-2 border-line text-ink-3 hover:text-ink-2'}`}
-              >
-                {c.replace(/_/g, ' ')}
-              </button>
-            ))}
-          </div>
         </div>
         <div className="w-[140px]">
           <div className="text-[11px] font-medium uppercase tracking-wider text-ink-3 mb-1.5">Min rating</div>
@@ -176,19 +152,10 @@ export default function AgentMarketplace() {
         </div>
       </div>
 
-      {/* Proven-only: filter to agents with a track-record badge for the
-          selected skill. Only meaningful once a capability is picked. */}
-      {capability && (
-        <label className="flex items-center gap-2 text-xs text-ink-2 mb-4 -mt-2 cursor-pointer">
-          <input type="checkbox" checked={provenOnly} onChange={(e) => setProvenOnly(e.target.checked)} />
-          <span>Proven only — agents with settled, verified <span className="text-ok">{capability.replace(/_/g, ' ')}</span> tasks</span>
-        </label>
-      )}
-
       <SectionRule num="01" title="Agents" side={data ? `${data.total} found` : undefined} />
 
       {/* Storefront cards — an agent is a product, present it like one:
-          identicon, name, capabilities on the left; rating · work · price on
+          identicon, name on the left; rating · work · price on
           the right. The whole card is the link. */}
       {isLoading ? (
         <div className="border border-line"><LoadingState label="Searching agents…" /></div>
@@ -199,9 +166,7 @@ export default function AgentMarketplace() {
           <EmptyState
             icon="search"
             title="No agents found"
-            description={capability
-              ? `No agents match the "${capability.replace(/_/g, ' ')}" capability. Try a different filter.`
-              : 'No agents are registered on the marketplace yet.'}
+            description="No agents are registered on the marketplace yet."
             action={
               <Link to="/agents/deploy">
                 <Button variant="outline" label="Deploy an agent" size="sm" />
@@ -215,7 +180,6 @@ export default function AgentMarketplace() {
             // Shape-defensive: a partial row from the API degrades that card,
             // not the whole list.
             const badges = r.badges ?? [];
-            const capabilities = r.capabilities ?? [];
             const hasTee = badges.some(b => b.type === 'tee' || b.capability === 'tee_verified');
             const priceLabel = fromPriceLabel(r.fromPrice, sym);
             return (
@@ -232,16 +196,6 @@ export default function AgentMarketplace() {
                     {badges.length > 0 && <span className="text-ok text-xs">✓ {badges.length}</span>}
                   </div>
                   <div className="text-[11px] font-mono text-ink-3 mt-0.5">{truncateAddress(r.address)}</div>
-                  {capabilities.length > 0 && (
-                    <div className="flex flex-wrap gap-1 mt-2">
-                      {capabilities.slice(0, 4).map((c) => (
-                        <Tag key={c} tone="neutral">{c.replace(/_/g, ' ')}</Tag>
-                      ))}
-                      {capabilities.length > 4 && (
-                        <span className="text-[11px] text-ink-3 self-center">+{capabilities.length - 4}</span>
-                      )}
-                    </div>
-                  )}
                 </div>
                 {/* Right rail: the buy signals — rating · work done · entry price */}
                 <div className="col-span-2 sm:col-span-1 flex sm:flex-col items-center sm:items-end justify-between sm:justify-center gap-x-4 gap-y-1 font-mono text-xs sm:text-right border-t sm:border-t-0 border-line/60 pt-3 sm:pt-0">

@@ -52,8 +52,6 @@ function durationHint(secs: number): string {
   return `${Math.round(secs / 86400)} days from now`;
 }
 
-import { AGENT_CAPABILITIES } from '../config/capabilities';
-
   // Pulled from the shared constants module so the address lives in exactly
   // one place. AgentDetail's /withdraw call uses the same value when
   // withdrawing ERC20 tokens.
@@ -111,7 +109,6 @@ export default function PostTask() {
   const [status, setStatus] = useState<'idle' | 'encrypting' | 'approving' | 'signing' | 'done' | 'error'>('idle');
   const [error, setError] = useState('');
   const [taskId, setTaskId] = useState<string | null>(null);
-  const [requiredCaps, setRequiredCaps] = useState<string[]>([]);
   // Snapshot of how many executors the AES key was wrapped to at post time.
   // Drives the post-success copy: a non-zero count means at least one agent
   // can /accept immediately; zero means the task is awaiting bids. The
@@ -126,9 +123,6 @@ export default function PostTask() {
   // synchronously, so the second invocation bails immediately.
   const submittingRef = useRef(false);
 
-  const toggleCap = (cap: string) =>
-    setRequiredCaps(prev => (prev.includes(cap) ? prev.filter(c => c !== cap) : [...prev, cap]));
-
   useEffect(() => {
     trackEvent('post_task_view');
   }, []);
@@ -141,21 +135,6 @@ export default function PostTask() {
     )
       .then((r) => setVerifiers(r.executors ?? []))
       .catch(() => { /* picker stays empty; poster can use Auto */ });
-  }, []);
-
-  // Per-capability supply + proof, so the picker shows "N agents · M proven"
-  // per tag — pick a skill and see how much of the market can actually do it.
-  const [capStats, setCapStats] = useState<Record<string, { agents: number; proven: number }>>({});
-  useEffect(() => {
-    authedGet<{ capabilities: Array<{ capability: string; agents: number; proven: number }> }>(
-      '/api/v1/marketplace/capabilities/stats',
-    )
-      .then((r) => {
-        const map: Record<string, { agents: number; proven: number }> = {};
-        for (const c of r.capabilities ?? []) map[c.capability] = { agents: c.agents, proven: c.proven };
-        setCapStats(map);
-      })
-      .catch(() => { /* counts are decorative — absence is fine */ });
   }, []);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -202,12 +181,11 @@ export default function PostTask() {
       let executors: Array<{ address: string; publicKey: string; capabilities: string[]; reputation: number }> = [];
       if (!isPublicTask) {
         console.log('[PostTask] Looking up matching executors...');
-        const capsQS = encodeURIComponent(requiredCaps.join(','));
         // authedGet unwraps to `body.data` (see api.ts:23), so T is the inner
         // payload — not the {success, data} envelope.
         const execResp = await authedGet<{
           executors: Array<{ address: string; publicKey: string; capabilities: string[]; reputation: number }>;
-        }>(`/api/v1/a2a/executors?capabilities=${capsQS}`, token);
+        }>(`/api/v1/a2a/executors`, token);
         executors = execResp.executors ?? [];
         console.log(`[PostTask] ${executors.length} matching executor(s) found at post time`);
       }
@@ -363,7 +341,7 @@ export default function PostTask() {
         verificationMode,
         verificationCriteria,
         verifierAddress,
-        requiredCapabilities: requiredCaps,
+        requiredCapabilities: [],
         rootHash,
         wrappedKeys: isPublicTask ? undefined : wrappedKeys,
       }, token);
@@ -388,7 +366,7 @@ export default function PostTask() {
         verificationMode,
         verificationCriteria,
         verifierAddress,
-        requiredCapabilities: requiredCaps,
+        requiredCapabilities: [],
         rootHash,
         wrappedKeys: isPublicTask ? undefined : wrappedKeys,
         // Only sent when key-custody is enabled (else undefined → omitted by
@@ -509,7 +487,7 @@ export default function PostTask() {
                   <span className="text-sm font-semibold">Awaiting first bidder</span>
                 </div>
                 <p className="text-sm text-ink-2 leading-relaxed">
-                  No agent with matching capabilities is registered yet. Your task is encrypted
+                  No registered agent has picked it up yet. Your task is encrypted
                   and posted — when an agent bids and accepts, the platform's key custody service
                   will re-wrap the encryption key server-side. You don't need to keep a browser
                   tab open.
@@ -613,47 +591,6 @@ export default function PostTask() {
                 />
               </FormField>
 
-              <FormField
-                label="Capabilities (optional)"
-                hint="Tag the skills this task needs to route it to matching agents first. Leave empty to open it to every agent."
-              >
-                <div className="mb-2 text-xs text-ink-3">
-                  {requiredCaps.length > 0 ? (
-                    <><span className="font-mono text-ink-2">{requiredCaps.length}</span> selected — offered first to agents that have all of these</>
-                  ) : (
-                    <>None selected — open to all agents</>
-                  )}
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {AGENT_CAPABILITIES.map((cap) => {
-                    const active = requiredCaps.includes(cap);
-                    const stat = capStats[cap];
-                    return (
-                      <button
-                        key={cap}
-                        type="button"
-                        onClick={() => toggleCap(cap)}
-                        title={stat ? `${stat.agents} agent(s) · ${stat.proven} with a proven track record` : undefined}
-                        className={`px-2.5 py-1 text-xs border transition-colors ${active
-                          ? 'bg-cream/10 border-cream/40 text-cream'
-                          : 'bg-surface-2 border-line text-ink-3 hover:text-ink-2'
-                          }`}
-                      >
-                        {cap}
-                        {stat && stat.agents > 0 && (
-                          <span className="ml-1.5 text-[10px] text-ink-3">
-                            {stat.agents}{stat.proven > 0 && <span className="text-ok"> · {stat.proven}✓</span>}
-                          </span>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-                <div className="mt-1.5 text-[11px] text-ink-3">
-                  Counts show agents that declare each skill; <span className="text-ok">✓ = proven</span> by settled, verified tasks.
-                </div>
-              </FormField>
-
               {/* Verification: 'auto' = backend rubric; 'agent' = a
                   poster-designated verifier agent that decrypts the brief and
                   judges the work. Tasks are visible to autonomous agents at /a2a. */}
@@ -733,7 +670,7 @@ export default function PostTask() {
                           .filter(v => v.publicKey && v.address.toLowerCase() !== address?.toLowerCase())
                           .map(v => (
                             <option key={v.address} value={v.address}>
-                              {v.address.slice(0, 10)}… · rep {v.reputation} · {v.capabilities.slice(0, 3).join(', ')}
+                              {v.address.slice(0, 10)}… · rep {v.reputation}
                             </option>
                           ))}
                       </select>

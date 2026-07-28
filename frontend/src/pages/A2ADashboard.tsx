@@ -22,7 +22,6 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { useChainAddress } from '../hooks/useChainWallet';
 import { getOrCreateExecutorIdentity } from '../lib/executorIdentity';
-import { AGENT_CAPABILITIES as ALL_CAPABILITIES } from '../config/capabilities';
 
 type Tab = 'browse' | 'executions' | 'register';
 
@@ -35,7 +34,6 @@ const TABS: { id: Tab; label: string }[] = [
 type BrowseRow = {
   meta: {
     taskId: string;
-    requiredCapabilities: string[];
     verificationMode: string;
     targetExecutorType: string;
     // Present only on public tasks — poster opted out of blindness, so the
@@ -51,7 +49,6 @@ export default function A2ADashboard() {
   // Tab lives in the URL (?tab=) so refresh/back/share keep the view.
   const [activeTab, setActiveTab] = useTabParam<Tab>('browse', TABS.map((t) => t.id));
   const [displayName, setDisplayName] = useState('');
-  const [selectedCaps, setSelectedCaps] = useState<string[]>([]);
   const [agentCardUrl, setAgentCardUrl] = useState('');
   const [mcpEndpoint, setMcpEndpoint] = useState('');
   const [rate, setRate] = useState('');
@@ -64,9 +61,6 @@ export default function A2ADashboard() {
   const { data: execs, isLoading: execsLoading, isError: execsError, refetch: refetchExecs } = useMyExecutions({ enabled: activeTab === 'executions' });
   const registerMutation = useRegisterAgent();
 
-  const toggleCap = (cap: string) =>
-    setSelectedCaps((prev) => (prev.includes(cap) ? prev.filter((c) => c !== cap) : [...prev, cap]));
-
   const taskId = (e: { meta: { taskId: string }; onChain?: { taskId?: string } }) => e.onChain?.taskId || e.meta.taskId;
   const taskLabel = (e: { meta: { taskId: string }; onChain?: { taskId?: string } }) =>
     e.onChain?.taskId ? `#${e.onChain.taskId}` : `${e.meta.taskId.slice(0, 10)}…`;
@@ -75,7 +69,6 @@ export default function A2ADashboard() {
 
   const agentCardPreview = `{
   "name": "${displayName || '<agent_name>'}",
-  "capabilities": [${selectedCaps.map((c) => `"${c}"`).join(', ')}],
   "agent_card_url": "${agentCardUrl || '<url>'}",
   "mcp_endpoint": "${mcpEndpoint || '<url>'}",
   "rate": "${rate || '0'} 0G/task"
@@ -153,17 +146,6 @@ export default function A2ADashboard() {
                     {r.meta.publicBrief}
                   </p>
                 )}
-
-                {/* required capabilities */}
-                <div className="flex flex-wrap gap-1.5">
-                  {r.meta.requiredCapabilities.length > 0 ? (
-                    r.meta.requiredCapabilities.map((c) => (
-                      <Tag key={c} tone="neutral">{c}</Tag>
-                    ))
-                  ) : (
-                    <span className="text-xs text-ink-3">No specific capabilities</span>
-                  )}
-                </div>
 
                 <div className="flex-1" />
 
@@ -264,25 +246,6 @@ export default function A2ADashboard() {
               <FormInput placeholder="my-agent-executor" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
             </FormField>
 
-            <FormField label="Capabilities" required hint={`${selectedCaps.length} selected`}>
-              <div className="flex flex-wrap gap-1.5">
-                {ALL_CAPABILITIES.map((cap) => (
-                  <button
-                    key={cap}
-                    type="button"
-                    onClick={() => toggleCap(cap)}
-                    className={`px-2.5 py-1 text-xs border transition-colors ${
-                      selectedCaps.includes(cap)
-                        ? 'bg-cream/10 border-cream/40 text-cream'
-                        : 'bg-surface-2 border-line text-ink-3 hover:text-ink-2'
-                    }`}
-                  >
-                    {cap}
-                  </button>
-                ))}
-              </div>
-            </FormField>
-
             <FormField label="Agent card URL" hint="Public agent card JSON endpoint">
               <FormInput className="font-mono" placeholder="https://…" value={agentCardUrl} onChange={(e) => setAgentCardUrl(e.target.value)} />
             </FormField>
@@ -299,7 +262,7 @@ export default function A2ADashboard() {
               <Button
                 variant="primary"
                 label={registerMutation.isPending ? 'Registering…' : profile?.agent ? 'Re-register executor' : 'Register executor'}
-                disabled={!displayName.trim() || selectedCaps.length === 0 || !isAuthenticated || registerMutation.isPending}
+                disabled={!displayName.trim() || !isAuthenticated || registerMutation.isPending}
                 onClick={async () => {
                   setRegisterError(null);
                   if (!address) {
@@ -310,7 +273,7 @@ export default function A2ADashboard() {
                     const { publicKey } = getOrCreateExecutorIdentity(address);
                     await registerMutation.mutateAsync({
                       displayName,
-                      capabilities: selectedCaps,
+                      capabilities: [],
                       publicKey,
                       ...(agentCardUrl ? { agentCardUrl } : {}),
                       ...(mcpEndpoint ? { mcpEndpointUrl: mcpEndpoint } : {}),
@@ -336,7 +299,6 @@ export default function A2ADashboard() {
             {profile?.agent ? (
               <div className="text-sm text-ink-3 space-y-1.5">
                 <div>Name: <span className="text-ink">{profile.agent.displayName}</span></div>
-                <div>Capabilities: <span className="text-ink font-mono">{profile.agent.capabilities.length}</span></div>
                 <div>Reputation: <span className="text-ink font-mono">{profile.agent.reputation.toFixed(1)}</span></div>
                 <div>Tasks: <span className="text-ink font-mono">{profile.agent.tasksCompleted}</span></div>
               </div>

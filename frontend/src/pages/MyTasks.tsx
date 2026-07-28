@@ -33,7 +33,6 @@ interface PostedTask {
     taskId: string;           // taskHash, bytes32 hex
     targetExecutorType: 'agent' | 'human';
     verificationMode: 'manual' | 'auto' | 'oracle' | 'agent';
-    requiredCapabilities: string[];
     posterAddress?: string;
     verifierAddress?: string;
     rootHash?: string;
@@ -359,13 +358,6 @@ export default function MyTasks() {
                     <div className="text-[11px] text-ink-3 mt-1 capitalize">
                       {t.meta.verificationMode} verify · {t.meta.targetExecutorType}
                     </div>
-                    {t.meta.requiredCapabilities && t.meta.requiredCapabilities.length > 0 && (
-                      <div className="flex gap-1 mt-2 flex-wrap">
-                        {t.meta.requiredCapabilities.slice(0, 4).map(c => (
-                          <Tag key={c} tone="neutral">{c.replace(/_/g, ' ')}</Tag>
-                        ))}
-                      </div>
-                    )}
                     {failedReasons && (
                       <div className="mt-2 text-[11px] text-err leading-relaxed">
                         Failed: {failedReasons.join(' · ')}

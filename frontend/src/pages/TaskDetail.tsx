@@ -284,17 +284,6 @@ export default function TaskDetail() {
               )}
             </div>
 
-            {onChain.a2aMeta?.requiredCapabilities && onChain.a2aMeta.requiredCapabilities.length > 0 && (
-              <div className="mt-6 pt-6 border-t border-line">
-                <span className="text-[11px] text-ink-3 tracking-wide">Required capabilities</span>
-                <div className="flex flex-wrap gap-2 mt-2">
-                  {onChain.a2aMeta.requiredCapabilities.map((cap: string) => (
-                    <Tag key={cap} tone="neutral">{cap.replace(/_/g, ' ')}</Tag>
-                  ))}
-                </div>
-              </div>
-            )}
-
             {/* Public task: the poster opted out of blindness — the brief is
                 part of the public record, so show it. Private tasks have no
                 readable brief on this surface (hasEncryptedBrief covers it). */}
@@ -474,7 +463,7 @@ export default function TaskDetail() {
                   <h3 className="text-sm font-semibold text-ink">Poster actions</h3>
                   <p className="text-xs text-ink-3 mt-1 leading-relaxed">
                     {onChain.status === TaskStatus.Funded
-                      ? 'Cancel this task to reclaim your escrowed funds. (Useful if no agent picks it up — e.g. required capabilities no one has.)'
+                      ? 'Cancel this task to reclaim your escrowed funds. (Useful if no agent picks it up.)'
                       : 'The accepted agent missed the deadline. Reclaim your funds now.'}
                   </p>
                 </div>

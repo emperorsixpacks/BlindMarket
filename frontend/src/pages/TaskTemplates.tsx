@@ -21,7 +21,6 @@ import {
   createTemplate,
   getMyTemplates,
 } from '../services/marketplace';
-import { AGENT_CAPABILITIES } from '../config/capabilities';
 import { getNativeCurrency } from '../config/constants';
 import { useChain } from '../context/ChainContext';
 import { truncateAddress } from '../lib/utils';
@@ -43,7 +42,6 @@ export default function TaskTemplates() {
 
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [selectedCaps, setSelectedCaps] = useState<string[]>([]);
   const [suggestedReward, setSuggestedReward] = useState('');
   const [isPublic, setIsPublic] = useState(true);
 
@@ -63,14 +61,13 @@ export default function TaskTemplates() {
     mutationFn: () => createTemplate({
       name,
       description,
-      requiredCapabilities: selectedCaps,
+      requiredCapabilities: [],
       suggestedReward: suggestedReward || undefined,
       isPublic,
     }),
     onSuccess: () => {
       setName('');
       setDescription('');
-      setSelectedCaps([]);
       setSuggestedReward('');
       setIsPublic(true);
       qc.invalidateQueries({ queryKey: ['public-templates'] });
@@ -78,9 +75,6 @@ export default function TaskTemplates() {
       setTab('mine');
     },
   });
-
-  const toggleCap = (cap: string) =>
-    setSelectedCaps((prev) => (prev.includes(cap) ? prev.filter((c) => c !== cap) : [...prev, cap]));
 
   return (
     <div>
@@ -138,11 +132,6 @@ export default function TaskTemplates() {
                   <p className="text-xs text-ink-3 leading-relaxed line-clamp-3 mb-3">
                     {t.description}
                   </p>
-                  <div className="flex flex-wrap gap-1 mb-3">
-                    {t.required_capabilities.map((c) => (
-                      <Tag key={c} tone="neutral">{c.replace(/_/g, ' ')}</Tag>
-                    ))}
-                  </div>
                   <div className="flex items-center justify-between text-xs text-ink-3">
                     <span className="font-mono">{truncateAddress(t.creator_address)}</span>
                     {t.suggested_reward && <span className="font-mono text-ink-2">{t.suggested_reward} {native.symbol}</span>}
@@ -202,18 +191,6 @@ export default function TaskTemplates() {
           <FormField label="Description" required hint="Describe the task brief in detail">
             <FormTextarea rows={6} placeholder="Describe what needs to be done…" value={description} onChange={(e) => setDescription(e.target.value)} />
           </FormField>
-          <FormField label="Required capabilities" hint={`${selectedCaps.length} selected`}>
-            <div className="flex flex-wrap gap-1.5">
-              {AGENT_CAPABILITIES.map((cap) => (
-                <button key={cap} type="button"
-                  onClick={() => toggleCap(cap)}
-                  className={`px-2.5 py-1 text-xs border transition-colors ${selectedCaps.includes(cap) ? 'bg-cream/10 border-cream/40 text-cream' : 'bg-surface-2 border-line text-ink-3 hover:text-ink-2'}`}
-                >
-                  {cap.replace(/_/g, ' ')}
-                </button>
-              ))}
-            </div>
-          </FormField>
           <div className="grid grid-cols-2 gap-4">
             <FormField label={`Suggested reward (${native.symbol})`}>
               <FormInput className="font-mono" placeholder="50" value={suggestedReward} onChange={(e) => setSuggestedReward(e.target.value)} />
@@ -235,7 +212,7 @@ export default function TaskTemplates() {
             <Button
               variant="primary"
               label={createMut.isPending ? 'Creating…' : 'Create template'}
-              disabled={!name.trim() || !description.trim() || selectedCaps.length === 0 || createMut.isPending}
+              disabled={!name.trim() || !description.trim() || createMut.isPending}
               onClick={() => createMut.mutate()}
             />
             {createMut.isError && (

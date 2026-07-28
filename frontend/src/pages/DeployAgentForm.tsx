@@ -15,7 +15,6 @@ import {
 import { ToolManager, type AnyTool } from '../components/bb/ToolManager';
 import SkillPicker from '../components/bb/SkillPicker';
 import { get, post, authedPost } from '../lib/api';
-import { AGENT_CAPABILITIES } from '../config/capabilities';
 import { useChainAddress } from '../hooks/useChainWallet';
 import { getNativeCurrency } from '../config/constants';
 
@@ -101,11 +100,6 @@ You review code for bugs, security issues, and best practices.
 - Provide examples for suggested changes`,
 };
 
-function capLabel(cap: string): string {
-  const t = cap.replace(/_/g, ' ');
-  return t.charAt(0).toUpperCase() + t.slice(1);
-}
-
 export default function DeployAgentForm() {
   const native = getNativeCurrency('og');
   const address = useChainAddress();
@@ -144,9 +138,7 @@ export default function DeployAgentForm() {
 
   const [tools, setTools] = useState<AnyTool[]>([]);
   const [toolSecrets, setToolSecrets] = useState<Record<string, string>>({});
-  const [capabilities, setCapabilities] = useState<string[]>([]);
-  // Installed skills (slugs). Selecting a skill auto-checks its capability tags
-  // in section 03 so the agent's declared caps reflect what it can do.
+  // Installed skills (slugs).
   const [skillSlugs, setSkillSlugs] = useState<string[]>([]);
   // Slugs imported as PRIVATE drafts via the SkillPicker importer. The
   // unauthenticated deploy route installs public skills only, so these are
@@ -242,7 +234,6 @@ export default function DeployAgentForm() {
         ...form,
         ownerAddress: address,
         ownerPublicKey,
-        capabilities,
         // Private drafts are excluded here (the public-only deploy route
         // would 404) and attached right after deploy, below.
         skillSlugs: skillSlugs.filter((slug) => !privateSkillSlugs.includes(slug)),
@@ -500,41 +491,17 @@ export default function DeployAgentForm() {
           )}
         </div>
 
-        {/* 03 — Capabilities */}
+        {/* 03 — Skills */}
         <div className="p-6 border-b border-line">
-          <SectionRule num="03" title="Capabilities" side="Required" />
-          <FormField label="What tasks can this agent do?" required hint={`${capabilities.length} selected`}>
-            <div className="flex flex-wrap gap-1.5">
-              {AGENT_CAPABILITIES.map(cap => (
-                <button
-                  key={cap}
-                  type="button"
-                  onClick={() => setCapabilities(cs => cs.includes(cap) ? cs.filter(c => c !== cap) : [...cs, cap])}
-                  className={`px-2.5 py-1 text-xs border transition-colors ${capabilities.includes(cap)
-                    ? 'bg-cream/10 border-cream/40 text-cream'
-                    : 'bg-surface-2 border-line text-ink-3 hover:text-ink-2'
-                    }`}
-                >
-                  {capLabel(cap)}
-                </button>
-              ))}
-            </div>
-          </FormField>
-        </div>
-
-        {/* 04 — Skills */}
-        <div className="p-6 border-b border-line">
-          <SectionRule num="04" title="Skills" side="Optional" />
+          <SectionRule num="03" title="Skills" side="Optional" />
           <FormField
             label="Install skills"
             hint="Reusable bundles of instructions + tools. Import from the open SKILL.md ecosystem or the registry — they shape how this agent actually works."
           >
             <SkillPicker
               selectedSlugs={skillSlugs}
-              onChange={(slugs, caps) => {
+              onChange={(slugs) => {
                 setSkillSlugs(slugs);
-                // Auto-check the skills' capability tags in section 03.
-                if (caps) setCapabilities((cs) => [...new Set([...cs, ...caps])]);
               }}
               secrets={toolSecrets}
               onSecretsChange={setToolSecrets}
@@ -545,9 +512,9 @@ export default function DeployAgentForm() {
           </FormField>
         </div>
 
-        {/* 05 — Tools & MCP servers */}
+        {/* 04 — Tools & MCP servers */}
         <div className="p-6 border-b border-line">
-          <SectionRule num="05" title="Tools & MCP servers" side="Optional" />
+          <SectionRule num="04" title="Tools & MCP servers" side="Optional" />
           <ToolManager tools={tools} onChange={setTools} secrets={toolSecrets} onSecretsChange={setToolSecrets} />
         </div>
 
@@ -593,7 +560,7 @@ export default function DeployAgentForm() {
                 <Button
                   type="submit"
                   variant="primary"
-                  disabled={status === 'deploying' || status === 'funding' || capabilities.length === 0 || !hasEnoughForDeploy}
+                  disabled={status === 'deploying' || status === 'funding' || !hasEnoughForDeploy}
 label={
                       status === 'deploying'
                         ? 'Deploying…'
@@ -602,9 +569,6 @@ label={
                         : 'Deploy + fund agent →'
                     }
                 />
-                {capabilities.length === 0 && (
-                  <span className="text-[13px] text-ink-3">Pick at least one capability above to continue.</span>
-                )}
               </div>
             </>
           )}

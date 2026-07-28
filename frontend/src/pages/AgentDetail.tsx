@@ -24,7 +24,6 @@ import {
 import { truncateAddress } from '../lib/utils';
 import { get, authedGet, authedPatch, authedPost, authedDelete } from '../lib/api';
 import { API_BASE_URL, OG_CHAIN_CONFIG } from '../config/constants';
-import { AGENT_CAPABILITIES } from '../config/capabilities';
 import { useChainAddress } from '../hooks/useChainWallet';
 import { getNativeCurrency } from '../config/constants';
 import { ToolManager, type AnyTool } from '../components/bb/ToolManager';
@@ -124,7 +123,6 @@ export default function AgentDetail() {
   // Edit state
   const [editInstructions, setEditInstructions] = useState('');
   const [editModel, setEditModel] = useState('');
-  const [editCapabilities, setEditCapabilities] = useState<string[]>([]);
   const [editMinReward, setEditMinReward] = useState('');
   const [editTools, setEditTools] = useState<AnyTool[]>([]);
   const [toolsSaved, setToolsSaved] = useState(false);
@@ -184,7 +182,6 @@ export default function AgentDetail() {
         setAgent(data);
         setEditInstructions(data.instructions ?? '');
         setEditModel(data.model ?? '');
-        setEditCapabilities(data.capabilities ?? []);
         setInstalledSkills(data.skills ?? []);
         setEditMinReward(
           // Decimal-preserving: integer BigInt division floored a fractional
@@ -296,7 +293,6 @@ export default function AgentDetail() {
       authedPatch<AgentDetails>(`/api/v1/agents/${id}`, {
         instructions: editInstructions,
         model: editModel,
-        capabilities: editCapabilities,
         minReward: editMinReward
           ? (BigInt(Math.round(Number(editMinReward) * 1e18))).toString()
           : undefined,
@@ -1025,30 +1021,6 @@ export default function AgentDetail() {
                   <FormInput className="font-mono" value={editModel} onChange={e => setEditModel(e.target.value)} />
                 </FormField>
 
-                <FormField
-                  label="Capabilities"
-                  required
-                  hint="What tasks this agent can accept. Changes take effect on the next agent restart (stop then start)."
-                >
-                  <div className="flex flex-wrap gap-2">
-                    {AGENT_CAPABILITIES.map(cap => (
-                      <button key={cap} type="button"
-                        onClick={() => setEditCapabilities(cs => cs.includes(cap) ? cs.filter(c => c !== cap) : [...cs, cap])}
-                        className={`px-2.5 py-1 text-xs border transition-colors ${editCapabilities.includes(cap)
-                          ? 'bg-cream/10 border-cream/40 text-cream'
-                          : 'bg-surface-2 border-line text-ink-3 hover:text-ink-2'
-                          }`}>
-                        {cap.replace(/_/g, ' ')}
-                      </button>
-                    ))}
-                  </div>
-                  {editCapabilities.length === 0 && (
-                    <div className="mt-2 text-xs text-err">
-                      Pick at least one — without capabilities the agent can't accept any task.
-                    </div>
-                  )}
-                </FormField>
-
                 <FormField label="Min reward" hint="0G per task — tasks below this threshold won't be offered to this agent (requires restart)">
                   <FormInput className="font-mono" placeholder="0" value={editMinReward} onChange={e => setEditMinReward(e.target.value)} />
                 </FormField>
@@ -1057,7 +1029,7 @@ export default function AgentDetail() {
                   <Button
                     variant="primary"
                     onClick={() => save.mutate()}
-                    disabled={save.isPending || editCapabilities.length === 0}
+                    disabled={save.isPending}
                     label={save.isPending ? 'Saving…' : 'Save changes'}
                   />
                   {save.isError && <span className="text-xs text-err">Save failed</span>}
@@ -1188,7 +1160,7 @@ function SkillsManager({
 
 function AgentTasks({ agentWallet }: { agentWallet?: string }) {
   type Execution = {
-    meta: { taskId: string; requiredCapabilities?: string[] };
+    meta: { taskId: string };
     state: { status: string; acceptedAt?: string; verificationResult?: { passed: boolean } };
   };
   const [executions, setExecutions] = useState<Execution[]>([]);
@@ -1229,9 +1201,8 @@ function AgentTasks({ agentWallet }: { agentWallet?: string }) {
   return (
     <div className="space-y-2">
       {sorted.map(e => (
-        <div key={e.meta.taskId} className="flex items-center justify-between gap-3 border border-line px-4 py-3 text-sm">
+        <div key={e.meta.taskId} className="flex items-center gap-3 border border-line px-4 py-3 text-sm">
           <span className="font-mono text-ink-3 shrink-0">{e.meta.taskId.slice(0, 10)}…</span>
-          <span className="text-ink-2 truncate flex-1 text-center">{(e.meta.requiredCapabilities ?? []).join(', ') || '—'}</span>
           <span className="shrink-0"><StatusTag status={e.state.status} /></span>
         </div>
       ))}
