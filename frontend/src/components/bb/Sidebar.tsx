@@ -58,9 +58,13 @@ const navGroups: NavGroup[] = [
 interface SidebarProps {
   open: boolean;
   onClose: () => void;
+  /** Desktop (md+) icon-rail mode. Below md the mobile drawer always renders
+   * the full 240px sidebar regardless of this flag. */
+  collapsed: boolean;
+  onToggleCollapse: () => void;
 }
 
-export function Sidebar({ open, onClose }: SidebarProps) {
+export function Sidebar({ open, onClose, collapsed, onToggleCollapse }: SidebarProps) {
   const location = useLocation();
   const { data: stats, refetch } = useQuery({
     queryKey: ['stats'],
@@ -120,13 +124,13 @@ export function Sidebar({ open, onClose }: SidebarProps) {
       </AnimatePresence>
 
       <aside
-        className={`w-[240px] h-screen fixed left-0 top-0 bg-surface border-r border-line flex flex-col z-40 transition-transform duration-200 ease-out md:translate-x-0 ${open ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}
+        className={`w-[240px] ${collapsed ? 'md:w-16' : 'md:w-[240px]'} h-screen fixed left-0 top-0 bg-surface border-r border-line flex flex-col z-40 overflow-x-hidden transition-[transform,width] duration-200 ease-out motion-reduce:transition-none md:translate-x-0 ${open ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}
       >
         {/* Brand */}
-        <div className="flex items-center justify-between px-5 h-16 border-b border-line">
+        <div className={`flex items-center justify-between px-5 h-16 border-b border-line ${collapsed ? 'md:justify-center md:px-0' : ''}`}>
           <Link to="/" className="flex items-center gap-2.5" onClick={onClose}>
             <LogoMark size={24} blade="var(--bb-ink)" slit="var(--bb-surface)" />
-            <span className="text-sm font-semibold text-ink tracking-tight">BlindMarket</span>
+            <span className={`text-sm font-semibold text-ink tracking-tight ${collapsed ? 'md:hidden' : ''}`}>BlindMarket</span>
           </Link>
           <button
             onClick={onClose}
@@ -144,11 +148,14 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           {navGroups.map((group, gi) => (
             <div key={group.label || `g${gi}`} className={group.label ? 'mb-1 mt-5 first:mt-0' : 'mb-1'}>
               {group.label && (
-                <div className="px-5 mb-1.5 select-none cursor-default">
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-3">
-                    {group.label}
-                  </span>
-                </div>
+                <>
+                  <div className={`px-5 mb-1.5 select-none cursor-default ${collapsed ? 'md:hidden' : ''}`}>
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-3">
+                      {group.label}
+                    </span>
+                  </div>
+                  {collapsed && <div className="hidden md:block h-px bg-line mx-4 my-2" aria-hidden />}
+                </>
               )}
               {group.items.map((item) => {
                 const active = isActive(item);
@@ -158,7 +165,8 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                     to={item.to}
                     onClick={onClose}
                     aria-current={active ? 'page' : undefined}
-                    className={`relative flex items-center gap-3 px-5 py-2 text-sm transition-colors duration-150 ${active ? 'text-ink font-medium' : 'text-ink-2 hover:text-ink hover:bg-surface-2'}`}
+                    title={collapsed ? item.label : undefined}
+                    className={`relative flex items-center gap-3 px-5 py-2 text-sm transition-colors duration-150 ${collapsed ? 'md:px-0 md:justify-center' : ''} ${active ? 'text-ink font-medium' : 'text-ink-2 hover:text-ink hover:bg-surface-2'}`}
                   >
                     {active && (
                       <motion.span
@@ -170,11 +178,16 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                     <span className={`relative shrink-0 ${active ? 'text-cream' : 'text-ink-3'}`}>
                       <Icon name={item.icon} size={17} />
                     </span>
-                    <span className="relative">{item.label}</span>
+                    <span className={`relative whitespace-nowrap ${collapsed ? 'md:hidden' : ''}`}>{item.label}</span>
                     {item.to === '/messages' && unreadCount > 0 && (
-                      <span className="relative ml-auto min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-cream text-bg text-[10px] font-semibold leading-none px-1">
-                        {unreadCount > 99 ? '99+' : unreadCount}
-                      </span>
+                      <>
+                        <span className={`relative ml-auto min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-cream text-bg text-[10px] font-semibold leading-none px-1 ${collapsed ? 'md:hidden' : ''}`}>
+                          {unreadCount > 99 ? '99+' : unreadCount}
+                        </span>
+                        {collapsed && (
+                          <span className="hidden md:block absolute top-1.5 right-4 w-1.5 h-1.5 bg-cream" aria-hidden />
+                        )}
+                      </>
                     )}
                   </Link>
                 );
@@ -183,9 +196,34 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           ))}
         </nav>
 
+        {/* Desktop collapse toggle — one stable slot in both states. */}
+        <button
+          onClick={onToggleCollapse}
+          aria-expanded={!collapsed}
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          className={`hidden md:flex items-center w-full border-t border-line py-2 text-ink-3 hover:text-ink hover:bg-surface-2 transition-colors ${collapsed ? 'justify-center' : 'gap-2 px-5'}`}
+        >
+          <svg
+            viewBox="0 0 24 24"
+            className={`w-3 h-3 transition-transform ${collapsed ? '-rotate-90' : 'rotate-90'}`}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+          >
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+          <span className={`text-[10px] font-semibold uppercase tracking-wider ${collapsed ? 'md:hidden' : ''}`}>
+            Collapse
+          </span>
+        </button>
+
         {/* Live platform stats — compact widget. Shares the ['stats'] query
-            above, so it updates live off the same stats:update socket event. */}
-        <div className="px-5 py-4 border-t border-line">
+            above, so it updates live off the same stats:update socket event.
+            Hidden in the icon rail (query keeps running for the footer + other
+            consumers of the shared ['stats'] key). */}
+        <div className={`px-5 py-4 border-t border-line ${collapsed ? 'md:hidden' : ''}`}>
           <div className="flex items-center gap-1.5 mb-2.5">
             <span className="w-1.5 h-1.5 bg-ok inline-block animate-bb-pulse" />
             <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-3">Live platform</span>
@@ -205,18 +243,21 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           </dl>
         </div>
 
-        {/* Footer status */}
-        <div className="px-5 py-4 border-t border-line space-y-1.5">
+        {/* Footer status — reduced to the status dot in the icon rail. */}
+        <div className={`px-5 py-4 border-t border-line space-y-1.5 ${collapsed ? 'md:px-0 md:flex md:justify-center' : ''}`}>
           <div className="flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 bg-ok inline-block" />
-            <span className="text-[11px] text-ok">TEE online</span>
+            <span
+              className="w-1.5 h-1.5 bg-ok inline-block"
+              title={collapsed ? `TEE online · v0.4.2${!isMainnet ? ' · testnet' : ''}` : undefined}
+            />
+            <span className={`text-[11px] text-ok ${collapsed ? 'md:hidden' : ''}`}>TEE online</span>
           </div>
           {stats && (
-            <div className="text-[11px] text-ink-3">
+            <div className={`text-[11px] text-ink-3 ${collapsed ? 'md:hidden' : ''}`}>
               {stats.openTasks} open tasks
             </div>
           )}
-          <div className="text-[10px] font-mono text-ink-3 pt-0.5">v0.4.2{!isMainnet && ' · testnet'}</div>
+          <div className={`text-[10px] font-mono text-ink-3 pt-0.5 ${collapsed ? 'md:hidden' : ''}`}>v0.4.2{!isMainnet && ' · testnet'}</div>
         </div>
       </aside>
     </>

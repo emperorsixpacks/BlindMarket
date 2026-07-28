@@ -5,20 +5,49 @@ import { ChainBanner } from '../ChainBanner';
 import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
 
+// Same localStorage-boolean pattern as Settings' bb.notify.* prefs.
+const COLLAPSED_KEY = 'bb.sidebar.collapsed';
+function loadBool(key: string, fallback: boolean): boolean {
+  try {
+    const v = localStorage.getItem(key);
+    return v == null ? fallback : v === '1';
+  } catch {
+    return fallback;
+  }
+}
+function saveBool(key: string, value: boolean) {
+  try {
+    localStorage.setItem(key, value ? '1' : '0');
+  } catch {}
+}
+
 export function DashboardLayout() {
   const location = useLocation();
   const reduceMotion = useReducedMotion();
   const dist = reduceMotion ? 0 : 8;
   const [navOpen, setNavOpen] = useState(false);
+  // Desktop-only (md+) icon-rail collapse; independent of the mobile drawer.
+  const [collapsed, setCollapsed] = useState(() => loadBool(COLLAPSED_KEY, false));
 
   useEffect(() => {
     setNavOpen(false);
   }, [location.pathname]);
 
+  useEffect(() => {
+    saveBool(COLLAPSED_KEY, collapsed);
+  }, [collapsed]);
+
   return (
     <div className="min-h-screen bg-bg">
-      <Sidebar open={navOpen} onClose={() => setNavOpen(false)} />
-      <div className="md:ml-[240px] flex flex-col min-h-screen">
+      <Sidebar
+        open={navOpen}
+        onClose={() => setNavOpen(false)}
+        collapsed={collapsed}
+        onToggleCollapse={() => setCollapsed((v) => !v)}
+      />
+      <div
+        className={`${collapsed ? 'md:ml-16' : 'md:ml-[240px]'} flex flex-col min-h-screen transition-[margin-left] duration-200 ease-out motion-reduce:transition-none`}
+      >
         <TopBar onMenuClick={() => setNavOpen(true)} />
         <ChainBanner />
         <main
