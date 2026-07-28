@@ -102,8 +102,9 @@ export function MarketingLayout() {
       </div>
 
       {/* Fixed nav takes no layout space — clear it on routes without a
-          full-bleed hero. */}
-      <div className={onLanding ? '' : 'pt-28'}>
+          full-bleed hero, and pin those routes to the marketing surface's
+          paper composition (mk-paper-scope re-points the bb tokens). */}
+      <div className={onLanding ? '' : 'mk-paper-scope bg-bg pt-28 pb-6 text-ink'}>
         <Outlet />
       </div>
 
