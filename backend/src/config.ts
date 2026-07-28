@@ -121,6 +121,14 @@ export const config = {
   demandGapMinAgeMs: ((v) => (Number.isFinite(v) && v >= 0 ? v : 10 * 60 * 1000))(
     parseInt(optional('DEMAND_GAP_MIN_AGE_MS', String(10 * 60 * 1000)), 10),
   ),
+  // Proof re-key: at settlement the worker's closest installed skill (cosine
+  // between the task's routing text and the skill doc) is credited alongside
+  // any declared tags when it clears this floor. Model-relative like the gap
+  // threshold above; NaN-guarded because a malformed env value would silently
+  // turn slug crediting OFF (NaN comparisons are false) with no error.
+  proofSlugSimThreshold: ((v) => (Number.isFinite(v) ? v : 0.5))(
+    parseFloat(optional('PROOF_SLUG_SIM_THRESHOLD', '0.5')),
+  ),
 
   // Railway Sandboxes — ephemeral compute for agent tool execution
   railwayApiToken: process.env.RAILWAY_API_TOKEN || '',
