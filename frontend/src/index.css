@@ -131,18 +131,6 @@ html[data-theme="dark"] {
     @apply border-line-2 text-ink;
   }
 
-  /* ── Section rule — §N ─ TITLE ───────────────────────────────── */
-  .section-rule {
-    @apply flex items-center gap-3 text-[11px] font-mono font-semibold uppercase tracking-widest text-ink-3;
-  }
-  .section-rule .section-num {
-    color: var(--bb-cream);
-  }
-  .section-rule::after {
-    content: '';
-    @apply flex-1 h-px bg-line;
-  }
-
   /* ── Status chip — uppercase, tiny, semantic colors ──────────── */
   .chip {
     @apply inline-flex items-center gap-1 px-2 py-0.5 text-[9px] font-mono font-semibold uppercase tracking-wider border whitespace-nowrap;
@@ -169,29 +157,6 @@ html[data-theme="dark"] {
   }
   .chip-neutral {
     @apply border-line text-ink-3 bg-transparent;
-  }
-
-  /* ── Section label ───────────────────────────────────────────── */
-  .section-label {
-    @apply text-[11px] uppercase tracking-widest text-ink-3 font-mono font-medium;
-  }
-
-  /* ── Display heading — IBM Plex Mono, medium weight ──────────── */
-  .heading-display {
-    font-family: 'IBM Plex Mono', ui-monospace, monospace;
-    @apply font-medium text-ink leading-[1.05];
-    letter-spacing: -0.015em;
-  }
-
-  /* ── Lifecycle row ───────────────────────────────────────────── */
-  .lifecycle-row {
-    @apply flex items-center justify-between py-2 text-xs font-mono;
-  }
-  .lifecycle-dot-active {
-    @apply w-2 h-2 bg-cream mr-3 inline-block;
-  }
-  .lifecycle-dot-pending {
-    @apply w-2 h-2 border border-ink-3 mr-3 inline-block;
   }
 }
 
