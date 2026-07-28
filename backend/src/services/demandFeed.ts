@@ -1,20 +1,22 @@
 import { getPool } from './neonDb.js';
 import * as a2aStore from './a2aStore.js';
-import { getTaskIdByHash } from './escrowEvents.js';
+import { getCachedTaskIdByHash } from './escrowEvents.js';
 import * as escrowService from './escrow.js';
 import { config } from '../config.js';
 
 /**
  * Unmatched-demand feed (the "Wanted" board).
  *
- * The semantic router gives every task a measurable "how well can today's
+ * The semantic router gives every task a measurable "how well could the
  * roster serve this?" number: the best candidate's cosine similarity in the
- * shadow log. A task that is still OPEN past a minimum age whose best fit is
- * weak (or that had no candidates at all) is unserved demand — exactly the
- * signal an agent BUILDER needs to decide what to create next. This feed
- * publishes those gaps: what was asked (public routing text only), what it
- * pays, and how weak the best match was. Build the missing agent, it gets
- * embedded at registration, and the next similar task routes to it.
+ * shadow log — measured AT INDEX TIME (the shadow row is written once; a gap
+ * doesn't re-score when new agents register, it clears when the task is
+ * accepted or expires). A task that is still OPEN past a minimum age whose
+ * best fit was weak (or that had no candidates at all) is unserved demand —
+ * exactly the signal an agent BUILDER needs to decide what to create next.
+ * This feed publishes those gaps: what was asked (public routing text only),
+ * what it pays, and how weak the best match was. Build the missing agent, it
+ * gets embedded at registration, and the NEXT similar task routes to it.
  *
  * Privacy: everything here is already public — routing text is publicBrief /
  * routingSummary / tags by construction, reward + deadline are on-chain.
@@ -75,9 +77,11 @@ export function computeDemandGaps(
 
     const top = row.semantic_topk?.[0];
     const bestSim = typeof top?.similarity === 'number' ? top.similarity : null;
-    const noCandidates = bestSim === null;
-    if (!noCandidates && bestSim >= opts.simThreshold) continue; // well served
+    if (bestSim !== null && bestSim >= opts.simThreshold) continue; // well served
 
+    // NOTE: fields are hand-picked PUBLIC ones only — never spread `meta`
+    // here. This route is unauthenticated; the projectPublicMeta incident
+    // (wrappedKeys on unauth browse) is the cautionary tale.
     gaps.push({
       taskHash: row.task_hash.toLowerCase(),
       routingText: row.routing_text,
@@ -86,7 +90,7 @@ export function computeDemandGaps(
       deadline: open.deadline,
       postedAt: row.created_at,
       ageMs,
-      bestFit: noCandidates ? null : { similarity: bestSim!, displayName: top?.displayName ?? '' },
+      bestFit: bestSim === null ? null : { similarity: bestSim, displayName: top?.displayName ?? '' },
     });
   }
   gaps.sort((a, b) => (a.bestFit?.similarity ?? -1) - (b.bestFit?.similarity ?? -1));
@@ -94,17 +98,32 @@ export function computeDemandGaps(
 }
 
 const FEED_CAP = 50;
+/** The route's ?limit clamp must match the computation cap — a route limit
+ *  above this would be silently ignored. */
+export const MAX_DEMAND_LIMIT = FEED_CAP;
 const CACHE_TTL_MS = 60_000;
 let cache: { at: number; gaps: DemandGap[] } | null = null;
+let pending: Promise<DemandGap[]> | null = null;
 
 /**
- * Compute (or serve cached) the current gap list, reward-enriched. The reward
- * lookup is one redis mapping read + one eth_call per gap, bounded by FEED_CAP
- * and amortized by the 60s cache — this endpoint is public.
+ * Compute (or serve cached) the current gap list, reward-enriched. Public
+ * endpoint discipline: single-flight (concurrent cache-miss requests coalesce
+ * into ONE recompute instead of N× the Redis/DB/chain fan-out), cached-only
+ * hash→id mapping (the retrying resolver can burn ~6s per unresolved hash and
+ * escalate to a full-chain backfill scan — never from a public route), and
+ * reward carry-forward across cache generations (an open task's escrow amount
+ * is immutable, so re-paying an eth_call every 60s buys nothing).
  */
 export async function demandFeed(limit = 20): Promise<DemandGap[]> {
   if (cache && Date.now() - cache.at < CACHE_TTL_MS) return cache.gaps.slice(0, limit);
+  if (!pending) {
+    pending = recomputeGaps().finally(() => { pending = null; });
+  }
+  const gaps = await pending;
+  return gaps.slice(0, limit);
+}
 
+async function recomputeGaps(): Promise<DemandGap[]> {
   const open = await a2aStore.listOpenTasks();
   const openByHash = new Map<string, OpenTaskInfo>(
     open.map(({ meta }) => [
@@ -132,11 +151,20 @@ export async function demandFeed(limit = 20): Promise<DemandGap[]> {
     }).slice(0, FEED_CAP);
 
     // Best-effort reward enrichment — a chain/indexer blip must not empty the
-    // feed, it just leaves rewardRaw off that entry.
+    // feed, it just leaves rewardRaw off that entry until a later cycle.
+    const prev = new Map((cache?.gaps ?? []).map((g) => [g.taskHash, g]));
     await Promise.all(
       gaps.map(async (g) => {
+        const seen = prev.get(g.taskHash);
+        if (seen?.rewardRaw) {
+          g.onChainId = seen.onChainId;
+          g.rewardRaw = seen.rewardRaw;
+          return;
+        }
         try {
-          const id = await getTaskIdByHash(g.taskHash);
+          // Cached mapping ONLY: a missing hash2id entry just means no reward
+          // label this cycle (the forward poller will have it soon).
+          const id = await getCachedTaskIdByHash(g.taskHash);
           if (!id) return;
           g.onChainId = id;
           const t = await escrowService.getTask(Number(id));
@@ -147,5 +175,5 @@ export async function demandFeed(limit = 20): Promise<DemandGap[]> {
   }
 
   cache = { at: Date.now(), gaps };
-  return gaps.slice(0, limit);
+  return gaps;
 }

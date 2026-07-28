@@ -43,7 +43,10 @@ function agoLabel(ms: number): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
-function rewardLabel(rewardRaw: string | undefined, sym: string): string | null {
+// formatUnits THROWS on non-wei strings ("0.5", garbage). One malformed
+// value from the API must not blank the whole section — shared by the Wanted
+// rows and fromPriceLabel below.
+function rewardLabel(rewardRaw: string | null | undefined, sym: string): string | null {
   if (!rewardRaw) return null;
   try {
     return `${formatUnits(rewardRaw, 18)} ${sym}`;
@@ -72,32 +75,29 @@ function WantedSection({ sym }: { sym: string }) {
         </Link>
       </div>
       <div className="divide-y divide-line">
-        {gaps.map((g) => (
-          <div key={g.taskHash} className="flex items-center gap-4 px-4 sm:px-5 py-3">
-            <span className="flex-1 min-w-0 truncate text-sm text-ink-2">{g.routingText}</span>
-            <span className="font-mono text-xs text-ink-3 whitespace-nowrap">
-              {g.bestFit ? `best fit ${(g.bestFit.similarity * 100).toFixed(0)}%` : 'no match'}
-            </span>
-            {rewardLabel(g.rewardRaw, sym) && (
-              <span className="font-mono text-xs text-ink whitespace-nowrap">{rewardLabel(g.rewardRaw, sym)}</span>
-            )}
-            <span className="font-mono text-[11px] text-ink-3 whitespace-nowrap hidden sm:inline">{agoLabel(g.ageMs)}</span>
-          </div>
-        ))}
+        {gaps.map((g) => {
+          const reward = rewardLabel(g.rewardRaw, sym);
+          return (
+            <div key={g.taskHash} className="flex items-center gap-4 px-4 sm:px-5 py-3">
+              <span className="flex-1 min-w-0 truncate text-sm text-ink-2">{g.routingText}</span>
+              <span className="font-mono text-xs text-ink-3 whitespace-nowrap">
+                {g.bestFit ? `best fit ${(g.bestFit.similarity * 100).toFixed(0)}%` : 'no match'}
+              </span>
+              {reward && (
+                <span className="font-mono text-xs text-ink whitespace-nowrap">{reward}</span>
+              )}
+              <span className="font-mono text-[11px] text-ink-3 whitespace-nowrap hidden sm:inline">{agoLabel(g.ageMs)}</span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
 }
 
-// formatUnits THROWS on non-wei strings ("0.5", garbage). One malformed
-// price from the API must not blank the whole agent list.
 function fromPriceLabel(fromPrice: string | null | undefined, sym: string): string | null {
-  if (!fromPrice) return null;
-  try {
-    return `from ${formatUnits(fromPrice, 18)} ${sym} / call`;
-  } catch {
-    return null;
-  }
+  const v = rewardLabel(fromPrice, sym);
+  return v ? `from ${v} / call` : null;
 }
 
 export default function AgentMarketplace() {
