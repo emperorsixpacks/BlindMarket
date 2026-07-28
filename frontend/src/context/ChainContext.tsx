@@ -6,9 +6,6 @@ const STORAGE_KEY = 'bb.chain';
 interface ChainContextValue {
   activeChain: SupportedChain;
   setActiveChain: (chain: SupportedChain) => void;
-  showSelector: boolean;
-  openSelector: () => void;
-  dismissSelector: () => void;
 }
 
 const ChainContext = createContext<ChainContextValue | null>(null);
@@ -25,28 +22,14 @@ function loadChain(): SupportedChain {
 
 export function ChainProvider({ children }: { children: ReactNode }) {
   const [activeChain, setActiveChainState] = useState<SupportedChain>(loadChain);
-  const [showSelector, setShowSelector] = useState(false);
 
   const setActiveChain = useCallback((chain: SupportedChain) => {
     setActiveChainState(chain);
     try { localStorage.setItem(STORAGE_KEY, chain); } catch {}
   }, []);
 
-  const openSelector = useCallback(() => setShowSelector(true), []);
-
-  const dismissSelector = useCallback(() => {
-    setShowSelector(false);
-    let saved: string | null = null;
-    try {
-      saved = localStorage.getItem(STORAGE_KEY);
-    } catch {}
-    if (!saved) {
-      setActiveChain('og');
-    }
-  }, [setActiveChain]);
-
   return (
-    <ChainContext.Provider value={{ activeChain, setActiveChain, showSelector, openSelector, dismissSelector }}>
+    <ChainContext.Provider value={{ activeChain, setActiveChain }}>
       {children}
     </ChainContext.Provider>
   );

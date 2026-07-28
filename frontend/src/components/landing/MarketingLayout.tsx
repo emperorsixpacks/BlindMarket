@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { motion, useReducedMotion } from 'framer-motion';
 import { LogoMark } from '../bb';
@@ -20,29 +19,23 @@ import { useAnalytics } from '../../hooks/useAnalytics';
  *
  * One conversion story: the single primary CTA everywhere in this chrome is
  * "Launch app" (chain selector → /a2a). Everything else is a text link.
- * (The nav's old ChainToggle was dropped: it had a single option and the
- * launch flow already opens the chain selector.)
+ * (The nav's old ChainToggle was dropped: it had a single option. Chain
+ * switching lives in the dashboard header's ChainToggle.)
  */
 
-/** Shared launch-app behavior: open the chain selector, then enter the app
- * once it closes. Used by the nav here and by the landing hero/closing CTAs. */
+/** Shared launch-app behavior: pin the chain and enter the app directly.
+ * Used by the nav here and by the landing hero/closing CTAs. The old
+ * chain-selector modal was pure friction with a single supported chain;
+ * switching stays available from the dashboard header. */
 export function useLaunchApp(section: string) {
   const { track } = useAnalytics();
   const navigate = useNavigate();
-  const { openSelector, showSelector } = useChain();
-  const [pending, setPending] = useState(false);
-
-  useEffect(() => {
-    if (pending && !showSelector) {
-      setPending(false);
-      navigate('/a2a');
-    }
-  }, [pending, showSelector, navigate]);
+  const { setActiveChain } = useChain();
 
   return () => {
     track('cta_click', { label: 'launch_app', target: '/a2a', section });
-    openSelector();
-    setPending(true);
+    setActiveChain('og');
+    navigate('/a2a');
   };
 }
 

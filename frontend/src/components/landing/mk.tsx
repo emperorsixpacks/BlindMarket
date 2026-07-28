@@ -12,17 +12,6 @@ import { motion, useReducedMotion } from 'framer-motion';
  * same in both app themes, like any editorial site.
  */
 
-export const MK = {
-  black: '#09090b',
-  band: '#0b0b0d',
-  paper: '#f4f4f2',
-  card: '#ffffff',
-  inkOnPaper: '#0a0a0b',
-  ink2OnPaper: '#52525b',
-  cream: '#f5efe0',
-  gold: '#b8860b',
-} as const;
-
 type Tone = 'cream' | 'ghost-dark' | 'ink' | 'ghost-light';
 
 const TONES: Record<Tone, string> = {

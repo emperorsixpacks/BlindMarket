@@ -7,7 +7,6 @@ import { ogTestnet } from './config/chains';
 import { WalletProvider } from './context/WalletContext';
 import { AuthProvider } from './context/AuthContext';
 import { ChainProvider } from './context/ChainContext';
-import { ChainSelectorModal } from './components/bb/ChainSelectorModal';
 import { DashboardLayout } from './components/bb/DashboardLayout';
 import { MarketingLayout } from './components/landing/MarketingLayout';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -101,7 +100,6 @@ export default function App() {
           <WalletProvider>
             <AuthProvider>
               <ThemeSync />
-              <ChainSelectorModal />
               <ErrorBoundary>
               <Suspense fallback={<RouteFallback />}>
               <Routes>
