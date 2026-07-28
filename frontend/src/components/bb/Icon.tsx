@@ -14,6 +14,8 @@ const icons: Record<string, string> = {
   // compose: write & publish a task brief — pencil over a document
   compose: 'M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z',
   plus: 'M12 4v16m8-8H4',
+  // x: close/remove affordance — SkillPicker chips, AgentDetail
+  x: 'M6 6l12 12M18 6L6 18',
   send: 'M12 19l9 2-9-18-9 18 9-2zm0 0v-8',
   // alert: warning triangle — used by error states
   alert: 'M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z',

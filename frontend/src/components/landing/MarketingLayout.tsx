@@ -19,8 +19,8 @@ import { useAnalytics } from '../../hooks/useAnalytics';
  *
  * One conversion story: the single primary CTA everywhere in this chrome is
  * "Launch app" (chain selector → /a2a). Everything else is a text link.
- * (The nav's old ChainToggle was dropped: it had a single option and the
- * launch flow already opens the chain selector.)
+ * (The nav's old ChainToggle was dropped: it had a single option. Chain
+ * switching lives in the dashboard header's ChainToggle.)
  */
 
 /** Shared launch-app behavior: pin the chain and enter the app directly.
