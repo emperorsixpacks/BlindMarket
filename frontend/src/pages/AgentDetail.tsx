@@ -58,6 +58,12 @@ export default function AgentDetail() {
   const [fetchError, setFetchError] = useState(false);
   const [searchParams] = useSearchParams();
 
+  // Canonical id for API calls. The route param may be a WALLET ADDRESS
+  // (Browse links by address; the GET endpoint resolves both) but the
+  // action/PATCH/console endpoints resolve by agent id only — so once the
+  // record loads, talk to the API by its real id, not the raw param.
+  const apiId = agent?.id ?? id ?? '';
+
   // Reviews state
   const [reviews, setReviews] = useState<AgentReview[]>([]);
   const [reviewStats, setReviewStats] = useState<AgentReviewStats | null>(null);
@@ -191,7 +197,7 @@ export default function AgentDetail() {
 
   const action = useMutation({
     mutationFn: (act: 'start' | 'pause' | 'stop' | 'restart') =>
-      authedPost<AgentDetails>(`/api/v1/agents/${id}/${act}`, {}),
+      authedPost<AgentDetails>(`/api/v1/agents/${apiId}/${act}`, {}),
     onSuccess: (data) => { setAgent(data); qc.invalidateQueries({ queryKey: ['my-agents'] }); },
   });
 
@@ -205,12 +211,12 @@ export default function AgentDetail() {
   // failure. Shared by the Start/Stop recovery banner AND the Services form 403.
   async function linkOwner(): Promise<void> {
     const challenge = await authedPost<{ nonce: string; message: string; ownerAddress: string }>(
-      `/api/v1/agents/${id}/link-owner/challenge`,
+      `/api/v1/agents/${apiId}/link-owner/challenge`,
       {},
     );
     if (!walletClient) throw new Error('Wallet not connected');
     const signature = await walletClient.signMessage({ message: challenge.message });
-    await authedPost(`/api/v1/agents/${id}/link-owner`, { nonce: challenge.nonce, signature });
+    await authedPost(`/api/v1/agents/${apiId}/link-owner`, { nonce: challenge.nonce, signature });
   }
 
   async function handleLinkOwner() {
@@ -221,7 +227,7 @@ export default function AgentDetail() {
       setLinkStatus('idle');
       // Refresh the record (now carries authorizedOwners) and retry whatever
       // action triggered the lock-out (defaults to start).
-      try { setAgent(await get<AgentDetails>(`/api/v1/agents/${id}`)); } catch { /* non-blocking */ }
+      try { setAgent(await get<AgentDetails>(`/api/v1/agents/${apiId}`)); } catch { /* non-blocking */ }
       action.mutate(action.variables ?? 'start');
     } catch (err) {
       setLinkError((err as Error).message || 'Could not link this wallet');
@@ -269,7 +275,7 @@ export default function AgentDetail() {
     setWithdrawError('');
     try {
       const data = await authedPost<{ txHash: string; amountSent: string; amountFormatted?: string; recipient: string }>(
-        `/api/v1/agents/${id}/withdraw`,
+        `/api/v1/agents/${apiId}/withdraw`,
         {},
       );
       const amount = data.amountFormatted ?? data.amountSent;
@@ -277,7 +283,7 @@ export default function AgentDetail() {
       setWithdrawStatus('done');
       await refetchBalance();
       try {
-        const fresh = await get<AgentDetails>(`/api/v1/agents/${id}`);
+        const fresh = await get<AgentDetails>(`/api/v1/agents/${apiId}`);
         setAgent(fresh);
       } catch { /* non-blocking */ }
     } catch (err) {
@@ -371,7 +377,7 @@ export default function AgentDetail() {
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_300px] gap-6 lg:gap-8">
         <div className="min-w-0 space-y-10">
           <ServicesSection
-            agentId={id!}
+            agentId={apiId}
             isOwner={isOwner}
             symbol={balanceSymbol}
             agentStatus={agent.status}
@@ -432,7 +438,7 @@ export default function AgentDetail() {
           )}
           <OpsConsole
             key={agent.id}
-            agentId={id!}
+            agentId={apiId}
             agent={agent}
             onAgentUpdated={setAgent}
             className={agent.walletAddress ? 'border-t-0' : ''}

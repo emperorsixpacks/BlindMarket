@@ -397,7 +397,7 @@ export function OpsConsole({
           <div className="absolute bottom-3 right-3 z-10 flex flex-col gap-1.5">
             <button
               onClick={scrollToTop}
-              className="w-8 h-8 flex items-center justify-center bg-surface-4 hover:bg-surface-5 text-ink-1 border border-line shadow-lg transition-all hover:scale-110"
+              className="w-8 h-8 flex items-center justify-center bg-surface-2 hover:bg-bg text-ink border border-line shadow-lg transition-all hover:scale-110"
               title="Scroll to top"
               aria-label="Scroll logs to top"
             >
@@ -407,7 +407,7 @@ export function OpsConsole({
             </button>
             <button
               onClick={scrollToBottom}
-              className={`w-8 h-8 flex items-center justify-center border shadow-lg transition-all hover:scale-110 ${autoScroll ? 'bg-cream/20 text-cream border-cream/40' : 'bg-surface-4 hover:bg-surface-5 text-ink-1 border-line'}`}
+              className={`w-8 h-8 flex items-center justify-center border shadow-lg transition-all hover:scale-110 ${autoScroll ? 'bg-cream/20 text-cream border-cream/40' : 'bg-surface-2 hover:bg-bg text-ink border-line'}`}
               title={autoScroll ? 'Auto-scroll on (click to disable)' : 'Scroll to bottom'}
               aria-label={autoScroll ? 'Auto-scroll on, click to disable' : 'Scroll logs to bottom'}
             >
