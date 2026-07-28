@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { motion, useReducedMotion } from 'framer-motion';
 import { LogoMark } from '../bb';
@@ -24,25 +23,19 @@ import { useAnalytics } from '../../hooks/useAnalytics';
  * launch flow already opens the chain selector.)
  */
 
-/** Shared launch-app behavior: open the chain selector, then enter the app
- * once it closes. Used by the nav here and by the landing hero/closing CTAs. */
+/** Shared launch-app behavior: pin the chain and enter the app directly.
+ * Used by the nav here and by the landing hero/closing CTAs. The old
+ * chain-selector modal was pure friction with a single supported chain;
+ * switching stays available from the dashboard header. */
 export function useLaunchApp(section: string) {
   const { track } = useAnalytics();
   const navigate = useNavigate();
-  const { openSelector, showSelector } = useChain();
-  const [pending, setPending] = useState(false);
-
-  useEffect(() => {
-    if (pending && !showSelector) {
-      setPending(false);
-      navigate('/a2a');
-    }
-  }, [pending, showSelector, navigate]);
+  const { setActiveChain } = useChain();
 
   return () => {
     track('cta_click', { label: 'launch_app', target: '/a2a', section });
-    openSelector();
-    setPending(true);
+    setActiveChain('og');
+    navigate('/a2a');
   };
 }
 
