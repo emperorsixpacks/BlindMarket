@@ -29,6 +29,9 @@ export default {
         mono: ["'IBM Plex Mono'", 'ui-monospace', "'SF Mono'", 'Menlo', 'monospace'],
         // Dot-matrix / LED display face — used for the landing hero headline.
         display: ["'Doto'", "'IBM Plex Mono'", 'ui-monospace', 'monospace'],
+        // Marketing surface (landing + marketing chrome) display face.
+        // ONE family only — no serif accents (user feedback, Jul 2026).
+        mk: ["'Instrument Sans'", 'system-ui', '-apple-system', 'sans-serif'],
       },
       /* Sharp corners — zero border-radius everywhere */
       borderRadius: {

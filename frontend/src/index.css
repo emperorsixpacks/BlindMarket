@@ -200,3 +200,20 @@ html[data-theme="dark"] {
     text-wrap: balance;
   }
 }
+
+/* ── Marketing (mk-) marquee — landing ticker band ─────────────── */
+/* Track holds TWO copies of the item list; translating -50% loops
+   seamlessly. Outside @layer so it can't be purged oddly; gated for
+   reduced motion. */
+.mk-marquee-track {
+  display: flex;
+  width: max-content;
+  animation: mkMarquee 48s linear infinite;
+}
+@keyframes mkMarquee {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mk-marquee-track { animation: none; }
+}

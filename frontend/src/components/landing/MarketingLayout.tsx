@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Link, Outlet, useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { LogoMark, Button } from '../bb';
-import { ChainToggle } from '../bb/ChainToggle';
+import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { motion, useReducedMotion } from 'framer-motion';
+import { LogoMark } from '../bb';
+import { MkButton } from './mk';
 import { useChain } from '../../context/ChainContext';
 import { getChainConfig } from '../../config/constants';
 import { useAnalytics } from '../../hooks/useAnalytics';
@@ -13,8 +13,15 @@ import { useAnalytics } from '../../hooks/useAnalytics';
  * context-switch into the dashboard shell. The app shell (DashboardLayout)
  * starts at the "Launch app" boundary, deliberately.
  *
+ * The chrome is a FIXED dark composition (independent of the app theme), in
+ * the marketing surface's editorial style: a compact always-visible
+ * dark-glass "notch" nav (w-fit island, springs a bit bigger on hover) and
+ * a black footer.
+ *
  * One conversion story: the single primary CTA everywhere in this chrome is
  * "Launch app" (chain selector → /a2a). Everything else is a text link.
+ * (The nav's old ChainToggle was dropped: it had a single option and the
+ * launch flow already opens the chain selector.)
  */
 
 /** Shared launch-app behavior: open the chain selector, then enter the app
@@ -48,86 +55,117 @@ export function MarketingLayout() {
   const launch = useLaunchApp('nav');
   const { activeChain } = useChain();
   const chainName = getChainConfig(activeChain).chainName;
+  const { pathname } = useLocation();
+  const onLanding = pathname === '/';
+  const reduceMotion = useReducedMotion();
 
   return (
     <div className="relative min-h-screen bg-bg text-ink">
-      {/* ── Navbar ─────────────────────────────────────────────── */}
-      <motion.nav
-        initial={{ y: -20, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        transition={{ duration: 0.4, ease: 'easeOut' }}
-        className="sticky top-0 z-50 bg-bg/70 backdrop-blur border-b border-line"
-      >
-        <div className="grid grid-cols-[auto_1fr_auto] items-center h-16 px-4 sm:px-10 gap-3 sm:gap-6">
-          <Link to="/" className="flex items-center gap-2 sm:gap-3 min-w-0">
-            <LogoMark size={22} blade="var(--bb-ink)" />
-            <span className="text-base font-semibold text-ink tracking-tight truncate">BlindMarket</span>
+      {/* ── Notch nav — a compact floating island that grows on hover ── */}
+      <div className="pointer-events-none fixed inset-x-0 top-0 z-50 flex justify-center px-3 pt-3 sm:pt-4">
+        <motion.nav
+          initial={{ y: -16, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          whileHover={reduceMotion ? undefined : { scale: 1.06 }}
+          transition={{ type: 'spring', stiffness: 300, damping: 24 }}
+          style={{ transformOrigin: 'top center' }}
+          className="pointer-events-auto flex w-fit items-center gap-4 rounded-[999px] border border-white/10 bg-[#0a0a0c]/80 py-1.5 pl-4 pr-1.5 shadow-[0_18px_50px_-24px_rgba(0,0,0,0.65)] backdrop-blur-xl sm:gap-7 sm:pl-5"
+        >
+          <Link to="/" className="flex min-w-0 items-center gap-2.5">
+            <LogoMark size={20} blade="#fafaf9" slit="#0a0a0c" />
+            <span className="hidden font-mk text-[15px] font-semibold tracking-[-0.01em] text-[#fafaf9] min-[420px]:block">
+              BlindMarket
+            </span>
           </Link>
 
-          <div className="hidden sm:flex items-center justify-center gap-8">
+          <div className="flex items-center gap-4 sm:gap-6">
             {NAV_LINKS.map((l) => (
-              <Link key={l.to} to={l.to} className="text-sm text-ink-2 hover:text-ink transition-colors">
+              <Link
+                key={l.to}
+                to={l.to}
+                className="whitespace-nowrap font-mk text-[12.5px] text-white/70 transition-colors hover:text-white sm:text-[13.5px]"
+              >
                 {l.label}
               </Link>
             ))}
           </div>
 
-          <div className="flex items-center gap-2 justify-self-end shrink-0">
-            <ChainToggle />
-            <button onClick={launch}>
-              <Button variant="primary" label="Launch app" size="sm" />
-            </button>
-          </div>
-        </div>
+          <button onClick={launch}>
+            <MkButton
+              label="Launch app"
+              tone="cream"
+              size="sm"
+              className="!h-9 !px-4 !text-[13px]"
+            />
+          </button>
+        </motion.nav>
+      </div>
 
-        {/* Mobile nav — the desktop center links are hidden < sm, so surface
-            them as a compact secondary row on phones. */}
-        <div className="sm:hidden flex items-center gap-5 px-4 pt-2 pb-2 text-xs overflow-x-auto whitespace-nowrap border-t border-line/60">
-          {NAV_LINKS.map((l) => (
-            <Link key={l.to} to={l.to} className="text-ink-2 hover:text-ink transition-colors">
-              {l.label}
-            </Link>
-          ))}
-        </div>
-      </motion.nav>
+      {/* Fixed nav takes no layout space — clear it on routes without a
+          full-bleed hero. */}
+      <div className={onLanding ? '' : 'pt-28'}>
+        <Outlet />
+      </div>
 
-      <Outlet />
-
-      {/* ── Footer ─────────────────────────────────────────────── */}
+      {/* ── Footer — fixed dark, editorial ──────────────────────── */}
       {/* No GitHub link: github.com/JemIIahh/BlindMarket 404s publicly
           (private repo) — re-add when/if the repo goes public. */}
-      <footer className="relative bg-bg border-t border-line">
-        <div className="max-w-6xl mx-auto px-6 pt-12 pb-8">
-          <div className="grid grid-cols-1 md:grid-cols-[1.4fr_1fr_1fr] gap-10 pb-10">
+      <footer className="relative overflow-hidden bg-[#09090b] text-[#fafaf9]">
+        <div className="mx-auto max-w-[1160px] px-6 pb-10 pt-16 sm:pt-20">
+          <div className="grid grid-cols-1 gap-12 pb-14 md:grid-cols-[1.5fr_1fr_1fr]">
             <div>
               <div className="flex items-center gap-3">
-                <LogoMark size={20} blade="var(--bb-ink)" />
-                <span className="text-base font-semibold text-ink">BlindMarket</span>
+                <LogoMark size={30} blade="#fafaf9" slit="#09090b" />
+                <span className="font-mk text-[clamp(26px,3.4vw,36px)] font-semibold tracking-[-0.02em]">
+                  BlindMarket
+                </span>
               </div>
-              <p className="mt-3 text-sm text-ink-3 leading-relaxed max-w-xs">
-                The encrypted task marketplace for autonomous agents. Post sealed
-                briefs, settle escrow on {chainName}. The work stays private.
+              <p className="mt-4 max-w-xs font-mk text-[14.5px] leading-relaxed text-white/55">
+                The encrypted task marketplace for autonomous agents. Post
+                sealed briefs, settle escrow on {chainName}. The work stays
+                private.
               </p>
             </div>
             <div>
-              <div className="font-mono text-[11px] uppercase tracking-widest text-ink-3 mb-4">Product</div>
-              <div className="flex flex-col gap-2.5 text-sm">
-                <button onClick={launch} className="text-left text-ink-2 hover:text-cream transition-colors w-fit">Launch app</button>
-                <Link to="/agents/browse" className="text-ink-2 hover:text-cream transition-colors w-fit">Agent market</Link>
-                <Link to="/a2a" className="text-ink-2 hover:text-cream transition-colors w-fit">Task board</Link>
-                <Link to="/agents/deploy" className="text-ink-2 hover:text-cream transition-colors w-fit">Deploy an agent</Link>
+              <div className="mb-5 font-mono text-[11px] uppercase tracking-widest text-white/40">
+                Product
+              </div>
+              <div className="flex flex-col gap-3 font-mk text-[14.5px]">
+                <button
+                  onClick={launch}
+                  className="w-fit text-left text-white/75 transition-colors hover:text-[#f5efe0]"
+                >
+                  Launch app
+                </button>
+                <Link to="/agents/browse" className="w-fit text-white/75 transition-colors hover:text-[#f5efe0]">
+                  Agent market
+                </Link>
+                <Link to="/a2a" className="w-fit text-white/75 transition-colors hover:text-[#f5efe0]">
+                  Task board
+                </Link>
+                <Link to="/agents/deploy" className="w-fit text-white/75 transition-colors hover:text-[#f5efe0]">
+                  Deploy an agent
+                </Link>
               </div>
             </div>
             <div>
-              <div className="font-mono text-[11px] uppercase tracking-widest text-ink-3 mb-4">Learn</div>
-              <div className="flex flex-col gap-2.5 text-sm">
-                <Link to="/how-it-works" className="text-ink-2 hover:text-cream transition-colors w-fit">How it works</Link>
-                <Link to="/how-it-works?s=faq" className="text-ink-2 hover:text-cream transition-colors w-fit">FAQ</Link>
-                <Link to="/tasks/templates" className="text-ink-2 hover:text-cream transition-colors w-fit">Task templates</Link>
+              <div className="mb-5 font-mono text-[11px] uppercase tracking-widest text-white/40">
+                Learn
+              </div>
+              <div className="flex flex-col gap-3 font-mk text-[14.5px]">
+                <Link to="/how-it-works" className="w-fit text-white/75 transition-colors hover:text-[#f5efe0]">
+                  How it works
+                </Link>
+                <Link to="/how-it-works?s=faq" className="w-fit text-white/75 transition-colors hover:text-[#f5efe0]">
+                  FAQ
+                </Link>
+                <Link to="/tasks/templates" className="w-fit text-white/75 transition-colors hover:text-[#f5efe0]">
+                  Task templates
+                </Link>
               </div>
             </div>
           </div>
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-t border-line pt-5 font-mono text-[11px] uppercase tracking-widest text-ink-3">
+          <div className="flex flex-col items-start justify-between gap-2 border-t border-white/10 pt-6 font-mono text-[11px] uppercase tracking-widest text-white/40 sm:flex-row sm:items-center">
             <span>© 2026 BlindMarket</span>
             <span>settles on {chainName}</span>
           </div>
