@@ -53,13 +53,13 @@ export function EncryptedFlow() {
   return (
     <div className="relative">
       {/* Connector line — drawn behind the nodes */}
-      <div className="absolute top-[34px] left-[10%] right-[10%] h-px bg-line pointer-events-none hidden md:block" />
+      <div className="absolute top-[36px] left-[10%] right-[10%] h-px bg-line pointer-events-none hidden md:block" />
 
       {/* Animated traveling packet — dashed line that flows */}
       {!reduceMotion && (
         <motion.div
           aria-hidden
-          className="absolute top-[34px] left-[10%] right-[10%] h-px hidden md:block pointer-events-none"
+          className="absolute top-[36px] left-[10%] right-[10%] h-px hidden md:block pointer-events-none"
           style={{
             backgroundImage: 'linear-gradient(90deg, transparent 0%, var(--bb-cream) 25%, var(--bb-cream) 50%, transparent 75%)',
             backgroundSize: '200% 100%',
@@ -82,18 +82,19 @@ export function EncryptedFlow() {
             transition={{ duration: 0.5, delay: reduceMotion ? 0 : i * 0.12, ease: [0.16, 1, 0.3, 1] }}
             className="flex flex-col items-center text-center"
           >
-            {/* Icon disk */}
+            {/* Icon disk — arbitrary radius: the theme zeroes named rounded-*,
+                which used to flatten these designed-as-circles into squares. */}
             <motion.div
               whileHover={reduceMotion ? {} : { y: -3 }}
               transition={{ duration: 0.2 }}
-              className="relative w-[68px] h-[68px] rounded-full bg-surface border border-line flex items-center justify-center text-cream z-10"
+              className="relative z-10 flex h-[72px] w-[72px] items-center justify-center rounded-[999px] border border-line bg-surface text-cream shadow-[0_12px_26px_-16px_rgba(10,10,11,0.3)]"
             >
               {step.icon}
               {/* Pulse ring */}
               {!reduceMotion && (
                 <motion.span
                   aria-hidden
-                  className="absolute inset-0 rounded-full border border-cream/40"
+                  className="absolute inset-0 rounded-[999px] border border-cream/40"
                   initial={{ scale: 1, opacity: 0 }}
                   whileInView={{ scale: [1, 1.35, 1], opacity: [0.6, 0, 0.6] }}
                   viewport={{ once: false, margin: '-100px' }}
@@ -103,11 +104,11 @@ export function EncryptedFlow() {
             </motion.div>
 
             {/* Step number */}
-            <div className="mt-4 text-[10px] uppercase tracking-widest text-ink-3">step {i + 1}</div>
+            <div className="mt-4 font-mono text-[10px] uppercase tracking-widest text-ink-3">step {i + 1}</div>
             {/* Label */}
-            <div className="mt-1 text-base font-semibold text-ink">{step.label}</div>
+            <div className="mt-1 font-mk text-[17px] font-medium tracking-[-0.01em] text-ink">{step.label}</div>
             {/* Sub */}
-            <div className="mt-1 text-xs text-ink-3 max-w-[160px]">{step.sub}</div>
+            <div className="mt-1 max-w-[170px] text-[12.5px] leading-relaxed text-ink-3">{step.sub}</div>
           </motion.div>
         ))}
       </div>

@@ -201,6 +201,30 @@ html[data-theme="dark"] {
   }
 }
 
+/* ── Marketing (mk-) paper scope ───────────────────────────────── */
+/* Pins the bb tokens to light-on-paper values regardless of the app
+   theme, so token-based components (EncryptedFlow, cards, hairlines)
+   render correctly inside the marketing surface's fixed paper band.
+   Same trick as the landing's fixed composition, applied via vars so
+   existing components need no changes. */
+.mk-paper-scope {
+  --bb-bg:         #f4f4f2;
+  --bb-surface:    #ffffff;
+  --bb-surface-2:  #ececea;
+  --bb-line:       #e3e3df;
+  --bb-line-2:     #c9c9c4;
+  --bb-ink:        #0a0a0b;
+  --bb-ink-2:      #3f3f46;
+  --bb-ink-3:      #71717a;
+  --bb-invert:     #101013;
+  --bb-invert-fg:  #fafaf9;
+  --bb-cream:      #b8860b;
+  --bb-ok:         #047857;
+  --bb-warn:       #b45309;
+  --bb-err:        #b91c1c;
+  --bb-info:       #1d4ed8;
+}
+
 /* ── Marketing (mk-) marquee — landing ticker band ─────────────── */
 /* Track holds TWO copies of the item list; translating -50% loops
    seamlessly. Outside @layer so it can't be purged oddly; gated for
