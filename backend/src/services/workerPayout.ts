@@ -15,6 +15,7 @@ import * as skillStatsStore from './skillStatsStore.js';
 import * as badgeStore from './badgeStore.js';
 import * as a2aStore from './a2aStore.js';
 import * as semanticMatch from './semanticMatch.js';
+import * as semanticProof from './semanticProof.js';
 import { redis } from './redis.js';
 
 // Earned-badge threshold: N settled completions per (agent, capability) with a
@@ -160,16 +161,20 @@ export async function recordWorkerPayout(
       console.warn(`[a2a] recordWorkerPayout: reputationDecay.recordTaskCompletion failed for ${taskHash.slice(0, 10)}…:`, (decayErr as Error).message);
     }
 
-    // Per-skill proof: credit the task's declared capability tags and auto-
-    // grant an 'earned' badge at the threshold. Inside the at-most-once block
-    // (so a finalize retry can't double-credit) but in its own try/catch — a
-    // stats failure must never release the NX marker or block the payout.
+    // Per-skill proof: credit the task's declared capability tags AND (proof
+    // re-key, semantic era) the worker's closest installed skill slug — a
+    // semantically routed task often carries no tags at all, and without the
+    // slug credit its settlement would build no track record. Inside the
+    // at-most-once block (so a finalize retry can't double-credit) but in its
+    // own try/catch — a stats failure must never release the NX marker or
+    // block the payout.
     try {
-      const caps = opts.requiredCapabilities
-        ?? (await a2aStore.getMeta(taskHash))?.requiredCapabilities
-        ?? [];
-      if (caps.length > 0) {
-        const stats = await skillStatsStore.recordCompletion(executorAddr, caps);
+      const meta = await a2aStore.getMeta(taskHash).catch(() => undefined);
+      const caps: string[] = opts.requiredCapabilities ?? meta?.requiredCapabilities ?? [];
+      const slug = meta ? await semanticProof.resolveProofSkillSlug(executorAddr, meta) : null;
+      const keys = slug && !caps.includes(slug) ? [...caps, slug] : caps;
+      if (keys.length > 0) {
+        const stats = await skillStatsStore.recordCompletion(executorAddr, keys);
         for (const s of stats) {
           const attempts = s.tasks_completed + s.tasks_failed;
           const failureRatio = attempts > 0 ? s.tasks_failed / attempts : 0;
@@ -221,11 +226,16 @@ export async function recordWorkerDispute(taskHash: string, executorAddr: string
     }
     await reputationDecay.recordDispute(executorAddr, taskHash);
     // Per-skill proof: a dispute counts against the task's capability tags
-    // (feeds the earned-badge failure-ratio guard). Own try/catch — never
-    // blocks the dispute record itself.
+    // AND the same resolved skill slug the success path would have credited —
+    // otherwise a skill's failure ratio only ever sees its wins and the
+    // earned-badge guard goes blind. Own try/catch — never blocks the dispute
+    // record itself.
     try {
-      const caps = (await a2aStore.getMeta(taskHash))?.requiredCapabilities ?? [];
-      await skillStatsStore.recordFailure(executorAddr, caps);
+      const meta = await a2aStore.getMeta(taskHash);
+      const caps: string[] = meta?.requiredCapabilities ?? [];
+      const slug = meta ? await semanticProof.resolveProofSkillSlug(executorAddr, meta) : null;
+      const keys = slug && !caps.includes(slug) ? [...caps, slug] : caps;
+      await skillStatsStore.recordFailure(executorAddr, keys);
     } catch (statsErr) {
       console.warn(`[a2a] skill-stats failure record failed for ${taskHash.slice(0, 10)}…:`, (statsErr as Error).message);
     }
