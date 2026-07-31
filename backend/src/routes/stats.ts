@@ -110,20 +110,14 @@ statsRouter.get('/', async (_req, res) => {
     countRegisteredUsers(),
     // Verified-state task count
     countCompletedTasks(),
-    // Total escrow + payment volume from local ledger
+    // Total escrow + payment volume from durable ledger
     (async () => {
-      const db = require('../services/database.js').getDb();
-      const row = db.prepare(`
-        SELECT
-          SUM(CASE WHEN type IN ('escrow_lock', 'payment') THEN amount ELSE 0 END) AS processed_volume,
-          SUM(CASE WHEN type = 'fee' THEN amount ELSE 0 END) AS total_fees,
-          COUNT(CASE WHEN type IN ('escrow_lock', 'payment') THEN 1 END) AS processed_tx_count
-        FROM transactions
-      `).get();
+      const { getSummary } = await import('../services/accountingService.js');
+      const summary = await getSummary([]);
       return {
-        processedVolume: Number(row.processed_volume || 0),
-        totalFees: Number(row.total_fees || 0),
-        processedTxCount: Number(row.processed_tx_count || 0),
+        processedVolume: summary.totalEarned + summary.totalFees,
+        totalFees: summary.totalFees,
+        processedTxCount: summary.taskCount,
       };
     })(),
   ]);

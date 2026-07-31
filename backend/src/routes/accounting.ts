@@ -59,13 +59,13 @@ accountingRouter.get('/export', requireAuth, async (req: AuthRequest, res, next)
     const addresses = await resolveAddresses(address);
 
     if (format === 'csv') {
-      const csv = accountingService.exportCsv(addresses, from, to);
+      const csv = await accountingService.exportCsv(addresses, from, to);
       res.setHeader('Content-Type', 'text/csv');
       res.setHeader('Content-Disposition', 'attachment; filename=transactions.csv');
       return res.send(csv);
     }
 
-    const result = accountingService.getTransactions(addresses, from, to);
+    const result = await accountingService.getTransactions(addresses, from, to);
     res.setHeader('Content-Disposition', 'attachment; filename=transactions.json');
     res.json({ success: true, data: result });
   } catch (err) {

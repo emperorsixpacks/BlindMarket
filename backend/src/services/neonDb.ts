@@ -445,6 +445,33 @@ const migrations: Array<{ id: number; name: string; sql: string }> = [
       ALTER TABLE match_shadow_log ADD COLUMN IF NOT EXISTS routed_by TEXT;
     `,
   },
+  {
+    // Off-chain accounting ledger (escrow_lock, payment, fee, refund, stake,
+    // slash, stake_return). Previously SQLite-only; in production SQLite is
+    // ephemeral, so this PG table is the durable source of truth for volume
+    // and earnings queries.
+    id: 21,
+    name: 'transactions',
+    sql: `
+      CREATE TABLE IF NOT EXISTS transactions (
+        id SERIAL PRIMARY KEY,
+        address TEXT NOT NULL,
+        role TEXT NOT NULL,
+        task_id TEXT,
+        type TEXT NOT NULL,
+        amount DOUBLE PRECISION NOT NULL DEFAULT 0,
+        fee DOUBLE PRECISION NOT NULL DEFAULT 0,
+        net DOUBLE PRECISION NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'confirmed',
+        tx_hash TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_transactions_address ON transactions(address);
+      CREATE INDEX IF NOT EXISTS idx_transactions_type ON transactions(type);
+      CREATE INDEX IF NOT EXISTS idx_transactions_created ON transactions(created_at);
+    `,
+  },
 ];
 
 async function runMigrations(p: pg.Pool): Promise<void> {
