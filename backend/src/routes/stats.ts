@@ -110,6 +110,22 @@ statsRouter.get('/', async (_req, res) => {
     countRegisteredUsers(),
     // Verified-state task count
     countCompletedTasks(),
+    // Total escrow + payment volume from local ledger
+    (async () => {
+      const db = require('../services/database.js').getDb();
+      const row = db.prepare(`
+        SELECT
+          SUM(CASE WHEN type IN ('escrow_lock', 'payment') THEN amount ELSE 0 END) AS processed_volume,
+          SUM(CASE WHEN type = 'fee' THEN amount ELSE 0 END) AS total_fees,
+          COUNT(CASE WHEN type IN ('escrow_lock', 'payment') THEN 1 END) AS processed_tx_count
+        FROM transactions
+      `).get();
+      return {
+        processedVolume: Number(row.processed_volume || 0),
+        totalFees: Number(row.total_fees || 0),
+        processedTxCount: Number(row.processed_tx_count || 0),
+      };
+    })(),
   ]);
 
   res.json({
@@ -126,6 +142,10 @@ statsRouter.get('/', async (_req, res) => {
       registeredUsers:  results[4].status === 'fulfilled' ? results[4].value : 0,
       completedTasks:   results[5].status === 'fulfilled' ? results[5].value : 0,
       activeWorkers:    results[1].status === 'fulfilled' ? results[1].value : 0,
+      // Volume / processing metrics
+      processedVolume:  results[6].status === 'fulfilled' ? results[6].value.processedVolume : 0,
+      totalFees:        results[6].status === 'fulfilled' ? results[6].value.totalFees : 0,
+      processedTxCount: results[6].status === 'fulfilled' ? results[6].value.processedTxCount : 0,
     },
   });
 });
