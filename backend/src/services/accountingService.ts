@@ -184,6 +184,60 @@ export async function getSummary(addresses: string[], from?: string, to?: string
   };
 }
 
+export async function getGlobalStats(): Promise<{ totalEarned: number; totalFees: number; totalVolume: number; taskCount: number }> {
+  if (usePg()) {
+    const pool = await getPool();
+    const rows = await pool.query(
+      `SELECT type, SUM(amount) as total_amount, SUM(fee) as total_fee, COUNT(*)::int as cnt FROM transactions GROUP BY type`,
+    );
+    let totalEarned = 0;
+    let totalFees = 0;
+    let taskCount = 0;
+    const INCOME_TYPES = new Set(['payment', 'stake_return']);
+    for (const row of rows.rows) {
+      if (INCOME_TYPES.has(row.type)) {
+        totalEarned += Number(row.total_amount ?? 0);
+        totalFees += Number(row.total_fee ?? 0);
+        taskCount += row.cnt ?? 0;
+      }
+      if (row.type === 'fee') {
+        totalFees += Number(row.total_fee ?? 0);
+      }
+    }
+    return {
+      totalEarned: Math.round(totalEarned * 1_000_000) / 1_000_000,
+      totalFees: Math.round(totalFees * 1_000_000) / 1_000_000,
+      totalVolume: Math.round((totalEarned + totalFees) * 1_000_000) / 1_000_000,
+      taskCount,
+    };
+  }
+
+  const db = getDb();
+  const rows = db.prepare(
+    `SELECT type, SUM(amount) as total_amount, SUM(fee) as total_fee, COUNT(*) as cnt FROM transactions GROUP BY type`,
+  ).all() as { type: string; total_amount: number; total_fee: number; cnt: number }[];
+  let totalEarned = 0;
+  let totalFees = 0;
+  let taskCount = 0;
+  const INCOME_TYPES = new Set(['payment', 'stake_return']);
+  for (const row of rows) {
+    if (INCOME_TYPES.has(row.type)) {
+      totalEarned += row.total_amount ?? 0;
+      totalFees += row.total_fee ?? 0;
+      taskCount += row.cnt;
+    }
+    if (row.type === 'fee') {
+      totalFees += row.total_fee ?? 0;
+    }
+  }
+  return {
+    totalEarned: Math.round(totalEarned * 1_000_000) / 1_000_000,
+    totalFees: Math.round(totalFees * 1_000_000) / 1_000_000,
+    totalVolume: Math.round((totalEarned + totalFees) * 1_000_000) / 1_000_000,
+    taskCount,
+  };
+}
+
 export async function exportCsv(addresses: string[], from?: string, to?: string): Promise<string> {
   const { transactions } = await getTransactions(addresses, from, to);
 

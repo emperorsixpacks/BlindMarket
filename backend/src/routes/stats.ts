@@ -112,12 +112,12 @@ statsRouter.get('/', async (_req, res) => {
     countCompletedTasks(),
     // Total escrow + payment volume from durable ledger
     (async () => {
-      const { getSummary } = await import('../services/accountingService.js');
-      const summary = await getSummary([]);
+      const { getGlobalStats } = await import('../services/accountingService.js');
+      const stats = await getGlobalStats();
       return {
-        processedVolume: summary.totalEarned + summary.totalFees,
-        totalFees: summary.totalFees,
-        processedTxCount: summary.taskCount,
+        processedVolume: stats.totalVolume,
+        totalFees: stats.totalFees,
+        processedTxCount: stats.taskCount,
       };
     })(),
   ]);
