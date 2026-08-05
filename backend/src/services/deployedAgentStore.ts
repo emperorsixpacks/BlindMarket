@@ -1,5 +1,10 @@
 import { getPool } from './neonDb.js';
+import { config } from '../config.js';
 import type { DeployedAgent, AgentCapability, AgentTool, LLMProvider, AgentStatus, InstalledSkill } from '../types.js';
+
+function hasPg(): boolean {
+  return Boolean(config.databaseUrl);
+}
 
 function rowToAgent(row: Record<string, unknown>): DeployedAgent {
   return {
@@ -30,6 +35,7 @@ function rowToAgent(row: Record<string, unknown>): DeployedAgent {
 }
 
 export async function saveAgent(agent: DeployedAgent): Promise<void> {
+  if (!hasPg()) return;
   const db = await getPool();
   await db.query(
     `INSERT INTO deployed_agents
@@ -78,6 +84,7 @@ export async function saveAgent(agent: DeployedAgent): Promise<void> {
 }
 
 export async function loadAgent(id: string): Promise<DeployedAgent | null> {
+  if (!hasPg()) return null;
   const db = await getPool();
   const { rows } = await db.query<Record<string, unknown>>(
     'SELECT * FROM deployed_agents WHERE id = $1',
@@ -87,6 +94,7 @@ export async function loadAgent(id: string): Promise<DeployedAgent | null> {
 }
 
 export async function loadAgentByWallet(walletAddress: string): Promise<DeployedAgent | null> {
+  if (!hasPg()) return null;
   const db = await getPool();
   const { rows } = await db.query<Record<string, unknown>>(
     'SELECT * FROM deployed_agents WHERE LOWER(wallet_address) = LOWER($1) LIMIT 1',
@@ -96,6 +104,7 @@ export async function loadAgentByWallet(walletAddress: string): Promise<Deployed
 }
 
 export async function loadAllAgents(): Promise<DeployedAgent[]> {
+  if (!hasPg()) return [];
   const db = await getPool();
   const { rows } = await db.query<Record<string, unknown>>(
     'SELECT * FROM deployed_agents ORDER BY deployed_at DESC',
@@ -104,6 +113,7 @@ export async function loadAllAgents(): Promise<DeployedAgent[]> {
 }
 
 export async function deleteAgent(id: string): Promise<void> {
+  if (!hasPg()) return;
   const db = await getPool();
   await db.query('DELETE FROM deployed_agents WHERE id = $1', [id]);
 }
