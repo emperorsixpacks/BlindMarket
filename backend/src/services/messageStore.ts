@@ -1,4 +1,9 @@
 import { getPool } from './neonDb.js';
+import { config } from '../config.js';
+
+function hasPg(): boolean {
+  return Boolean(config.databaseUrl);
+}
 
 export interface AgentMessage {
   id: number;
@@ -22,6 +27,7 @@ export async function sendMessage(opts: {
   subject?: string;
   body: string;
 }): Promise<AgentMessage> {
+  if (!hasPg()) throw new Error('Messaging requires PostgreSQL (set DATABASE_URL)');
   const db = await getPool();
   const { rows } = await db.query<AgentMessage>(
     'INSERT INTO agent_messages (task_id, from_address, to_address, subject, body) VALUES ($1, $2, $3, $4, $5) RETURNING *',
@@ -37,6 +43,7 @@ export async function getInbox(
   address: string,
   opts?: { taskId?: string; unreadOnly?: boolean; limit?: number; offset?: number },
 ): Promise<{ messages: AgentMessage[]; total: number }> {
+  if (!hasPg()) return { messages: [], total: 0 };
   const db = await getPool();
   const addr = address.toLowerCase();
   let where = 'WHERE to_address = $1';
@@ -73,6 +80,7 @@ export async function getSent(
   address: string,
   opts?: { taskId?: string; limit?: number; offset?: number },
 ): Promise<{ messages: AgentMessage[]; total: number }> {
+  if (!hasPg()) return { messages: [], total: 0 };
   const db = await getPool();
   const addr = address.toLowerCase();
   let where = 'WHERE from_address = $1';
@@ -107,6 +115,7 @@ export async function getThread(
   addressB: string,
   taskId: string,
 ): Promise<AgentMessage[]> {
+  if (!hasPg()) return [];
   const db = await getPool();
   const a = addressA.toLowerCase();
   const b = addressB.toLowerCase();
@@ -124,6 +133,7 @@ export async function getThread(
  * Mark messages as read.
  */
 export async function markRead(address: string, messageIds?: number[]): Promise<void> {
+  if (!hasPg()) return;
   const db = await getPool();
   const addr = address.toLowerCase();
 
@@ -142,6 +152,7 @@ export async function markRead(address: string, messageIds?: number[]): Promise<
  * Count unread messages for an address.
  */
 export async function unreadCount(address: string): Promise<number> {
+  if (!hasPg()) return 0;
   const db = await getPool();
   const { rows } = await db.query<{ cnt: number }>(
     'SELECT COUNT(*) as cnt FROM agent_messages WHERE to_address = $1 AND read_at IS NULL',
