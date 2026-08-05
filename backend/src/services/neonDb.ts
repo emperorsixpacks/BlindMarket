@@ -472,6 +472,98 @@ const migrations: Array<{ id: number; name: string; sql: string }> = [
       CREATE INDEX IF NOT EXISTS idx_transactions_created ON transactions(created_at);
     `,
   },
+  {
+    // Chain-of-custody evidence vault. Previously SQLite-only.
+    id: 22,
+    name: 'custody_entries',
+    sql: `
+      CREATE TABLE IF NOT EXISTS custody_entries (
+        id SERIAL PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        evidence_hash TEXT NOT NULL,
+        submitter TEXT NOT NULL,
+        data_snapshot TEXT,
+        integrity_hash TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_custody_task ON custody_entries(task_id);
+    `,
+  },
+  {
+    id: 23,
+    name: 'custody_audit_log',
+    sql: `
+      CREATE TABLE IF NOT EXISTS custody_audit_log (
+        id SERIAL PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        entry_id INTEGER REFERENCES custody_entries(id),
+        action TEXT NOT NULL,
+        actor TEXT NOT NULL,
+        detail TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_audit_task ON custody_audit_log(task_id);
+    `,
+  },
+  {
+    // Worker stake locks. Previously SQLite-only.
+    id: 24,
+    name: 'stakes',
+    sql: `
+      CREATE TABLE IF NOT EXISTS stakes (
+        id SERIAL PRIMARY KEY,
+        worker TEXT NOT NULL,
+        task_id TEXT NOT NULL UNIQUE,
+        task_reward DOUBLE PRECISION NOT NULL,
+        stake_amount DOUBLE PRECISION NOT NULL,
+        status TEXT NOT NULL DEFAULT 'locked',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_stakes_worker ON stakes(worker);
+      CREATE INDEX IF NOT EXISTS idx_stakes_task ON stakes(task_id);
+    `,
+  },
+  {
+    // Task applications. Previously SQLite-only.
+    id: 25,
+    name: 'applications',
+    sql: `
+      CREATE TABLE IF NOT EXISTS applications (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        applicant TEXT NOT NULL,
+        message TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE(task_id, applicant)
+      );
+      CREATE INDEX IF NOT EXISTS idx_applications_task ON applications(task_id);
+      CREATE INDEX IF NOT EXISTS idx_applications_applicant ON applications(applicant);
+    `,
+  },
+  {
+    // Usage analytics events. Previously SQLite-only.
+    id: 26,
+    name: 'analytics_events',
+    sql: `
+      CREATE TABLE IF NOT EXISTS analytics_events (
+        id SERIAL PRIMARY KEY,
+        event TEXT NOT NULL,
+        anon_id TEXT,
+        session_id TEXT,
+        address TEXT,
+        path TEXT,
+        referrer TEXT,
+        props TEXT,
+        user_agent TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_analytics_event ON analytics_events(event);
+      CREATE INDEX IF NOT EXISTS idx_analytics_created ON analytics_events(created_at);
+      CREATE INDEX IF NOT EXISTS idx_analytics_anon ON analytics_events(anon_id);
+      CREATE INDEX IF NOT EXISTS idx_analytics_session ON analytics_events(session_id);
+    `,
+  },
 ];
 
 async function runMigrations(p: pg.Pool): Promise<void> {

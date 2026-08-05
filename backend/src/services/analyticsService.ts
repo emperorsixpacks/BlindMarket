@@ -1,4 +1,6 @@
 import { getDb } from './database.js';
+import { getPool } from './neonDb.js';
+import { config } from '../config.js';
 
 export interface RecordEventInput {
   event: string;
@@ -20,8 +22,11 @@ function clip(value: string | null | undefined, max: number): string | null {
   return value.length > max ? value.slice(0, max) : value;
 }
 
-export function recordEvent(input: RecordEventInput): void {
-  const db = getDb();
+function usePg(): boolean {
+  return Boolean(config.databaseUrl);
+}
+
+export async function recordEvent(input: RecordEventInput): Promise<void> {
   const event = clip(input.event, MAX_EVENT_LEN);
   if (!event) return;
 
@@ -35,6 +40,26 @@ export function recordEvent(input: RecordEventInput): void {
     }
   }
 
+  if (usePg()) {
+    const pool = await getPool();
+    await pool.query(
+      `INSERT INTO analytics_events (event, anon_id, session_id, address, path, referrer, props, user_agent)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [
+        event,
+        clip(input.anonId, 80),
+        clip(input.sessionId, 80),
+        input.address ? input.address.toLowerCase() : null,
+        clip(input.path, MAX_PATH_LEN),
+        clip(input.referrer, MAX_PATH_LEN),
+        propsJson,
+        clip(input.userAgent, 256),
+      ],
+    );
+    return;
+  }
+
+  const db = getDb();
   db.prepare(
     `INSERT INTO analytics_events
        (event, anon_id, session_id, address, path, referrer, props, user_agent)
@@ -51,8 +76,41 @@ export function recordEvent(input: RecordEventInput): void {
   );
 }
 
-export function recordBatch(inputs: RecordEventInput[]): number {
+export async function recordBatch(inputs: RecordEventInput[]): Promise<number> {
   if (!inputs.length) return 0;
+
+  if (usePg()) {
+    const pool = await getPool();
+    let n = 0;
+    for (const r of inputs) {
+      const event = clip(r.event, MAX_EVENT_LEN);
+      if (!event) continue;
+      let propsJson: string | null = null;
+      if (r.props && typeof r.props === 'object') {
+        try {
+          const s = JSON.stringify(r.props);
+          propsJson = s.length > MAX_PROPS_LEN ? s.slice(0, MAX_PROPS_LEN) : s;
+        } catch { /* ignore */ }
+      }
+      await pool.query(
+        `INSERT INTO analytics_events (event, anon_id, session_id, address, path, referrer, props, user_agent)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [
+          event,
+          clip(r.anonId, 80),
+          clip(r.sessionId, 80),
+          r.address ? r.address.toLowerCase() : null,
+          clip(r.path, MAX_PATH_LEN),
+          clip(r.referrer, MAX_PATH_LEN),
+          propsJson,
+          clip(r.userAgent, 256),
+        ],
+      );
+      n++;
+    }
+    return n;
+  }
+
   const db = getDb();
   const stmt = db.prepare(
     `INSERT INTO analytics_events
@@ -114,10 +172,45 @@ export interface FunnelResult {
   rows: FunnelRow[];
 }
 
-export function getFunnel(windowDays = 30): FunnelResult {
-  const db = getDb();
+export async function getFunnel(windowDays = 30): Promise<FunnelResult> {
   const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000).toISOString();
 
+  if (usePg()) {
+    const pool = await getPool();
+    const rows: FunnelRow[] = [];
+    let topUnique = 0;
+    let prevUnique = 0;
+
+    for (let i = 0; i < FUNNEL_STAGES.length; i++) {
+      const stage = FUNNEL_STAGES[i];
+      const uniqueRes = await pool.query(
+        `SELECT COUNT(DISTINCT anon_id) AS n FROM analytics_events WHERE event = $1 AND created_at >= $2 AND anon_id IS NOT NULL`,
+        [stage, since],
+      );
+      const totalRes = await pool.query(
+        `SELECT COUNT(*) AS n FROM analytics_events WHERE event = $1 AND created_at >= $2`,
+        [stage, since],
+      );
+      const uniqueVisitors = Number(uniqueRes.rows[0].n);
+      const totalEvents = Number(totalRes.rows[0].n);
+
+      if (i === 0) topUnique = uniqueVisitors;
+
+      rows.push({
+        stage,
+        uniqueVisitors,
+        totalEvents,
+        conversionFromPrev: i === 0 || prevUnique === 0 ? null : uniqueVisitors / prevUnique,
+        conversionFromTop: i === 0 || topUnique === 0 ? null : uniqueVisitors / topUnique,
+      });
+
+      prevUnique = uniqueVisitors;
+    }
+
+    return { windowDays, generatedAt: new Date().toISOString(), rows };
+  }
+
+  const db = getDb();
   const uniqueStmt = db.prepare(
     `SELECT COUNT(DISTINCT anon_id) AS n
        FROM analytics_events
@@ -163,9 +256,24 @@ export interface EventCount {
   count: number;
 }
 
-export function getTopEvents(windowDays = 30, limit = 25): EventCount[] {
-  const db = getDb();
+export async function getTopEvents(windowDays = 30, limit = 25): Promise<EventCount[]> {
   const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000).toISOString();
+
+  if (usePg()) {
+    const pool = await getPool();
+    const res = await pool.query(
+      `SELECT event, COUNT(*) AS count
+         FROM analytics_events
+        WHERE created_at >= $1
+        GROUP BY event
+        ORDER BY count DESC
+        LIMIT $2`,
+      [since, limit],
+    );
+    return res.rows as EventCount[];
+  }
+
+  const db = getDb();
   return db
     .prepare(
       `SELECT event, COUNT(*) AS count

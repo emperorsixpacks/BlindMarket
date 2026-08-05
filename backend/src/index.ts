@@ -104,8 +104,12 @@ app.use('/api/v1/openapi.json', openapiRouter);
 // Error handling (must be last)
 app.use(globalErrorHandler);
 
-// Initialize SQLite database and run migrations
-getDb();
+// Initialize database: SQLite when no DATABASE_URL (dev), PostgreSQL otherwise (prod)
+if (!config.databaseUrl) {
+  getDb();
+} else {
+  console.log('[db] DATABASE_URL set — using PostgreSQL');
+}
 
 const corsOptions = {
   origin: config.nodeEnv === 'development'

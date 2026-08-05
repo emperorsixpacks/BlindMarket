@@ -24,13 +24,13 @@ const batchSchema = z.object({
  * Public ingestion. Auth optional — if a JWT is present we attach the address.
  * Anonymous traffic still gets recorded (anon_id from client).
  */
-analyticsRouter.post('/events', optionalAuth, (req: AuthRequest, res, next) => {
+analyticsRouter.post('/events', optionalAuth, async (req: AuthRequest, res, next) => {
   try {
     const { events } = batchSchema.parse(req.body);
     const address = req.user?.address || null;
     const userAgent = (req.headers['user-agent'] as string | undefined) || null;
 
-    const inserted = recordBatch(
+    const inserted = await recordBatch(
       events.map(e => ({
         event: e.event,
         anonId: e.anonId ?? null,
@@ -61,11 +61,11 @@ const funnelQuerySchema = z.object({
  * GET /api/v1/analytics/funnel?windowDays=30
  * Founder-only.
  */
-analyticsRouter.get('/funnel', requireAuth, requireFounder, (req, res, next) => {
+analyticsRouter.get('/funnel', requireAuth, requireFounder, async (req, res, next) => {
   try {
     const { windowDays } = funnelQuerySchema.parse(req.query);
-    const funnel = getFunnel(windowDays ?? 30);
-    const top = getTopEvents(windowDays ?? 30, 25);
+    const funnel = await getFunnel(windowDays ?? 30);
+    const top = await getTopEvents(windowDays ?? 30, 25);
 
     const body: ApiResponse<{ funnel: typeof funnel; topEvents: typeof top }> = {
       success: true,

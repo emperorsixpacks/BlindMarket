@@ -13,6 +13,8 @@ import { redis } from '../services/redis.js';
 import { randomUUID } from 'crypto';
 import * as accountingService from '../services/accountingService.js';
 import { getDb } from '../services/database.js';
+import { getPool } from '../services/neonDb.js';
+import { config } from '../config.js';
 import { rooms } from '../services/socket.js';
 
 export const tasksRouter = Router();
@@ -78,6 +80,10 @@ const applySchema = z.object({
 const assignSchema = z.object({
   worker: z.string().regex(/^0x[0-9a-fA-F]{40,66}$/, 'Invalid worker address'),
 });
+
+function usePg(): boolean {
+  return Boolean(config.databaseUrl);
+}
 
 // --- Helpers ---
 function serializeBigInts(obj: Record<string, unknown>): Record<string, unknown> {
@@ -326,8 +332,20 @@ tasksRouter.post('/:id/apply', requireAuth, async (req: AuthRequest, res, next) 
     const taskId = req.params.id as string;
     const { message } = applySchema.parse(req.body);
     const applicant = req.user!.address;
-    const db = getDb();
 
+    if (usePg()) {
+      const pool = await getPool();
+      const existing = await pool.query('SELECT id FROM applications WHERE task_id = $1 AND applicant = $2', [taskId, applicant]);
+      if (existing.rows.length > 0) throw new AppError(409, 'ALREADY_APPLIED', 'Already applied to this task');
+
+      const id = randomUUID();
+      await pool.query('INSERT INTO applications (id, task_id, applicant, message) VALUES ($1, $2, $3, $4)', [id, taskId, applicant, message ?? null]);
+
+      res.status(201).json({ success: true, data: { application_id: id } } satisfies ApiResponse);
+      return;
+    }
+
+    const db = getDb();
     const existing = db.prepare('SELECT id FROM applications WHERE task_id = ? AND applicant = ?').get(taskId, applicant);
     if (existing) throw new AppError(409, 'ALREADY_APPLIED', 'Already applied to this task');
 
@@ -359,6 +377,13 @@ tasksRouter.get('/:id/applications', requireAuth, async (req: AuthRequest, res, 
     const task = await escrowService.getTask(parseInt(rawId, 10));
     if (from === 'agent' || task.agent.toLowerCase() !== from.toLowerCase()) {
       throw new AppError(403, 'FORBIDDEN', 'Only the task poster can view applicants');
+    }
+
+    if (usePg()) {
+      const pool = await getPool();
+      const taskApps = await pool.query('SELECT * FROM applications WHERE task_id = $1 ORDER BY created_at ASC', [rawId]);
+      res.json({ success: true, data: { applications: taskApps.rows } } satisfies ApiResponse);
+      return;
     }
 
     const db = getDb();

@@ -57,6 +57,11 @@ app.use('/a2a/v1', a2aProtocolRouter);
 
 app.use(globalErrorHandler);
 
-getDb();
+// Initialize database: SQLite when no DATABASE_URL (dev), PostgreSQL otherwise (prod)
+if (!config.databaseUrl) {
+  getDb();
+} else {
+  console.log('[db] DATABASE_URL set — using PostgreSQL');
+}
 
 export default app;

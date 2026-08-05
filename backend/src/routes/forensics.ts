@@ -63,7 +63,7 @@ router.post('/submit', requireAuth, async (req: AuthRequest, res, next) => {
 
     // Ingest into custody vault for chain-of-custody tracking
     try {
-      custodyVault.ingestEvidence(
+      await custodyVault.ingestEvidence(
         taskId,
         signedReport.report.reportHash,
         signedReport.report.workerAddress,

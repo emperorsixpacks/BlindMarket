@@ -17,7 +17,7 @@ custodyRouter.post('/ingest', requireAuth, async (req: AuthRequest, res, next) =
   try {
     const { taskId, evidenceHash, dataSnapshot } = ingestSchema.parse(req.body);
     const submitter = req.user!.address;
-    const entry = custodyVault.ingestEvidence(taskId, evidenceHash, submitter, dataSnapshot);
+    const entry = await custodyVault.ingestEvidence(taskId, evidenceHash, submitter, dataSnapshot);
     res.status(201).json({ success: true, data: entry });
   } catch (err: any) {
     if (err?.name === 'ZodError') {
@@ -34,12 +34,12 @@ custodyRouter.post('/ingest', requireAuth, async (req: AuthRequest, res, next) =
 custodyRouter.get('/:taskId/chain', requireAuth, async (req: AuthRequest, res, next) => {
   try {
     const taskId = req.params.taskId as string;
-    const chain = custodyVault.getCustodyChain(taskId);
+    const chain = await custodyVault.getCustodyChain(taskId);
 
     // Auto-log "viewed" event
     const firstEntry = chain[0];
     if (firstEntry) {
-      custodyVault.logAuditEvent(taskId, firstEntry.id, 'viewed', req.user!.address);
+      await custodyVault.logAuditEvent(taskId, firstEntry.id, 'viewed', req.user!.address);
     }
 
     res.json({ success: true, data: { chain } });
@@ -52,10 +52,10 @@ custodyRouter.get('/:taskId/chain', requireAuth, async (req: AuthRequest, res, n
 custodyRouter.get('/:taskId/verify', requireAuth, async (req: AuthRequest, res, next) => {
   try {
     const taskId = req.params.taskId as string;
-    const result = custodyVault.verifyIntegrity(taskId);
+    const result = await custodyVault.verifyIntegrity(taskId);
 
     // Auto-log "integrity_check"
-    custodyVault.logAuditEvent(taskId, null, 'integrity_check', req.user!.address, `Result: ${result.valid ? 'pass' : 'fail'}`);
+    await custodyVault.logAuditEvent(taskId, null, 'integrity_check', req.user!.address, `Result: ${result.valid ? 'pass' : 'fail'}`);
 
     res.json({ success: true, data: result });
   } catch (err) {
@@ -67,7 +67,7 @@ custodyRouter.get('/:taskId/verify', requireAuth, async (req: AuthRequest, res, 
 custodyRouter.get('/:taskId/audit', requireAuth, async (req: AuthRequest, res, next) => {
   try {
     const taskId = req.params.taskId as string;
-    const audit = custodyVault.getAuditLog(taskId);
+    const audit = await custodyVault.getAuditLog(taskId);
     res.json({ success: true, data: { audit } });
   } catch (err) {
     next(err);

@@ -21,7 +21,7 @@ stakingRouter.post('/stake', requireAuth, async (req: AuthRequest, res, next) =>
   try {
     const { taskId, taskReward } = stakeSchema.parse(req.body);
     const worker = req.user!.address;
-    const stake = stakingService.lockStake(worker, taskId, taskReward);
+    const stake = await stakingService.lockStake(worker, taskId, taskReward);
 
     accountingService.recordTransaction({
       address: worker,
@@ -49,7 +49,7 @@ stakingRouter.post('/stake', requireAuth, async (req: AuthRequest, res, next) =>
 stakingRouter.post('/release', requireAuth, requireFounder, async (req: AuthRequest, res, next) => {
   try {
     const { taskId } = taskIdSchema.parse(req.body);
-    const stake = stakingService.releaseStake(taskId);
+    const stake = await stakingService.releaseStake(taskId);
     if (!stake) {
       return res.status(404).json({
         success: false,
@@ -82,7 +82,7 @@ stakingRouter.post('/release', requireAuth, requireFounder, async (req: AuthRequ
 stakingRouter.post('/slash', requireAuth, requireFounder, async (req: AuthRequest, res, next) => {
   try {
     const { taskId } = taskIdSchema.parse(req.body);
-    const stake = stakingService.slashStake(taskId);
+    const stake = await stakingService.slashStake(taskId);
     if (!stake) {
       return res.status(404).json({
         success: false,
@@ -114,8 +114,8 @@ stakingRouter.post('/slash', requireAuth, requireFounder, async (req: AuthReques
 stakingRouter.get('/:address', async (req, res, next) => {
   try {
     const address = req.params.address;
-    const stakes = stakingService.getWorkerStakes(address);
-    const summary = stakingService.getStakeSummary(address);
+    const stakes = await stakingService.getWorkerStakes(address);
+    const summary = await stakingService.getStakeSummary(address);
     res.json({ success: true, data: { stakes, summary } });
   } catch (err) {
     next(err);
