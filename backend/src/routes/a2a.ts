@@ -424,20 +424,6 @@ a2aRouter.post('/tasks/:id/accept', requireAuth, async (req: AuthRequest, res, n
       throw new AppError(403, 'NOT_TARGET_EXECUTOR', 'This task is reserved for a specific agent');
     }
 
-    // ── 3. Capability match (more expensive — do after cheap checks) ──────────
-    if (meta.requiredCapabilities.length > 0) {
-      const hasAll = hasAllCapabilities(agent, meta.requiredCapabilities);
-      if (!hasAll) {
-        console.warn(`[a2a] accept: capability mismatch for ${taskId}: agent has [${agent.capabilities.join(',')}], must have ALL of [${meta.requiredCapabilities.join(',')}]`);
-        await a2aStore.logAcceptAttempt(taskId, address, 'rejected_precheck');
-        throw new AppError(
-          403,
-          'CAPABILITY_MISMATCH',
-          `Need all of: ${meta.requiredCapabilities.join(', ')}`,
-        );
-      }
-    }
-
     // ── 4. Wrapped key / custody checks ──────────────────────────────────────
     const hasOwnSlice = !!meta.wrappedKeys?.[addrLc];
     const custodySvc = keyCustody.getKeyCustodyService();
@@ -752,15 +738,6 @@ a2aRouter.post('/tasks/:id/bid', requireAuth, async (req: AuthRequest, res, next
         'NO_PUBKEY',
         'Your executor registration has no publicKey — re-register so posters can wrap to you',
       );
-    }
-    if (meta.requiredCapabilities.length > 0) {
-      if (!hasAllCapabilities(agent, meta.requiredCapabilities)) {
-        throw new AppError(
-          403,
-          'CAPABILITY_MISMATCH',
-          `Need all of: ${meta.requiredCapabilities.join(', ')}`,
-        );
-      }
     }
 
     // If we already have a wrap for this address, the bid is moot — let the

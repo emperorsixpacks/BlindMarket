@@ -407,35 +407,34 @@ describe('POST /accept — deadline pre-check', () => {
 // tasks with NO rootHash so the handler skips the NEEDS_WRAP / custody branch
 // and the capability decision alone determines the outcome.
 describe('POST /accept — capability gate (superset match)', () => {
-  it('partial overlap is REJECTED: agent has one of two required caps → 403 CAPABILITY_MISMATCH', async () => {
+  it('partial overlap is now ACCEPTED: capabilities are optional metadata (embedding-routed)', async () => {
     vi.mocked(agentStore.getAgent).mockResolvedValue(
       agentRecord({ capabilities: ['data_processing'] }) as any,
     );
     vi.mocked(a2aStore.getMeta).mockResolvedValue(
       meta({ requiredCapabilities: ['data_processing', 'code_execution'] }) as any,
     );
+    vi.mocked(a2aStore.tryAccept).mockResolvedValue({ ok: true, state: {} } as any);
 
     const res = await accept();
 
-    expect(res.status).toBe(403);
-    expect(res.body.error.code).toBe('CAPABILITY_MISMATCH');
-    expect(a2aStore.tryAccept).not.toHaveBeenCalled(); // gated before the CAS
-    expect(settleAssignment).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
+    expect(res.body.data.status).toBe('accepted');
   });
 
-  it('disjoint caps are REJECTED: 403 CAPABILITY_MISMATCH', async () => {
+  it('disjoint caps are now ACCEPTED: capabilities are optional metadata (embedding-routed)', async () => {
     vi.mocked(agentStore.getAgent).mockResolvedValue(
       agentRecord({ capabilities: ['translation'] }) as any,
     );
     vi.mocked(a2aStore.getMeta).mockResolvedValue(
       meta({ requiredCapabilities: ['data_processing', 'code_execution'] }) as any,
     );
+    vi.mocked(a2aStore.tryAccept).mockResolvedValue({ ok: true, state: {} } as any);
 
     const res = await accept();
 
-    expect(res.status).toBe(403);
-    expect(res.body.error.code).toBe('CAPABILITY_MISMATCH');
-    expect(a2aStore.tryAccept).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
+    expect(res.body.data.status).toBe('accepted');
   });
 
   it('superset is ACCEPTED: agent has all required caps plus extras → 200', async () => {
