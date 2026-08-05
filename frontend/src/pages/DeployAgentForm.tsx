@@ -34,6 +34,8 @@ const OG_FAUCET_URL = 'https://faucet.0g.ai';
 
 type Provider = 'openai' | 'anthropic' | 'groq' | 'gemini' | '0g-compute';
 type ProviderModels = Record<Provider, string[]>;
+interface ModelPricing { id: string; inputCostPer1M: number; outputCostPer1M: number; }
+type PricingMap = Record<Provider, ModelPricing[]>;
 
 /** snake_case capability id → human label ("web_research" → "Web research"). */
 const INSTRUCTION_TEMPLATES: Record<string, string> = {
@@ -113,6 +115,7 @@ export default function DeployAgentForm() {
     gemini: ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash'],
     '0g-compute': ['deepseek-ai/DeepSeek-V3.1', 'qwen/qwen-2.5-7b-instruct', 'google/gemma-3-27b-it'],
   });
+  const [pricing, setPricing] = useState<PricingMap>({} as PricingMap);
 
   const [form, setForm] = useState({
     name: '',
@@ -121,6 +124,9 @@ export default function DeployAgentForm() {
     model: 'deepseek-ai/DeepSeek-V3.1',
     apiKey: '',
   });
+
+  // Lookup current model's pricing
+  const currentModelPricing = pricing[form.provider]?.find(m => m.id === form.model);
 
   const [showTemplateMenu, setShowTemplateMenu] = useState(false);
 
@@ -192,7 +198,11 @@ export default function DeployAgentForm() {
   useEffect(() => {
     let cancelled = false;
     get<Record<string, unknown>>('/api/v1/agents/providers')
-      .then((d) => { if (!cancelled && d.models) setProviders(d.models as ProviderModels); })
+      .then((d) => {
+        if (cancelled) return;
+        if (d.models) setProviders(d.models as ProviderModels);
+        if (d.pricing) setPricing(d.pricing as PricingMap);
+      })
       .catch(() => { });
     return () => { cancelled = true; };
   }, []);
@@ -448,7 +458,15 @@ export default function DeployAgentForm() {
             </FormField>
             <FormField label="Model">
               <FormSelect value={form.model} onChange={e => set('model', e.target.value)} className="font-mono">
-                {(providers[form.provider] ?? []).map(m => <option key={m} value={m}>{m}</option>)}
+                {(providers[form.provider] ?? []).map(m => {
+                  const p = pricing[form.provider]?.find(x => x.id === m);
+                  const cost = p ? (p.inputCostPer1M + p.outputCostPer1M) / 2 : null;
+                  return (
+                    <option key={m} value={m}>
+                      {m}{cost !== null ? (cost === 0 ? ' (free)' : ` (~$${cost.toFixed(2)}/1M)`) : ''}
+                    </option>
+                  );
+                })}
               </FormSelect>
             </FormField>
             <FormField label="API key" required={form.provider !== '0g-compute'} hint={form.provider === '0g-compute' ? 'No API key needed — billed to agent wallet via 0G Compute Router' : undefined}>
@@ -463,6 +481,26 @@ export default function DeployAgentForm() {
               />
             </FormField>
           </div>
+
+          {/* Model pricing display */}
+          {currentModelPricing && (currentModelPricing.inputCostPer1M > 0 || currentModelPricing.outputCostPer1M > 0) && (
+            <div className="mt-3 flex items-center gap-4 text-[12px] text-ink-3">
+              <span>
+                Input: <span className="font-mono text-ink">${currentModelPricing.inputCostPer1M.toFixed(2)}</span> / 1M tokens
+              </span>
+              <span>
+                Output: <span className="font-mono text-ink">${currentModelPricing.outputCostPer1M.toFixed(2)}</span> / 1M tokens
+              </span>
+              <span className="text-ink-4">
+                ~${((currentModelPricing.inputCostPer1M + currentModelPricing.outputCostPer1M) / 2).toFixed(2)} avg / 1M
+              </span>
+            </div>
+          )}
+          {currentModelPricing && currentModelPricing.inputCostPer1M === 0 && currentModelPricing.outputCostPer1M === 0 && (
+            <div className="mt-3 text-[12px] text-green-400">
+              Free — billed via {form.provider === '0g-compute' ? 'agent wallet' : 'provider free tier'}
+            </div>
+          )}
 
           {form.provider === '0g-compute' && (
             <div className="mt-4 border border-cream/20 bg-cream/[0.03] px-4 py-3.5 text-[13px] leading-relaxed space-y-2">
