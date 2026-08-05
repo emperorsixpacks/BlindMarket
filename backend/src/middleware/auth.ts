@@ -171,7 +171,7 @@ export function verifyRegistrationToken(token: string): { address: string; owner
     }
     return { address: claims.address, ownerAddress: claims.ownerAddress as string };
   } catch (err: any) {
-    console.warn('[Auth] Registration token verification failed:', err.message);
+    console.debug('[Auth] Registration token check (not HS256 — trying Privy):', err.message);
     return null;
   }
 }
