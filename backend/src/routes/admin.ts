@@ -47,8 +47,8 @@ adminRouter.get('/embedding-coverage', requireAuth, requireFounder, async (_req:
     res.json({
       success: true,
       data: {
-        totalAgents: Number(total.rows[0].n),
-        embedded: Number(withVec.rows[0].n),
+        totalAgents: Number(total.rows[0]?.n ?? 0),
+        embedded: Number(withVec.rows[0]?.n ?? 0),
         activeModel: embeddingModelId(),
         byModel: Object.fromEntries(byModel.rows.map((r) => [r.embedding_model ?? 'null', Number(r.n)])),
       },

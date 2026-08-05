@@ -145,7 +145,7 @@ export async function listPublicSkills(opts: {
      LIMIT $${vals.length - 1} OFFSET $${vals.length}`,
     vals,
   );
-  return { skills: rows, total: Number(countRes.rows[0].cnt) };
+  return { skills: rows, total: Number(countRes.rows[0]?.cnt ?? 0) };
 }
 
 export async function listSkillsByAuthor(authorAddress: string): Promise<AgentSkillRow[]> {

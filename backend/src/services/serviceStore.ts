@@ -157,7 +157,7 @@ export async function listActiveServices(opts: {
      LIMIT $${vals.length - 1} OFFSET $${vals.length}`,
     vals,
   );
-  return { services: rows, total: Number(totalRows[0].cnt) };
+  return { services: rows, total: Number(totalRows[0]?.cnt ?? 0) };
 }
 
 export async function getActiveService(serviceId: number): Promise<AgentServicePublic | null> {

@@ -78,5 +78,5 @@ export async function hasBadge(agentAddress: string, capability: string): Promis
      WHERE agent_address = $1 AND capability = $2 AND (expires_at IS NULL OR expires_at > NOW())`,
     [agentAddress.toLowerCase(), capability],
   );
-  return Number(rows[0].cnt) > 0;
+  return Number(rows[0]?.cnt ?? 0) > 0;
 }

@@ -46,7 +46,7 @@ export async function getPublicTemplates(limit = 20, offset = 0): Promise<{ temp
     'SELECT * FROM task_templates WHERE is_public = true ORDER BY use_count DESC, created_at DESC LIMIT $1 OFFSET $2',
     [limit, offset],
   );
-  return { templates: rows, total: Number(countRow.rows[0].cnt) };
+  return { templates: rows, total: Number(countRow.rows[0]?.cnt ?? 0) };
 }
 
 export async function getTemplatesByCreator(creatorAddress: string): Promise<TaskTemplate[]> {
