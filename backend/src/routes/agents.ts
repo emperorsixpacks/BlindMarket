@@ -257,16 +257,11 @@ agentsRouter.post('/deploy', async (req, res, next) => {
     if (skills.length > 0) {
       assertComposedSizeOk(parsed.data.instructions, skills, parsed.data.tools as never);
     }
-    // Union the skills' routing tags into the declared capabilities; the
-    // agent must end up with at least one (see DeploySchema comment).
+    // Union the skills' routing tags into the declared capabilities.
     const capabilities = [...new Set([
       ...parsed.data.capabilities,
       ...skills.flatMap((s) => s.capabilities),
     ])] as (typeof parsed.data.capabilities);
-    if (capabilities.length === 0) {
-      res.status(400).json({ success: false, error: { code: 'NO_CAPABILITIES', message: 'Declare at least one capability or install a skill that provides one' } });
-      return;
-    }
 
     const agent = await deployAgent({
       ...deployParams,
