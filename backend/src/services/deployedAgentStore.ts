@@ -1,8 +1,9 @@
 import { getPool } from './neonDb.js';
+import { getDb } from './database.js';
 import { config } from '../config.js';
 import type { DeployedAgent, AgentCapability, AgentTool, LLMProvider, AgentStatus, InstalledSkill } from '../types.js';
 
-function hasPg(): boolean {
+function usePg(): boolean {
   return Boolean(config.databaseUrl);
 }
 
@@ -10,15 +11,15 @@ function rowToAgent(row: Record<string, unknown>): DeployedAgent {
   return {
     id: row.id as string,
     ownerAddress: row.owner_address as string,
-    authorizedOwners: (row.authorized_owners as string[])?.length ? (row.authorized_owners as string[]) : undefined,
+    authorizedOwners: safeJsonArray(row.authorized_owners),
     name: row.name as string,
     instructions: row.instructions as string,
     provider: row.provider as LLMProvider,
     model: row.model as string,
     apiKey: row.api_key as string,
     encryptedApiKey: row.encrypted_api_key as string,
-    capabilities: (row.capabilities as AgentCapability[]) ?? [],
-    tools: (row.tools as AgentTool[]) ?? [],
+    capabilities: safeJsonArray(row.capabilities) as AgentCapability[],
+    tools: safeJsonJson(row.tools) as AgentTool[],
     status: (row.status as AgentStatus) ?? 'stopped',
     deployedAt: (row.deployed_at as string) ?? new Date().toISOString(),
     lastActiveAt: (row.last_active_at as string) ?? undefined,
@@ -30,90 +31,161 @@ function rowToAgent(row: Record<string, unknown>): DeployedAgent {
     rawPrivateKey: (row.raw_private_key as string) ?? undefined,
     inftTokenId: (row.inft_token_id as number) ?? undefined,
     minReward: (row.min_reward as string) ?? undefined,
-    skills: (row.skills as InstalledSkill[])?.length ? (row.skills as InstalledSkill[]) : undefined,
+    skills: safeJsonJson(row.skills) as InstalledSkill[] | undefined,
   };
 }
 
+function safeJsonArray(v: unknown): string[] {
+  if (Array.isArray(v)) return v;
+  if (typeof v === 'string') { try { return JSON.parse(v); } catch { return []; } }
+  return [];
+}
+
+function safeJsonJson(v: unknown): unknown {
+  if (v == null) return undefined;
+  if (typeof v === 'object') return v;
+  if (typeof v === 'string') { try { return JSON.parse(v); } catch { return undefined; } }
+  return undefined;
+}
+
+function agentToRow(agent: DeployedAgent): Record<string, unknown> {
+  return {
+    id: agent.id,
+    owner_address: agent.ownerAddress,
+    authorized_owners: JSON.stringify(agent.authorizedOwners ?? []),
+    name: agent.name,
+    instructions: agent.instructions,
+    provider: agent.provider,
+    model: agent.model,
+    api_key: agent.apiKey,
+    encrypted_api_key: agent.encryptedApiKey,
+    capabilities: JSON.stringify(agent.capabilities),
+    tools: JSON.stringify(agent.tools ?? []),
+    status: agent.status,
+    deployed_at: agent.deployedAt,
+    last_active_at: agent.lastActiveAt ?? null,
+    storage_ref: agent.storageRef ?? null,
+    platform_token: agent.platformToken ?? null,
+    wallet_address: agent.walletAddress,
+    public_key: agent.publicKey,
+    encrypted_private_key: agent.encryptedPrivateKey,
+    raw_private_key: agent.rawPrivateKey ?? null,
+    inft_token_id: agent.inftTokenId ?? null,
+    min_reward: agent.minReward ?? null,
+    skills: JSON.stringify(agent.skills ?? []),
+    updated_at: new Date().toISOString(),
+  };
+}
+
+const PG_COLS = 'id, owner_address, authorized_owners, name, instructions, provider, model, api_key, encrypted_api_key, capabilities, tools, status, deployed_at, last_active_at, storage_ref, platform_token, wallet_address, public_key, encrypted_private_key, raw_private_key, inft_token_id, min_reward, skills';
+
 export async function saveAgent(agent: DeployedAgent): Promise<void> {
-  if (!hasPg()) return;
-  const db = await getPool();
-  await db.query(
-    `INSERT INTO deployed_agents
-       (id, owner_address, authorized_owners, name, instructions,
-        provider, model, api_key, encrypted_api_key, capabilities,
-        tools, status, deployed_at, last_active_at, storage_ref,
-        platform_token, wallet_address, public_key, encrypted_private_key,
-        raw_private_key, inft_token_id, min_reward, skills, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-       $16, $17, $18, $19, $20, $21, $22, $23, NOW())
-     ON CONFLICT (id) DO UPDATE SET
-       owner_address = EXCLUDED.owner_address,
-       authorized_owners = EXCLUDED.authorized_owners,
-       name = EXCLUDED.name,
-       instructions = EXCLUDED.instructions,
-       provider = EXCLUDED.provider,
-       model = EXCLUDED.model,
-       api_key = EXCLUDED.api_key,
-       encrypted_api_key = EXCLUDED.encrypted_api_key,
-       capabilities = EXCLUDED.capabilities,
-       tools = EXCLUDED.tools,
-       status = EXCLUDED.status,
-       last_active_at = EXCLUDED.last_active_at,
-       storage_ref = EXCLUDED.storage_ref,
-       platform_token = EXCLUDED.platform_token,
-       wallet_address = EXCLUDED.wallet_address,
-       public_key = EXCLUDED.public_key,
-       encrypted_private_key = EXCLUDED.encrypted_private_key,
-       raw_private_key = EXCLUDED.raw_private_key,
-       inft_token_id = EXCLUDED.inft_token_id,
-       min_reward = EXCLUDED.min_reward,
-       skills = EXCLUDED.skills,
-       updated_at = NOW()`,
-    [
-      agent.id, agent.ownerAddress, agent.authorizedOwners ?? [],
-      agent.name, agent.instructions, agent.provider, agent.model,
-      agent.apiKey, agent.encryptedApiKey, agent.capabilities,
-      JSON.stringify(agent.tools ?? []), agent.status,
-      agent.deployedAt, agent.lastActiveAt ?? null, agent.storageRef ?? null,
-      agent.platformToken ?? null, agent.walletAddress, agent.publicKey,
-      agent.encryptedPrivateKey, agent.rawPrivateKey ?? null,
-      agent.inftTokenId ?? null, agent.minReward ?? null,
-      JSON.stringify(agent.skills ?? []),
-    ],
-  );
+  if (usePg()) {
+    const db = await getPool();
+    await db.query(
+      `INSERT INTO deployed_agents
+         (id, owner_address, authorized_owners, name, instructions,
+          provider, model, api_key, encrypted_api_key, capabilities,
+          tools, status, deployed_at, last_active_at, storage_ref,
+          platform_token, wallet_address, public_key, encrypted_private_key,
+          raw_private_key, inft_token_id, min_reward, skills, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+         $16, $17, $18, $19, $20, $21, $22, $23, NOW())
+       ON CONFLICT (id) DO UPDATE SET
+         owner_address = EXCLUDED.owner_address,
+         authorized_owners = EXCLUDED.authorized_owners,
+         name = EXCLUDED.name,
+         instructions = EXCLUDED.instructions,
+         provider = EXCLUDED.provider,
+         model = EXCLUDED.model,
+         api_key = EXCLUDED.api_key,
+         encrypted_api_key = EXCLUDED.encrypted_api_key,
+         capabilities = EXCLUDED.capabilities,
+         tools = EXCLUDED.tools,
+         status = EXCLUDED.status,
+         last_active_at = EXCLUDED.last_active_at,
+         storage_ref = EXCLUDED.storage_ref,
+         platform_token = EXCLUDED.platform_token,
+         wallet_address = EXCLUDED.wallet_address,
+         public_key = EXCLUDED.public_key,
+         encrypted_private_key = EXCLUDED.encrypted_private_key,
+         raw_private_key = EXCLUDED.raw_private_key,
+         inft_token_id = EXCLUDED.inft_token_id,
+         min_reward = EXCLUDED.min_reward,
+         skills = EXCLUDED.skills,
+         updated_at = NOW()`,
+      [
+        agent.id, agent.ownerAddress, agent.authorizedOwners ?? [],
+        agent.name, agent.instructions, agent.provider, agent.model,
+        agent.apiKey, agent.encryptedApiKey, agent.capabilities,
+        JSON.stringify(agent.tools ?? []), agent.status,
+        agent.deployedAt, agent.lastActiveAt ?? null, agent.storageRef ?? null,
+        agent.platformToken ?? null, agent.walletAddress, agent.publicKey,
+        agent.encryptedPrivateKey, agent.rawPrivateKey ?? null,
+        agent.inftTokenId ?? null, agent.minReward ?? null,
+        JSON.stringify(agent.skills ?? []),
+      ],
+    );
+    return;
+  }
+
+  // SQLite fallback
+  const r = agentToRow(agent);
+  const db = getDb();
+  const cols = Object.keys(r);
+  const placeholders = cols.map(() => '?').join(', ');
+  const updates = cols.filter(c => c !== 'id').map(c => `${c} = excluded.${c}`).join(', ');
+  db.prepare(
+    `INSERT INTO deployed_agents (${cols.join(', ')}) VALUES (${placeholders})
+     ON CONFLICT(id) DO UPDATE SET ${updates}`,
+  ).run(...Object.values(r));
 }
 
 export async function loadAgent(id: string): Promise<DeployedAgent | null> {
-  if (!hasPg()) return null;
-  const db = await getPool();
-  const { rows } = await db.query<Record<string, unknown>>(
-    'SELECT * FROM deployed_agents WHERE id = $1',
-    [id],
-  );
-  return rows[0] ? rowToAgent(rows[0]) : null;
+  if (usePg()) {
+    const db = await getPool();
+    const { rows } = await db.query<Record<string, unknown>>(
+      `SELECT ${PG_COLS} FROM deployed_agents WHERE id = $1`, [id],
+    );
+    return rows[0] ? rowToAgent(rows[0]) : null;
+  }
+  const db = getDb();
+  const row = db.prepare(`SELECT ${PG_COLS} FROM deployed_agents WHERE id = ?`).get(id) as Record<string, unknown> | undefined;
+  return row ? rowToAgent(row) : null;
 }
 
 export async function loadAgentByWallet(walletAddress: string): Promise<DeployedAgent | null> {
-  if (!hasPg()) return null;
-  const db = await getPool();
-  const { rows } = await db.query<Record<string, unknown>>(
-    'SELECT * FROM deployed_agents WHERE LOWER(wallet_address) = LOWER($1) LIMIT 1',
-    [walletAddress],
-  );
-  return rows[0] ? rowToAgent(rows[0]) : null;
+  if (usePg()) {
+    const db = await getPool();
+    const { rows } = await db.query<Record<string, unknown>>(
+      `SELECT ${PG_COLS} FROM deployed_agents WHERE LOWER(wallet_address) = LOWER($1) LIMIT 1`, [walletAddress],
+    );
+    return rows[0] ? rowToAgent(rows[0]) : null;
+  }
+  const db = getDb();
+  const row = db.prepare(`SELECT ${PG_COLS} FROM deployed_agents WHERE LOWER(wallet_address) = LOWER(?) LIMIT 1`).get(walletAddress) as Record<string, unknown> | undefined;
+  return row ? rowToAgent(row) : null;
 }
 
 export async function loadAllAgents(): Promise<DeployedAgent[]> {
-  if (!hasPg()) return [];
-  const db = await getPool();
-  const { rows } = await db.query<Record<string, unknown>>(
-    'SELECT * FROM deployed_agents ORDER BY deployed_at DESC',
-  );
+  if (usePg()) {
+    const db = await getPool();
+    const { rows } = await db.query<Record<string, unknown>>(
+      `SELECT ${PG_COLS} FROM deployed_agents ORDER BY deployed_at DESC`,
+    );
+    return rows.map(rowToAgent);
+  }
+  const db = getDb();
+  const rows = db.prepare(`SELECT ${PG_COLS} FROM deployed_agents ORDER BY deployed_at DESC`).all() as Record<string, unknown>[];
   return rows.map(rowToAgent);
 }
 
 export async function deleteAgent(id: string): Promise<void> {
-  if (!hasPg()) return;
-  const db = await getPool();
-  await db.query('DELETE FROM deployed_agents WHERE id = $1', [id]);
+  if (usePg()) {
+    const db = await getPool();
+    await db.query('DELETE FROM deployed_agents WHERE id = $1', [id]);
+    return;
+  }
+  const db = getDb();
+  db.prepare('DELETE FROM deployed_agents WHERE id = ?').run(id);
 }

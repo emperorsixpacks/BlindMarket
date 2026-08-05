@@ -170,6 +170,39 @@ const migrations: Migration[] = [
     // no-op that always reported "valid").
     sql: `ALTER TABLE custody_entries ADD COLUMN integrity_hash TEXT;`,
   },
+  {
+    id: 9,
+    name: 'deployed_agents',
+    sql: `
+      CREATE TABLE IF NOT EXISTS deployed_agents (
+        id TEXT PRIMARY KEY,
+        owner_address TEXT NOT NULL,
+        authorized_owners TEXT DEFAULT '[]',
+        name TEXT NOT NULL,
+        instructions TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        model TEXT NOT NULL,
+        api_key TEXT NOT NULL DEFAULT '',
+        encrypted_api_key TEXT NOT NULL DEFAULT '',
+        capabilities TEXT DEFAULT '[]',
+        tools TEXT DEFAULT '[]',
+        status TEXT NOT NULL DEFAULT 'stopped',
+        deployed_at TEXT NOT NULL DEFAULT (datetime('now')),
+        last_active_at TEXT,
+        storage_ref TEXT,
+        platform_token TEXT,
+        wallet_address TEXT NOT NULL,
+        public_key TEXT NOT NULL,
+        encrypted_private_key TEXT NOT NULL,
+        raw_private_key TEXT,
+        inft_token_id INTEGER,
+        min_reward TEXT,
+        skills TEXT DEFAULT '[]',
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_deployed_owner ON deployed_agents(owner_address);
+    `,
+  },
 ];
 
 function runMigrations(database: Database.Database): void {
