@@ -203,6 +203,27 @@ const migrations: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_deployed_owner ON deployed_agents(owner_address);
     `,
   },
+  {
+    id: 10,
+    name: 'agent_executors',
+    sql: `
+      CREATE TABLE IF NOT EXISTS agent_executors (
+        address TEXT PRIMARY KEY,
+        display_name TEXT NOT NULL,
+        capabilities TEXT DEFAULT '[]',
+        public_key TEXT NOT NULL DEFAULT '',
+        agent_card_url TEXT,
+        mcp_endpoint_url TEXT,
+        min_reward TEXT,
+        preferred_capabilities TEXT,
+        reputation INTEGER NOT NULL DEFAULT 50,
+        tasks_completed INTEGER NOT NULL DEFAULT 0,
+        total_earned_raw TEXT NOT NULL DEFAULT '0',
+        registered_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `,
+  },
 ];
 
 function runMigrations(database: Database.Database): void {
