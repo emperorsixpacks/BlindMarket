@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { randomBytes } from 'crypto';
-import { AGENT_CAPABILITIES, LLM_PROVIDER_MODELS } from '../types.js';
+import { AGENT_CAPABILITIES, LLM_PROVIDER_MODELS, LLM_MODEL_IDS } from '../types.js';
 import type { AuthRequest } from '../types.js';
 import { requireAuth } from '../middleware/auth.js';
 import {
@@ -223,7 +223,13 @@ function strip(agent: Awaited<ReturnType<typeof getAgent>>) {
 
 // GET /api/v1/agents/providers
 agentsRouter.get('/providers', (_req, res) => {
-  res.json({ success: true, data: LLM_PROVIDER_MODELS });
+  res.json({
+    success: true,
+    data: {
+      models: LLM_MODEL_IDS,     // flat string[] per provider (backward compat)
+      pricing: LLM_PROVIDER_MODELS, // full ModelInfo[] with costs
+    },
+  });
 });
 
 // POST /api/v1/agents/deploy

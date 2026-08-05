@@ -107,13 +107,11 @@ export default function DeployAgentForm() {
   const navigate = useNavigate();
 
   const [providers, setProviders] = useState<ProviderModels>({
-    openai: ['gpt-4o', 'gpt-4o-mini'],
-    // Fallback only — the live list comes from GET /agents/providers.
-    // All three previous entries were RETIRED Anthropic models (404 on use).
-    anthropic: ['claude-opus-4-8', 'claude-sonnet-5', 'claude-haiku-4-5'],
-    groq: ['llama-3.3-70b-versatile', 'llama3-8b-8192'],
-    gemini: ['gemini-2.0-flash', 'gemini-1.5-pro'],
-    '0g-compute': ['deepseek-ai/DeepSeek-V3.1', 'google/gemma-3-27b-it', 'qwen/qwen-2.5-7b-instruct'],
+    openai: ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-4.1-nano', 'o3', 'o3-mini'],
+    anthropic: ['claude-opus-4-8', 'claude-sonnet-5', 'claude-haiku-4-5', 'claude-opus-4-5', 'claude-sonnet-4-6', 'claude-sonnet-4-5'],
+    groq: ['llama-3.1-8b-instant', 'llama-3.3-70b-versatile', 'qwen3-32b', 'gpt-oss-120b', 'gpt-oss-20b'],
+    gemini: ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash'],
+    '0g-compute': ['deepseek-ai/DeepSeek-V3.1', 'qwen/qwen-2.5-7b-instruct', 'google/gemma-3-27b-it'],
   });
 
   const [form, setForm] = useState({
@@ -193,8 +191,8 @@ export default function DeployAgentForm() {
 
   useEffect(() => {
     let cancelled = false;
-    get<ProviderModels>('/api/v1/agents/providers')
-      .then((d: ProviderModels) => { if (!cancelled) setProviders(d); })
+    get<Record<string, unknown>>('/api/v1/agents/providers')
+      .then((d) => { if (!cancelled && d.models) setProviders(d.models as ProviderModels); })
       .catch(() => { });
     return () => { cancelled = true; };
   }, []);

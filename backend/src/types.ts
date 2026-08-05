@@ -529,16 +529,53 @@ export type AgentTool = HttpAgentTool | McpAgentTool | JsAgentTool | SandboxAgen
 export type AgentStatus = 'stopped' | 'running' | 'paused';
 export type LLMProvider = 'openai' | 'anthropic' | 'groq' | 'gemini' | '0g-compute';
 
-export const LLM_PROVIDER_MODELS: Record<LLMProvider, string[]> = {
-  openai:      ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo'],
-  // Current Claude lineup first; opus-4-5/sonnet-4-5 kept (still active,
-  // ~40 deployed agents use them). claude-3-haiku-20240307 REMOVED —
-  // retired by Anthropic 2026-04-19, returns 404 (drop-in: claude-haiku-4-5).
-  anthropic:   ['claude-opus-4-8', 'claude-sonnet-5', 'claude-haiku-4-5', 'claude-opus-4-5', 'claude-sonnet-4-5'],
-  groq:        ['llama-3.3-70b-versatile', 'llama3-8b-8192', 'mixtral-8x7b-32768'],
-  gemini:      ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'],
-  '0g-compute': ['deepseek-ai/DeepSeek-V3.1', 'qwen/qwen-2.5-7b-instruct', 'google/gemma-3-27b-it'],
+export interface ModelInfo {
+  id: string;
+  inputCostPer1M: number;   // USD per 1M input tokens
+  outputCostPer1M: number;  // USD per 1M output tokens
+}
+
+export const LLM_PROVIDER_MODELS: Record<LLMProvider, ModelInfo[]> = {
+  openai: [
+    { id: 'gpt-4o',         inputCostPer1M: 2.50,  outputCostPer1M: 10.00 },
+    { id: 'gpt-4o-mini',    inputCostPer1M: 0.15,  outputCostPer1M: 0.60  },
+    { id: 'gpt-4.1',        inputCostPer1M: 2.00,  outputCostPer1M: 8.00  },
+    { id: 'gpt-4.1-mini',   inputCostPer1M: 0.40,  outputCostPer1M: 1.60  },
+    { id: 'gpt-4.1-nano',   inputCostPer1M: 0.10,  outputCostPer1M: 0.40  },
+    { id: 'o3',             inputCostPer1M: 2.00,  outputCostPer1M: 8.00  },
+    { id: 'o3-mini',        inputCostPer1M: 1.10,  outputCostPer1M: 4.40  },
+  ],
+  anthropic: [
+    { id: 'claude-opus-4-8',  inputCostPer1M: 5.00,  outputCostPer1M: 25.00 },
+    { id: 'claude-opus-4-5',  inputCostPer1M: 5.00,  outputCostPer1M: 25.00 },
+    { id: 'claude-sonnet-5',  inputCostPer1M: 3.00,  outputCostPer1M: 15.00 },
+    { id: 'claude-sonnet-4-6', inputCostPer1M: 3.00, outputCostPer1M: 15.00 },
+    { id: 'claude-sonnet-4-5', inputCostPer1M: 3.00, outputCostPer1M: 15.00 },
+    { id: 'claude-haiku-4-5', inputCostPer1M: 1.00,  outputCostPer1M: 5.00  },
+  ],
+  groq: [
+    { id: 'llama-3.1-8b-instant',    inputCostPer1M: 0.05,  outputCostPer1M: 0.08  },
+    { id: 'llama-3.3-70b-versatile',  inputCostPer1M: 0.59,  outputCostPer1M: 0.79  },
+    { id: 'qwen3-32b',               inputCostPer1M: 0.29,  outputCostPer1M: 0.59  },
+    { id: 'gpt-oss-120b',            inputCostPer1M: 0.15,  outputCostPer1M: 0.60  },
+    { id: 'gpt-oss-20b',             inputCostPer1M: 0.075, outputCostPer1M: 0.30  },
+  ],
+  gemini: [
+    { id: 'gemini-2.5-pro',   inputCostPer1M: 1.25,  outputCostPer1M: 10.00 },
+    { id: 'gemini-2.5-flash', inputCostPer1M: 0.15,  outputCostPer1M: 0.60  },
+    { id: 'gemini-2.0-flash', inputCostPer1M: 0.10,  outputCostPer1M: 0.40  },
+  ],
+  '0g-compute': [
+    { id: 'deepseek-ai/DeepSeek-V3.1',        inputCostPer1M: 0, outputCostPer1M: 0 },
+    { id: 'qwen/qwen-2.5-7b-instruct',        inputCostPer1M: 0, outputCostPer1M: 0 },
+    { id: 'google/gemma-3-27b-it',             inputCostPer1M: 0, outputCostPer1M: 0 },
+  ],
 };
+
+/** Legacy flat string list — used by deploy validation and provider list endpoint. */
+export const LLM_MODEL_IDS: Record<LLMProvider, string[]> = Object.fromEntries(
+  Object.entries(LLM_PROVIDER_MODELS).map(([k, v]) => [k, v.map(m => m.id)])
+) as Record<LLMProvider, string[]>;
 
 export interface DeployedAgent {
   id: string;
