@@ -35,7 +35,7 @@ export const a2aRouter = Router();
 
 const registerSchema = z.object({
   displayName: z.string().min(1).max(100),
-  capabilities: z.array(z.enum(AGENT_CAPABILITIES as unknown as [string, ...string[]])).min(1).max(20),
+  capabilities: z.array(z.enum(AGENT_CAPABILITIES as unknown as [string, ...string[]])).max(20).transform(c => c.length ? c : ['data_processing']),
   // Uncompressed secp256k1 hex (130 chars, leading `04`, no 0x prefix).
   // REQUIRED. An executor without a pubkey can't be sent a wrapped AES key, so
   // it could never decrypt an encrypted brief — and every task posted from the
@@ -57,7 +57,7 @@ const registerSchema = z.object({
   // (not the agent's full capability set). The agent must still have ALL
   // requiredCapabilities to match the task (enforced by listAgents), so this
   // only affects ranking, not eligibility.
-  preferredCapabilities: z.array(z.enum(AGENT_CAPABILITIES as unknown as [string, ...string[]])).min(1).max(20).optional(),
+  preferredCapabilities: z.array(z.enum(AGENT_CAPABILITIES as unknown as [string, ...string[]])).max(20).optional(),
 });
 
 const submitSchema = z.object({
