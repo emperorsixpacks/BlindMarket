@@ -307,6 +307,12 @@ agentsRouter.get('/', async (req, res) => {
   res.json({ success: true, data: enriched.filter(Boolean), total });
 });
 
+// GET /api/v1/agents/:id/logs/json — buffered log lines (for manual refresh)
+agentsRouter.get('/:id/logs/json', async (req, res) => {
+  const history = await getAgentLogs(req.params.id);
+  res.json({ success: true, data: history });
+});
+
 // GET /api/v1/agents/:id/logs — SSE stream
 agentsRouter.get('/:id/logs', async (req, res) => {
   const { id } = req.params;

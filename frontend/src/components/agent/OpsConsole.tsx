@@ -84,11 +84,25 @@ export function OpsConsole({
 
   useEffect(() => {
     if (!agentId) return;
-    const es = new EventSource(`${API_BASE_URL}/api/v1/agents/${agentId}/logs`);
-    es.onmessage = e => {
-      try { setLogs(prev => [...prev.slice(-199), JSON.parse(e.data)]); } catch { }
+    let es: EventSource | null = null;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+    function connect() {
+      es = new EventSource(`${API_BASE_URL}/api/v1/agents/${agentId}/logs`);
+      es.onmessage = e => {
+        try { setLogs(prev => [...prev.slice(-199), JSON.parse(e.data)]); } catch { }
+      };
+      es.onerror = () => {
+        es?.close();
+        retryTimer = setTimeout(connect, 3000);
+      };
+    }
+    connect();
+
+    return () => {
+      es?.close();
+      if (retryTimer) clearTimeout(retryTimer);
     };
-    return () => es.close();
   }, [agentId]);
 
   // Fetch error logs for the errors tab
@@ -121,6 +135,13 @@ export function OpsConsole({
       logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
     }
   }, [tab]);
+
+  const refreshLogs = async () => {
+    try {
+      const res = await authedGet<{ success: boolean; data: string[] }>(`/api/v1/agents/${agentId}/logs/json`);
+      setLogs(Array.isArray(res?.data) ? res.data.slice(-200) : []);
+    } catch { }
+  };
 
   const scrollToBottom = () => {
     if (logContainerRef.current) {
@@ -216,13 +237,25 @@ export function OpsConsole({
                 </div>
               );
             }) : (
-              <EmptyState
-                icon="list"
-                title={agent.status === 'running' ? 'Waiting for logs' : 'No logs yet'}
-                description={agent.status === 'running'
-                  ? 'Live output will stream here as the agent works.'
-                  : 'Start the agent to begin streaming its logs.'}
-              />
+              <div className="flex flex-col items-center gap-3 py-8">
+                <EmptyState
+                  icon="list"
+                  title={agent.status === 'running' ? 'Waiting for logs' : 'No logs yet'}
+                  description={agent.status === 'running'
+                    ? 'Live output will stream here as the agent works.'
+                    : 'Start the agent to begin streaming its logs.'}
+                />
+                <button
+                  onClick={refreshLogs}
+                  className="text-xs text-ink-3 hover:text-ink transition-colors flex items-center gap-1"
+                >
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M2 8a6 6 0 0 1 10.472-4M14 8a6 6 0 0 1-10.472 4" />
+                    <path d="M14 2v4h-4M2 14v-4h4" />
+                  </svg>
+                  Refresh
+                </button>
+              </div>
             )}
           </div>
         )}
@@ -395,6 +428,17 @@ export function OpsConsole({
 
         {tab === 'logs' && logs.length > 0 && (
           <div className="absolute bottom-3 right-3 z-10 flex flex-col gap-1.5">
+            <button
+              onClick={refreshLogs}
+              className="w-8 h-8 flex items-center justify-center bg-surface-2 hover:bg-bg text-ink border border-line shadow-lg transition-all hover:scale-110"
+              title="Refresh logs"
+              aria-label="Refresh logs"
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M2 8a6 6 0 0 1 10.472-4M14 8a6 6 0 0 1-10.472 4" />
+                <path d="M14 2v4h-4M2 14v-4h4" />
+              </svg>
+            </button>
             <button
               onClick={scrollToTop}
               className="w-8 h-8 flex items-center justify-center bg-surface-2 hover:bg-bg text-ink border border-line shadow-lg transition-all hover:scale-110"
