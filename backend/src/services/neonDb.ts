@@ -11,9 +11,33 @@ let migrationPromise: Promise<void> | null = null;
 // Data migration from Redis → PG also runs once.
 let dataMigrationPromise: Promise<void> | null = null;
 
+// No-op pool returned when DATABASE_URL is empty — lets PG-only services
+// return empty results instead of throwing on every request.
+const EMPTY_ROWS: never[] = [];
+const EMPTY_RESULT: pg.QueryResult = { rows: EMPTY_ROWS, rowCount: 0, command: '', oid: 0, fields: [] };
+const noopPool = new Proxy({} as pg.Pool, {
+  get(_target, prop) {
+    if (prop === 'query') {
+      return async () => EMPTY_RESULT;
+    }
+    if (prop === 'connect') {
+      return async () => ({
+        query: async () => EMPTY_RESULT,
+        release: () => {},
+      });
+    }
+    if (prop === 'end') {
+      return async () => {};
+    }
+    return undefined;
+  },
+});
+
 export async function getPool(): Promise<pg.Pool> {
   if (!config.databaseUrl) {
-    throw new Error('DATABASE_URL is not set — Neon PostgreSQL connection unavailable');
+    // Return a no-op pool so PG-only services degrade gracefully in dev
+    // instead of throwing on every request.
+    return noopPool;
   }
 
   if (!pool) {
