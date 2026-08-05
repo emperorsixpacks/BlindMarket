@@ -33,7 +33,7 @@ export async function registerAgent(agent: AgentExecutor): Promise<void> {
     const { rows: count } = await db.query<{ n: number }>(
       'SELECT COUNT(*)::int AS n FROM agent_executors',
     );
-    if (count[0].n >= MAX_AGENTS) {
+    if ((count[0]?.n ?? 0) >= MAX_AGENTS) {
       throw new Error('Agent registry full');
     }
   }
